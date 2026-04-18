@@ -1,0 +1,105 @@
+:root {
+  --bg: #0b0c0f;
+  --card: #11131a;
+  --text: #f2f4f8;
+  --muted: #a6adbb;
+  --border: rgba(255,255,255,0.12);
+  --link: #7db4ff;
+  --btnBg: rgba(255,255,255,0.06);
+  --btnBgHover: rgba(255,255,255,0.10);
+}
+
+/* Light theme (toggle) */
+html[data-theme="light"] {
+  --bg: #f6f7fb;
+  --card: #ffffff;
+  --text: #101318;
+  --muted: #4b5563;
+  --border: rgba(15, 23, 42, 0.15);
+  --link: #2563eb;
+  --btnBg: rgba(15, 23, 42, 0.06);
+  --btnBgHover: rgba(15, 23, 42, 0.10);
+}
+
+* { box-sizing: border-box; }
+html, body { padding: 0; margin: 0; font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Arial; background: var(--bg); color: var(--text); }
+
+a { color: var(--link); text-decoration: none; }
+a:hover { text-decoration: underline; }
+
+.container { max-width: 1100px; margin: 0 auto; padding: 20px; }
+.header { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 18px; }
+.headerRight { display: flex; align-items: center; gap: 10px; justify-content: flex-end; flex-wrap: wrap; }
+.nav { display: flex; flex-wrap: wrap; gap: 10px; }
+.nav a { padding: 6px 10px; border: 1px solid var(--border); border-radius: 999px; }
+
+.card { background: var(--card); border: 1px solid var(--border); border-radius: 14px; padding: 14px; }
+.grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 12px; }
+
+h1 { font-size: 22px; margin: 0; }
+h2 { font-size: 16px; margin: 0 0 10px 0; }
+
+.table { width: 100%; border-collapse: collapse; }
+.table th, .table td { border-bottom: 1px solid var(--border); padding: 8px 6px; vertical-align: top; }
+.table th { text-align: left; color: var(--muted); font-weight: 600; }
+
+input, select, textarea {
+  width: 100%;
+  padding: 8px 10px;
+  border-radius: 10px;
+  border: 1px solid var(--border);
+  /*
+    IMPORTANT:
+    Native <select> dropdown options are often rendered with a light background
+    by the browser/OS. If we keep white text (dark theme), the options can look
+    "white on white" and become unreadable.
+
+    Easiest fix: render all form controls with a light background + dark text.
+    (We can add a proper light/dark toggle later if desired.)
+  */
+  background: rgba(255, 255, 255, 0.96);
+  color: #0b0c0f;
+}
+
+/* Improve readability inside native dropdown lists */
+select option {
+  background: #ffffff;
+  color: #0b0c0f;
+}
+
+/*
+  Some browsers/OS themes ignore <option> styling and render the dropdown list
+  using the system color scheme. Force a light color-scheme for native selects so
+  the option list stays readable (fixes "white on white" in some dark-mode setups).
+*/
+select {
+  color-scheme: light !important;
+  background-color: #ffffff !important;
+  color: #111111 !important;
+}
+
+select option {
+  background-color: #ffffff !important;
+  color: #111111 !important;
+}
+textarea { min-height: 70px; }
+label { font-size: 12px; color: var(--muted); display: block; margin-bottom: 6px; }
+
+.row { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 10px; }
+
+.btn {
+  display: inline-block;
+  padding: 8px 12px;
+  border-radius: 10px;
+  border: 1px solid var(--border);
+  background: var(--btnBg);
+  color: var(--text);
+  cursor: pointer;
+}
+.btn:hover { background: var(--btnBgHover); }
+.btn.danger { border-color: rgba(255,80,80,0.5); }
+.btn.primary { border-color: rgba(125,180,255,0.7); }
+
+.muted { color: var(--muted); }
+
+.spacer { height: 10px; }

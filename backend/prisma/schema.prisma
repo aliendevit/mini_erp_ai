@@ -1,0 +1,181 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum InvoiceStatus {
+  draft
+  final
+  sent
+  paid
+  canceled
+}
+
+enum WorkDayType {
+  work
+  sick
+  vacation
+  holiday
+}
+
+model Customer {
+  id           String   @id @default(uuid()) @db.Uuid
+  companyName  String
+  street       String?
+  zipCode      String?
+  city         String?
+  country      String   @default("DE")
+  vatId        String?
+  contactName  String?
+  contactPhone String?
+  contactEmail String?
+  notes        String?
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  orders   Order[]
+  invoices Invoice[]
+}
+
+model Order {
+  id                 String    @id @default(uuid()) @db.Uuid
+  customerId         String    @db.Uuid
+  orderNumber        String?   @unique
+  title              String
+  description        String?
+  status             String    @default("open")
+  startDate          DateTime?
+  endDate            DateTime?
+  defaultHourlyRate  Decimal?  @db.Decimal(10,2)
+  currency           String    @default("EUR")
+  createdAt          DateTime  @default(now())
+  updatedAt          DateTime  @updatedAt
+
+  customer    Customer @relation(fields: [customerId], references: [id], onDelete: Restrict)
+  sites       Site[]
+  workEntries WorkEntry[]
+}
+
+model Site {
+  id        String   @id @default(uuid()) @db.Uuid
+  orderId   String   @db.Uuid
+  siteName  String
+  street    String?
+  zipCode   String?
+  city      String?
+  notes     String?
+  isActive  Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  order       Order @relation(fields: [orderId], references: [id], onDelete: Restrict)
+  assignments EmployeeAssignment[]
+  workEntries WorkEntry[]
+}
+
+model Employee {
+  id                String    @id @default(uuid()) @db.Uuid
+  firstName         String
+  lastName          String
+  birthDate         DateTime?
+  street            String?
+  zipCode           String?
+  city              String?
+  phone             String?
+  email             String?
+  isActive          Boolean   @default(true)
+  defaultHourlyRate Decimal?  @db.Decimal(10,2)
+  createdAt         DateTime  @default(now())
+  updatedAt         DateTime  @updatedAt
+
+  assignments EmployeeAssignment[]
+  workEntries  WorkEntry[]
+}
+
+model EmployeeAssignment {
+  id         String   @id @default(uuid()) @db.Uuid
+  employeeId String   @db.Uuid
+  siteId     String   @db.Uuid
+  startDate  DateTime?
+  endDate    DateTime?
+  notes      String?
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  employee Employee @relation(fields: [employeeId], references: [id], onDelete: Restrict)
+  site     Site     @relation(fields: [siteId], references: [id], onDelete: Restrict)
+
+  @@unique([employeeId, siteId])
+}
+
+model WorkEntry {
+  id          String   @id @default(uuid()) @db.Uuid
+  workDate    DateTime
+  employeeId  String   @db.Uuid
+  orderId     String   @db.Uuid
+  siteId      String   @db.Uuid
+  hours       Decimal  @db.Decimal(10,2)
+
+  // NEW: unified day status
+  dayType     WorkDayType @default(work)
+
+  // KEEP for backward compatibility (existing DB records)
+  isSick      Boolean  @default(false)
+
+  description String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  employee Employee @relation(fields: [employeeId], references: [id], onDelete: Restrict)
+  order    Order    @relation(fields: [orderId], references: [id], onDelete: Restrict)
+  site     Site     @relation(fields: [siteId], references: [id], onDelete: Restrict)
+
+  invoiceLines InvoiceLine[]
+}
+
+model Invoice {
+  id             String        @id @default(uuid()) @db.Uuid
+  invoiceNumber  String?       @unique
+  status         InvoiceStatus @default(draft)
+  customerId     String        @db.Uuid
+  issueDate      DateTime?
+  periodStart    DateTime?
+  periodEnd      DateTime?
+  notes          String?
+  pauschalAmount Decimal?      @db.Decimal(10,2)
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  customer Customer @relation(fields: [customerId], references: [id], onDelete: Restrict)
+  lines    InvoiceLine[]
+}
+
+model InvoiceLine {
+  id             String   @id @default(uuid()) @db.Uuid
+  invoiceId      String   @db.Uuid
+  workEntryId    String   @db.Uuid
+  serviceDate    DateTime
+  description    String?
+  hoursAllocated Decimal  @db.Decimal(10,2)
+  unitRate       Decimal? @db.Decimal(10,2)
+  lineAmount     Decimal? @db.Decimal(10,2)
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  invoice   Invoice   @relation(fields: [invoiceId], references: [id], onDelete: Restrict)
+  workEntry WorkEntry @relation(fields: [workEntryId], references: [id], onDelete: Restrict)
+
+  @@index([invoiceId])
+  @@index([workEntryId])
+}
+
+model InvoiceSequence {
+  year      Int      @id
+  nextSeq   Int
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
