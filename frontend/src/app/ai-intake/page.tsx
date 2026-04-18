@@ -140,6 +140,18 @@ function listText(values?: string[] | null): string {
   return (values || []).join(', ');
 }
 
+function normalizeRecommendations(value: unknown): RecommendationPayload | null {
+  if (!value || typeof value !== 'object') return null;
+  const candidate = value as Partial<RecommendationPayload>;
+  if (!candidate.window || typeof candidate.window !== 'object') return null;
+  if (!Array.isArray(candidate.sites)) return null;
+
+  const { startDate, endDate, weeks } = candidate.window as RecommendationPayload['window'];
+  if (typeof startDate !== 'string' || typeof endDate !== 'string' || typeof weeks !== 'number') return null;
+
+  return candidate as RecommendationPayload;
+}
+
 async function safeMessage(res: Response): Promise<string> {
   try {
     const data = await res.json();
@@ -160,6 +172,7 @@ export default function AIIntakePage() {
   const [chatInput, setChatInput] = useState('');
   const [busy, setBusy] = useState(false);
   const [streaming, setStreaming] = useState(false);
+  const [chatError, setChatError] = useState('');
   const [siteSelections, setSiteSelections] = useState<Record<number, string[]>>({});
   const [existingCustomerId, setExistingCustomerId] = useState('');
   const [lastResult, setLastResult] = useState<{ orderId?: string; customerId?: string } | null>(null);
@@ -195,7 +208,7 @@ export default function AIIntakePage() {
       currency: intake.currency || 'EUR',
     });
     setMessages(intake.messages || []);
-    const nextRecommendations = (intake.recommendedTeam as RecommendationPayload | null) || null;
+    const nextRecommendations = normalizeRecommendations(intake.recommendedTeam);
     setRecommendations(nextRecommendations);
     setSiteSelections({});
     setExistingCustomerId(intake.convertedCustomerId || '');
@@ -227,16 +240,20 @@ export default function AIIntakePage() {
   async function createIntake() {
     setBusy(true);
     try {
-      const created = await apiJson<ProposalDraft>('/ai/intakes', 'POST', {
-        customerCompanyName: draft.customerCompanyName || null,
-        orderTitle: draft.orderTitle || null,
-      });
+      const created = await createIntakeRecord();
       await loadLists(created.id);
     } catch (error: any) {
       alert(error.message);
     } finally {
       setBusy(false);
     }
+  }
+
+  async function createIntakeRecord(): Promise<ProposalDraft> {
+    return apiJson<ProposalDraft>('/ai/intakes', 'POST', {
+      customerCompanyName: draft.customerCompanyName || null,
+      orderTitle: draft.orderTitle || null,
+    });
   }
 
   async function saveDraft() {
@@ -260,9 +277,25 @@ export default function AIIntakePage() {
   }
 
   async function sendMessage() {
-    if (!selectedId) return alert('Bitte zuerst einen Intake anlegen.');
+    let intakeId = selectedId;
     const content = chatInput.trim();
     if (!content) return;
+    setChatError('');
+
+    if (!intakeId) {
+      setBusy(true);
+      try {
+        const created = await createIntakeRecord();
+        intakeId = created.id;
+        await loadLists(intakeId);
+      } catch (error: any) {
+        setChatError(error.message || 'Intake konnte nicht angelegt werden.');
+        setBusy(false);
+        return;
+      } finally {
+        setBusy(false);
+      }
+    }
 
     const userMessage: ProposalMessage = {
       id: `user-${Date.now()}`,
@@ -280,7 +313,7 @@ export default function AIIntakePage() {
     setStreaming(true);
 
     try {
-      const res = await fetch(`${API_BASE}/ai/intakes/${selectedId}/messages/stream`, {
+      const res = await fetch(`${API_BASE}/ai/intakes/${intakeId}/messages/stream`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ content }),
@@ -304,11 +337,18 @@ export default function AIIntakePage() {
           prev.map((item) => (item.id === assistantId ? { ...item, content: full } : item))
         );
       }
-      await loadIntake(selectedId);
-      await loadLists(selectedId);
+
+      const normalized = full.replace(/\s+/g, ' ').trim();
+      if (normalized.startsWith('[ERROR]')) {
+        setChatError(full.replace(/^\s*\[ERROR\]\s*/, '').trim() || 'Gemini-Antwort fehlgeschlagen.');
+        return;
+      }
+
+      await loadIntake(intakeId);
+      await loadLists(intakeId);
     } catch (error: any) {
-      alert(error.message);
-      await loadIntake(selectedId).catch(() => undefined);
+      setChatError(error.message || 'Nachricht konnte nicht gesendet werden.');
+      await loadIntake(intakeId).catch(() => undefined);
     } finally {
       setStreaming(false);
     }
@@ -321,7 +361,7 @@ export default function AIIntakePage() {
       const updated = await apiJson<ProposalDraft>(`/ai/intakes/${selectedId}/proposal`, 'POST');
       setDraft({ ...emptyDraft, ...updated, proposedSites: updated.proposedSites || [] });
       setMessages(updated.messages || []);
-      setRecommendations((updated.recommendedTeam as RecommendationPayload | null) || null);
+      setRecommendations(normalizeRecommendations(updated.recommendedTeam));
       await loadLists(selectedId);
     } catch (error: any) {
       alert(error.message);
@@ -344,7 +384,7 @@ export default function AIIntakePage() {
         ...response.proposal,
         proposedSites: response.proposal.proposedSites || [],
       });
-      setRecommendations(response.recommendations);
+      setRecommendations(normalizeRecommendations(response.recommendations));
     } catch (error: any) {
       alert(error.message);
     } finally {
@@ -513,8 +553,16 @@ export default function AIIntakePage() {
             onChange={(event) => setChatInput(event.target.value)}
             placeholder="Neue Nachricht an den Intake-Assistenten..."
           />
+          {chatError && (
+            <>
+              <div className="spacer" />
+              <div className="card" style={{ borderColor: 'rgba(255,80,80,0.5)', color: '#b91c1c' }}>
+                {chatError}
+              </div>
+            </>
+          )}
           <div className="spacer" />
-          <button className="btn primary" onClick={sendMessage} disabled={!selectedId || streaming || !chatInput.trim()}>
+          <button className="btn primary" onClick={sendMessage} disabled={busy || streaming || !chatInput.trim()}>
             {streaming ? 'Streaming...' : 'Nachricht senden'}
           </button>
         </div>

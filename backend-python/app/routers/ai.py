@@ -17,7 +17,7 @@ from ..schemas import (
     ProposalDraftPayload,
 )
 from ..services.ai_summary import build_work_summary
-from ..services.gemini_client import stream_text
+from ..services.gemini_client import ensure_gemini_ready, stream_text
 from ..services.proposals import (
     append_message,
     apply_proposal_update,
@@ -96,6 +96,7 @@ def intake_message_stream(proposal_id: str, payload: AIIntakeMessagePayload, db:
     append_message(db, proposal, "user", payload.content)
     db.commit()
     proposal = _get_proposal(db, proposal_id)
+    ensure_gemini_ready()
 
     def generate() -> Iterable[str]:
         assistant_parts: list[str] = []

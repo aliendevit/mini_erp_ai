@@ -7,7 +7,7 @@ from fastapi import HTTPException
 from ..settings import get_settings
 
 
-def _get_model(response_mime_type: str | None = None):
+def ensure_gemini_ready():
     settings = get_settings()
     if not settings.gemini_api_key:
         raise HTTPException(status_code=500, detail="Missing GEMINI_API_KEY. Add it to backend-python/.env.")
@@ -18,6 +18,11 @@ def _get_model(response_mime_type: str | None = None):
         raise HTTPException(status_code=500, detail="google-generativeai is not installed.") from exc
 
     genai.configure(api_key=settings.gemini_api_key)
+    return genai, settings
+
+
+def _get_model(response_mime_type: str | None = None):
+    genai, settings = ensure_gemini_ready()
     generation_config = {"response_mime_type": response_mime_type} if response_mime_type else None
     return genai.GenerativeModel(settings.gemini_model, generation_config=generation_config)
 

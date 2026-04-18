@@ -6,7 +6,7 @@ from decimal import Decimal
 from typing import Any
 
 from fastapi import HTTPException
-from pydantic import BaseModel, Field, ValidationError
+from pydantic import BaseModel, Field, ValidationError, field_validator
 from sqlalchemy.orm import Session
 
 from ..models import Customer, Employee, EmployeeAssignment, Order, Proposal, ProposalMessage, ProposalStatus, Site
@@ -63,6 +63,13 @@ class ExtractedProposalSite(BaseModel):
     requiredCertifications: list[str] = Field(default_factory=list)
     estimatedHours: float | None = None
 
+    @field_validator("requiredSkills", "requiredCertifications", mode="before")
+    @classmethod
+    def _coerce_list_fields(cls, value: Any) -> list[str]:
+        if value is None:
+            return []
+        return list(value)
+
 
 class ExtractedProposal(BaseModel):
     customerCompanyName: str | None = None
@@ -83,6 +90,27 @@ class ExtractedProposal(BaseModel):
     preferredEndDate: datetime | None = None
     estimatedHours: float | None = None
     currency: str = "EUR"
+
+    @field_validator("proposedSites", "requiredSkills", "requiredCertifications", mode="before")
+    @classmethod
+    def _coerce_collection_fields(cls, value: Any) -> list[Any]:
+        if value is None:
+            return []
+        return list(value)
+
+    @field_validator("customerCountry", mode="before")
+    @classmethod
+    def _default_country(cls, value: Any) -> str:
+        if value is None or str(value).strip() == "":
+            return "DE"
+        return str(value).strip().upper()
+
+    @field_validator("currency", mode="before")
+    @classmethod
+    def _default_currency(cls, value: Any) -> str:
+        if value is None or str(value).strip() == "":
+            return "EUR"
+        return str(value).strip().upper()
 
 
 def _chat_lines(messages: list[ProposalMessage]) -> str:
@@ -153,6 +181,8 @@ def build_proposal_prompt(messages: list[ProposalMessage]) -> str:
             "You convert a client intake transcript into a structured proposal draft.",
             "Return only valid JSON. Do not wrap it in markdown.",
             "Do not invent missing facts. Use null or empty arrays instead.",
+            "Use EUR as currency unless the transcript explicitly states another currency.",
+            "Use DE as customerCountry when the project is clearly in Germany and no other country is stated.",
             "Prefer German business wording inside summary and orderDescription.",
             "",
             f"Required JSON schema: {json.dumps(schema, ensure_ascii=True)}",

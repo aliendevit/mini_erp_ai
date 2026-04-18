@@ -14,7 +14,14 @@ except ImportError:  # pragma: no cover - fallback for environments without pyth
 
 
 ENV_FILE = Path(__file__).resolve().parents[1] / ".env"
-load_dotenv(ENV_FILE)
+if not load_dotenv(ENV_FILE):
+    if ENV_FILE.exists():
+        for raw_line in ENV_FILE.read_text(encoding="utf-8").splitlines():
+            line = raw_line.strip()
+            if not line or line.startswith("#") or "=" not in line:
+                continue
+            key, value = line.split("=", 1)
+            os.environ.setdefault(key.strip(), value.strip())
 
 
 class Settings(BaseModel):

@@ -16,7 +16,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from app.database import Base
 from app.models import Employee, EmployeeAvailabilityBlock, EmployeeSkill, Proposal, ProposalMessage
 from app.schemas import ProposalDraftPayload
-from app.services.proposals import apply_proposal_update, confirm_proposal, extract_proposal_from_messages
+from app.services.proposals import ExtractedProposal, apply_proposal_update, confirm_proposal, extract_proposal_from_messages
 from app.services.staffing import recommend_staff_for_proposal
 
 
@@ -77,6 +77,23 @@ class ProposalAndStaffingTests(unittest.TestCase):
                 extract_proposal_from_messages(proposal, [message])
 
         self.assertEqual(context.exception.status_code, 502)
+
+    def test_extracted_proposal_defaults_null_currency_and_lists(self) -> None:
+        extracted = ExtractedProposal.model_validate(
+            {
+                "summary": "Kurzfassung",
+                "orderTitle": "Sanierung",
+                "currency": None,
+                "requiredSkills": None,
+                "requiredCertifications": None,
+                "proposedSites": None,
+            }
+        )
+
+        self.assertEqual(extracted.currency, "EUR")
+        self.assertEqual(extracted.requiredSkills, [])
+        self.assertEqual(extracted.requiredCertifications, [])
+        self.assertEqual(extracted.proposedSites, [])
 
     def test_recommend_staff_filters_blocked_and_prefers_matching_employee(self) -> None:
         available = build_employee("Anna Maler", "Maler")
