@@ -12,6 +12,7 @@ What is included:
 - Reporting endpoint for hour aggregation
 - Invoice sequence settings endpoint
 - An AI-ready endpoint for work-entry summaries
+- AI intake workflow for Gemini-backed proposal drafting and staffing recommendations
 
 ## Run locally
 
@@ -24,6 +25,8 @@ Required environment:
 
 - `DATABASE_URL=sqlite:///./app.db`
 - `CORS_ORIGIN=http://localhost:3000`
+- `GEMINI_API_KEY=...`
+- `GEMINI_MODEL=gemini-1.5-flash`
 
 The app uses SQLite by default. If you set a PostgreSQL URL, it automatically rewrites `postgresql://` to SQLAlchemy's `postgresql+pg8000://`.
 
@@ -77,4 +80,11 @@ FastAPI plus SQLAlchemy gives you a clean place to add:
 - OCR / document parsing jobs
 - background workers for invoice automation
 
-The first hook is `/api/ai/work-summary`, which currently produces a deterministic summary and a prompt payload you can pass to an LLM provider later.
+AI endpoints now include:
+
+- `/api/ai/work-summary`
+- `/api/ai/intakes`
+- `/api/ai/intakes/{id}/messages/stream`
+- `/api/ai/intakes/{id}/proposal`
+- `/api/ai/intakes/{id}/recommend-assignments`
+- `/api/ai/intakes/{id}/confirm`

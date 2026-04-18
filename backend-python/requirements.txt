@@ -3,5 +3,7 @@ uvicorn==0.32.0
 sqlalchemy==2.0.36
 pg8000==1.31.2
 pydantic==2.10.1
+python-dotenv==1.0.1
+google-generativeai==0.8.3
 reportlab==4.2.5
 python-docx==1.1.2

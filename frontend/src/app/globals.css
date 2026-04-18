@@ -61,6 +61,11 @@ input, select, textarea {
   color: #0b0c0f;
 }
 
+input[type="checkbox"] {
+  width: auto;
+  padding: 0;
+}
+
 /* Improve readability inside native dropdown lists */
 select option {
   background: #ffffff;

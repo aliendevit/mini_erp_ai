@@ -1,10 +1,11 @@
 from __future__ import annotations
 
-import os
 from collections.abc import Generator
 
-from sqlalchemy import create_engine
+from sqlalchemy import create_engine, inspect, text
 from sqlalchemy.orm import DeclarativeBase, Session, sessionmaker
+
+from .settings import get_settings
 
 
 def _normalize_database_url(url: str) -> str:
@@ -14,10 +15,7 @@ def _normalize_database_url(url: str) -> str:
         return url.replace("postgresql://", "postgresql+pg8000://", 1)
     return url
 
-
-DATABASE_URL = _normalize_database_url(
-    os.getenv("DATABASE_URL", "sqlite:///./app.db")
-)
+DATABASE_URL = _normalize_database_url(get_settings().database_url)
 
 
 class Base(DeclarativeBase):
@@ -32,10 +30,30 @@ engine = create_engine(DATABASE_URL, **engine_kwargs)
 SessionLocal = sessionmaker(bind=engine, autoflush=False, autocommit=False, future=True)
 
 
+def _ensure_employee_staffing_columns() -> None:
+    inspector = inspect(engine)
+    if "Employee" not in inspector.get_table_names():
+        return
+
+    column_names = {column["name"] for column in inspector.get_columns("Employee")}
+    statements: list[str] = []
+
+    if "weeklyCapacityHours" not in column_names:
+        statements.append('ALTER TABLE "Employee" ADD COLUMN "weeklyCapacityHours" NUMERIC(10, 2)')
+
+    if not statements:
+        return
+
+    with engine.begin() as conn:
+        for statement in statements:
+            conn.execute(text(statement))
+
+
 def init_db() -> None:
     from . import models  # noqa: F401
 
     Base.metadata.create_all(bind=engine)
+    _ensure_employee_staffing_columns()
 
 
 def get_db() -> Generator[Session, None, None]:

@@ -26,6 +26,19 @@ class WorkDayType(str, Enum):
     holiday = "holiday"
 
 
+class ProposalStatus(str, Enum):
+    intake = "intake"
+    draft = "draft"
+    reviewed = "reviewed"
+    converted = "converted"
+    rejected = "rejected"
+
+
+class EmployeeSkillKind(str, Enum):
+    skill = "skill"
+    certification = "certification"
+
+
 class Customer(Base):
     __tablename__ = "Customer"
 
@@ -107,6 +120,7 @@ class Employee(Base):
     email: Mapped[str | None] = mapped_column(String)
     is_active: Mapped[bool] = mapped_column("isActive", Boolean, nullable=False, default=True, server_default="true")
     default_hourly_rate: Mapped[Decimal | None] = mapped_column("defaultHourlyRate", Numeric(10, 2))
+    weekly_capacity_hours: Mapped[Decimal | None] = mapped_column("weeklyCapacityHours", Numeric(10, 2))
     created_at: Mapped[datetime] = mapped_column("createdAt", DateTime(timezone=True), server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(
         "updatedAt", DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
@@ -114,6 +128,46 @@ class Employee(Base):
 
     assignments: Mapped[list["EmployeeAssignment"]] = relationship(back_populates="employee")
     work_entries: Mapped[list["WorkEntry"]] = relationship(back_populates="employee")
+    skill_records: Mapped[list["EmployeeSkill"]] = relationship(
+        back_populates="employee", cascade="all, delete-orphan"
+    )
+    availability_blocks: Mapped[list["EmployeeAvailabilityBlock"]] = relationship(
+        back_populates="employee", cascade="all, delete-orphan"
+    )
+
+
+class EmployeeSkill(Base):
+    __tablename__ = "EmployeeSkill"
+    __table_args__ = (
+        UniqueConstraint("employeeId", "kind", "name", name="EmployeeSkill_employeeId_kind_name_key"),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid4()))
+    employee_id: Mapped[str] = mapped_column("employeeId", String(36), ForeignKey("Employee.id"), nullable=False)
+    kind: Mapped[EmployeeSkillKind] = mapped_column(String, nullable=False)
+    name: Mapped[str] = mapped_column(String, nullable=False)
+    created_at: Mapped[datetime] = mapped_column("createdAt", DateTime(timezone=True), server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(
+        "updatedAt", DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
+    )
+
+    employee: Mapped[Employee] = relationship(back_populates="skill_records")
+
+
+class EmployeeAvailabilityBlock(Base):
+    __tablename__ = "EmployeeAvailabilityBlock"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid4()))
+    employee_id: Mapped[str] = mapped_column("employeeId", String(36), ForeignKey("Employee.id"), nullable=False)
+    start_date: Mapped[datetime] = mapped_column("startDate", DateTime(timezone=True), nullable=False)
+    end_date: Mapped[datetime] = mapped_column("endDate", DateTime(timezone=True), nullable=False)
+    reason: Mapped[str | None] = mapped_column(Text)
+    created_at: Mapped[datetime] = mapped_column("createdAt", DateTime(timezone=True), server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(
+        "updatedAt", DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
+    )
+
+    employee: Mapped[Employee] = relationship(back_populates="availability_blocks")
 
 
 class EmployeeAssignment(Base):
@@ -212,3 +266,53 @@ class InvoiceSequence(Base):
     updated_at: Mapped[datetime] = mapped_column(
         "updatedAt", DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
     )
+
+
+class Proposal(Base):
+    __tablename__ = "Proposal"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid4()))
+    status: Mapped[ProposalStatus] = mapped_column(String, nullable=False, default=ProposalStatus.intake.value)
+    customer_company_name: Mapped[str | None] = mapped_column("customerCompanyName", String)
+    customer_street: Mapped[str | None] = mapped_column("customerStreet", String)
+    customer_zip_code: Mapped[str | None] = mapped_column("customerZipCode", String)
+    customer_city: Mapped[str | None] = mapped_column("customerCity", String)
+    customer_country: Mapped[str | None] = mapped_column("customerCountry", String, default="DE")
+    contact_name: Mapped[str | None] = mapped_column("contactName", String)
+    contact_phone: Mapped[str | None] = mapped_column("contactPhone", String)
+    contact_email: Mapped[str | None] = mapped_column("contactEmail", String)
+    summary: Mapped[str | None] = mapped_column(Text)
+    order_title: Mapped[str | None] = mapped_column("orderTitle", String)
+    order_description: Mapped[str | None] = mapped_column("orderDescription", Text)
+    proposed_sites_json: Mapped[str | None] = mapped_column("proposedSitesJson", Text)
+    required_skills_json: Mapped[str | None] = mapped_column("requiredSkillsJson", Text)
+    required_certifications_json: Mapped[str | None] = mapped_column("requiredCertificationsJson", Text)
+    preferred_start_date: Mapped[datetime | None] = mapped_column("preferredStartDate", DateTime(timezone=True))
+    preferred_end_date: Mapped[datetime | None] = mapped_column("preferredEndDate", DateTime(timezone=True))
+    estimated_hours: Mapped[Decimal | None] = mapped_column("estimatedHours", Numeric(10, 2))
+    estimated_price: Mapped[Decimal | None] = mapped_column("estimatedPrice", Numeric(10, 2))
+    currency: Mapped[str] = mapped_column(String, nullable=False, default="EUR", server_default="EUR")
+    recommended_team_json: Mapped[str | None] = mapped_column("recommendedTeamJson", Text)
+    converted_customer_id: Mapped[str | None] = mapped_column("convertedCustomerId", String(36), ForeignKey("Customer.id"))
+    converted_order_id: Mapped[str | None] = mapped_column("convertedOrderId", String(36), ForeignKey("Order.id"))
+    created_at: Mapped[datetime] = mapped_column("createdAt", DateTime(timezone=True), server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(
+        "updatedAt", DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
+    )
+
+    messages: Mapped[list["ProposalMessage"]] = relationship(
+        back_populates="proposal", cascade="all, delete-orphan", order_by="ProposalMessage.created_at"
+    )
+
+
+class ProposalMessage(Base):
+    __tablename__ = "ProposalMessage"
+    __table_args__ = (Index("ProposalMessage_proposalId_idx", "proposalId"),)
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid4()))
+    proposal_id: Mapped[str] = mapped_column("proposalId", String(36), ForeignKey("Proposal.id"), nullable=False)
+    role: Mapped[str] = mapped_column(String, nullable=False)
+    content: Mapped[str] = mapped_column(Text, nullable=False)
+    created_at: Mapped[datetime] = mapped_column("createdAt", DateTime(timezone=True), server_default=func.now())
+
+    proposal: Mapped[Proposal] = relationship(back_populates="messages")

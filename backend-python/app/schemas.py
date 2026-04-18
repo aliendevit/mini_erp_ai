@@ -19,6 +19,13 @@ class CustomerPayload(BaseModel):
     notes: str | None = None
 
 
+class EmployeeAvailabilityBlockPayload(BaseModel):
+    id: str | None = None
+    startDate: datetime | date | None = None
+    endDate: datetime | date | None = None
+    reason: str | None = None
+
+
 class EmployeePayload(BaseModel):
     firstName: str
     lastName: str
@@ -30,6 +37,10 @@ class EmployeePayload(BaseModel):
     email: str | None = None
     isActive: bool = True
     defaultHourlyRate: float | None = None
+    weeklyCapacityHours: float | None = None
+    skills: list[str] = Field(default_factory=list)
+    certifications: list[str] = Field(default_factory=list)
+    availabilityBlocks: list[EmployeeAvailabilityBlockPayload] = Field(default_factory=list)
 
 
 class OrderPayload(BaseModel):
@@ -108,3 +119,57 @@ class AIWorkSummaryPayload(BaseModel):
     to_date: date | None = Field(default=None, alias="to")
     question: str | None = None
 
+
+class AIIntakeCreatePayload(BaseModel):
+    customerCompanyName: str | None = None
+    orderTitle: str | None = None
+
+
+class AIIntakeMessagePayload(BaseModel):
+    content: str = Field(..., min_length=1, max_length=10000)
+
+
+class ProposalSiteDraftPayload(BaseModel):
+    siteName: str = ""
+    street: str | None = None
+    zipCode: str | None = None
+    city: str | None = None
+    notes: str | None = None
+    requiredSkills: list[str] = Field(default_factory=list)
+    requiredCertifications: list[str] = Field(default_factory=list)
+    estimatedHours: float | None = None
+
+
+class ProposalDraftPayload(BaseModel):
+    status: Literal["intake", "draft", "reviewed", "converted", "rejected"] | None = None
+    customerCompanyName: str | None = None
+    customerStreet: str | None = None
+    customerZipCode: str | None = None
+    customerCity: str | None = None
+    customerCountry: str | None = None
+    contactName: str | None = None
+    contactPhone: str | None = None
+    contactEmail: str | None = None
+    summary: str | None = None
+    orderTitle: str | None = None
+    orderDescription: str | None = None
+    proposedSites: list[ProposalSiteDraftPayload] = Field(default_factory=list)
+    requiredSkills: list[str] = Field(default_factory=list)
+    requiredCertifications: list[str] = Field(default_factory=list)
+    preferredStartDate: datetime | date | None = None
+    preferredEndDate: datetime | date | None = None
+    estimatedHours: float | None = None
+    estimatedPrice: float | None = None
+    currency: str | None = None
+    recommendedTeam: dict | None = None
+
+
+class ProposalSiteAssignmentPayload(BaseModel):
+    siteIndex: int
+    employeeIds: list[str] = Field(default_factory=list)
+
+
+class AIIntakeConfirmPayload(BaseModel):
+    existingCustomerId: str | None = None
+    siteAssignments: list[ProposalSiteAssignmentPayload] = Field(default_factory=list)
+    manualEstimatedPrice: float | None = None

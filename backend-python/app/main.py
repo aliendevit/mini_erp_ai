@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import os
 from pathlib import Path
 
 from fastapi import FastAPI, HTTPException, Request
@@ -10,13 +9,14 @@ from fastapi.staticfiles import StaticFiles
 
 from .database import init_db
 from .routers import ai, core, invoices
+from .settings import get_settings
 
 app = FastAPI(title="Simple Accounting Python Backend")
 
-cors_origin = os.getenv("CORS_ORIGIN", "http://localhost:3000")
+settings = get_settings()
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[cors_origin],
+    allow_origins=[settings.cors_origin],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],

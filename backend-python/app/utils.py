@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from datetime import date, datetime, time, timedelta, timezone
 from decimal import Decimal
 from typing import Any
@@ -13,11 +14,15 @@ from sqlalchemy.orm import Session
 from .models import (
     Customer,
     Employee,
+    EmployeeAvailabilityBlock,
     EmployeeAssignment,
+    EmployeeSkill,
     Invoice,
     InvoiceLine,
     InvoiceSequence,
     Order,
+    Proposal,
+    ProposalMessage,
     Site,
     WorkEntry,
 )
@@ -27,6 +32,19 @@ def decimal_or_none(value: float | int | Decimal | None) -> Decimal | None:
     if value is None or value == "":
         return None
     return Decimal(str(value))
+
+
+def json_dumps(value: Any) -> str:
+    return json.dumps(value, ensure_ascii=True)
+
+
+def json_loads(value: str | None, default: Any) -> Any:
+    if not value:
+        return default
+    try:
+        return json.loads(value)
+    except json.JSONDecodeError:
+        return default
 
 
 def as_datetime(value: datetime | date | str | None) -> datetime | None:
@@ -196,24 +214,58 @@ def customer_payload(customer: Customer) -> dict[str, Any]:
     )
 
 
-def employee_payload(employee: Employee) -> dict[str, Any]:
+def employee_skill_payload(skill: EmployeeSkill) -> dict[str, Any]:
     return jsonable_encoder(
         {
-            "id": employee.id,
-            "firstName": employee.first_name,
-            "lastName": employee.last_name,
-            "birthDate": employee.birth_date,
-            "street": employee.street,
-            "zipCode": employee.zip_code,
-            "city": employee.city,
-            "phone": employee.phone,
-            "email": employee.email,
-            "isActive": employee.is_active,
-            "defaultHourlyRate": employee.default_hourly_rate,
-            "createdAt": employee.created_at,
-            "updatedAt": employee.updated_at,
+            "id": skill.id,
+            "employeeId": skill.employee_id,
+            "kind": skill.kind,
+            "name": skill.name,
+            "createdAt": skill.created_at,
+            "updatedAt": skill.updated_at,
         }
     )
+
+
+def employee_availability_payload(block: EmployeeAvailabilityBlock) -> dict[str, Any]:
+    return jsonable_encoder(
+        {
+            "id": block.id,
+            "employeeId": block.employee_id,
+            "startDate": block.start_date,
+            "endDate": block.end_date,
+            "reason": block.reason,
+            "createdAt": block.created_at,
+            "updatedAt": block.updated_at,
+        }
+    )
+
+
+def employee_payload(employee: Employee, include_staffing: bool = False) -> dict[str, Any]:
+    data: dict[str, Any] = {
+        "id": employee.id,
+        "firstName": employee.first_name,
+        "lastName": employee.last_name,
+        "birthDate": employee.birth_date,
+        "street": employee.street,
+        "zipCode": employee.zip_code,
+        "city": employee.city,
+        "phone": employee.phone,
+        "email": employee.email,
+        "isActive": employee.is_active,
+        "defaultHourlyRate": employee.default_hourly_rate,
+        "weeklyCapacityHours": employee.weekly_capacity_hours,
+        "createdAt": employee.created_at,
+        "updatedAt": employee.updated_at,
+    }
+    if include_staffing:
+        skills = [item.name for item in employee.skill_records if item.kind == "skill"]
+        certifications = [item.name for item in employee.skill_records if item.kind == "certification"]
+        data["skills"] = sorted(skills)
+        data["certifications"] = sorted(certifications)
+        data["availabilityBlocks"] = [employee_availability_payload(item) for item in employee.availability_blocks]
+        data["skillRecords"] = [employee_skill_payload(item) for item in employee.skill_records]
+    return jsonable_encoder(data)
 
 
 def assignment_payload(assignment: EmployeeAssignment, include_employee: bool = False, include_site: bool = False) -> dict[str, Any]:
@@ -347,6 +399,52 @@ def work_entry_payload(work_entry: WorkEntry, include_invoice_lines: bool = True
         data["site"] = site_payload(work_entry.site)
     if include_invoice_lines:
         data["invoiceLines"] = [invoice_line_payload(line, include_invoice=True) for line in work_entry.invoice_lines]
+    return jsonable_encoder(data)
+
+
+def proposal_message_payload(message: ProposalMessage) -> dict[str, Any]:
+    return jsonable_encoder(
+        {
+            "id": message.id,
+            "proposalId": message.proposal_id,
+            "role": message.role,
+            "content": message.content,
+            "createdAt": message.created_at,
+        }
+    )
+
+
+def proposal_payload(proposal: Proposal, include_messages: bool = False) -> dict[str, Any]:
+    data: dict[str, Any] = {
+        "id": proposal.id,
+        "status": proposal.status,
+        "customerCompanyName": proposal.customer_company_name,
+        "customerStreet": proposal.customer_street,
+        "customerZipCode": proposal.customer_zip_code,
+        "customerCity": proposal.customer_city,
+        "customerCountry": proposal.customer_country,
+        "contactName": proposal.contact_name,
+        "contactPhone": proposal.contact_phone,
+        "contactEmail": proposal.contact_email,
+        "summary": proposal.summary,
+        "orderTitle": proposal.order_title,
+        "orderDescription": proposal.order_description,
+        "proposedSites": json_loads(proposal.proposed_sites_json, []),
+        "requiredSkills": json_loads(proposal.required_skills_json, []),
+        "requiredCertifications": json_loads(proposal.required_certifications_json, []),
+        "preferredStartDate": proposal.preferred_start_date,
+        "preferredEndDate": proposal.preferred_end_date,
+        "estimatedHours": proposal.estimated_hours,
+        "estimatedPrice": proposal.estimated_price,
+        "currency": proposal.currency,
+        "recommendedTeam": json_loads(proposal.recommended_team_json, None),
+        "convertedCustomerId": proposal.converted_customer_id,
+        "convertedOrderId": proposal.converted_order_id,
+        "createdAt": proposal.created_at,
+        "updatedAt": proposal.updated_at,
+    }
+    if include_messages:
+        data["messages"] = [proposal_message_payload(item) for item in proposal.messages]
     return jsonable_encoder(data)
 
 

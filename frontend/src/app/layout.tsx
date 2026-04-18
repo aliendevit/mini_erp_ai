@@ -20,6 +20,7 @@ function TopNav() {
       <Link href="/invoices/drafts">EntwÃ¼rfe</Link>
       <Link href="/invoices">Rechnungen</Link>
       <Link href="/reports/hours">StundenÃ¼bersicht</Link>
+      <Link href="/ai-intake">AI Intake</Link>
     </div>
   );
 }

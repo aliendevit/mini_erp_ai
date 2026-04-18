@@ -8,7 +8,19 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, joinedload, selectinload
 
 from ..database import get_db
-from ..models import Customer, Employee, EmployeeAssignment, Invoice, InvoiceLine, InvoiceSequence, Order, Site, WorkEntry
+from ..models import (
+    Customer,
+    Employee,
+    EmployeeAssignment,
+    EmployeeAvailabilityBlock,
+    EmployeeSkill,
+    Invoice,
+    InvoiceLine,
+    InvoiceSequence,
+    Order,
+    Site,
+    WorkEntry,
+)
 from ..schemas import (
     AssignmentPayload,
     AssignmentUpdatePayload,
@@ -68,6 +80,29 @@ def _compute_rate(db: Session, employee_id: str, order_id: str) -> Decimal:
     order = db.get(Order, order_id)
     rate = (order.default_hourly_rate if order else None) or (employee.default_hourly_rate if employee else None)
     return Decimal("0") if rate is None else Decimal(str(rate))
+
+
+def _replace_employee_staffing(item: Employee, payload: EmployeePayload) -> None:
+    item.skill_records.clear()
+    item.availability_blocks.clear()
+
+    for name in sorted({value.strip() for value in payload.skills if value and value.strip()}):
+        item.skill_records.append(EmployeeSkill(kind="skill", name=name))
+    for name in sorted({value.strip() for value in payload.certifications if value and value.strip()}):
+        item.skill_records.append(EmployeeSkill(kind="certification", name=name))
+
+    for block in payload.availabilityBlocks:
+        start_date = as_datetime(block.startDate)
+        end_date = as_datetime(block.endDate)
+        if not start_date or not end_date:
+            continue
+        item.availability_blocks.append(
+            EmployeeAvailabilityBlock(
+                start_date=start_date,
+                end_date=end_date,
+                reason=block.reason,
+            )
+        )
 
 
 def _can_modify_work_entry(db: Session, work_entry_id: str) -> dict:
@@ -160,16 +195,25 @@ def delete_customer(customer_id: str, db: Session = Depends(get_db)) -> dict:
 
 @router.get("/employees")
 def list_employees(db: Session = Depends(get_db)) -> list[dict]:
-    items = db.scalars(select(Employee).order_by(Employee.last_name.asc(), Employee.first_name.asc())).all()
-    return [employee_payload(item) for item in items]
+    items = db.scalars(
+        select(Employee)
+        .options(selectinload(Employee.skill_records), selectinload(Employee.availability_blocks))
+        .order_by(Employee.last_name.asc(), Employee.first_name.asc())
+    ).all()
+    return [employee_payload(item, include_staffing=True) for item in items]
 
 
 @router.get("/employees/{employee_id}")
 def get_employee(employee_id: str, db: Session = Depends(get_db)) -> dict:
-    item = db.get(Employee, employee_id)
+    stmt = (
+        select(Employee)
+        .options(selectinload(Employee.skill_records), selectinload(Employee.availability_blocks))
+        .where(Employee.id == employee_id)
+    )
+    item = db.execute(stmt).scalar_one_or_none()
     if not item:
         raise not_found()
-    return employee_payload(item)
+    return employee_payload(item, include_staffing=True)
 
 
 @router.post("/employees", status_code=201)
@@ -185,16 +229,27 @@ def create_employee(payload: EmployeePayload, db: Session = Depends(get_db)) -> 
         email=payload.email,
         is_active=payload.isActive,
         default_hourly_rate=decimal_or_none(payload.defaultHourlyRate),
+        weekly_capacity_hours=decimal_or_none(payload.weeklyCapacityHours),
     )
+    _replace_employee_staffing(item, payload)
     db.add(item)
     db.commit()
     db.refresh(item)
-    return employee_payload(item)
+    item = db.execute(
+        select(Employee)
+        .options(selectinload(Employee.skill_records), selectinload(Employee.availability_blocks))
+        .where(Employee.id == item.id)
+    ).scalar_one()
+    return employee_payload(item, include_staffing=True)
 
 
 @router.put("/employees/{employee_id}")
 def update_employee(employee_id: str, payload: EmployeePayload, db: Session = Depends(get_db)) -> dict:
-    item = db.get(Employee, employee_id)
+    item = db.execute(
+        select(Employee)
+        .options(selectinload(Employee.skill_records), selectinload(Employee.availability_blocks))
+        .where(Employee.id == employee_id)
+    ).scalar_one_or_none()
     if not item:
         raise not_found()
     item.first_name = payload.firstName.strip()
@@ -207,9 +262,11 @@ def update_employee(employee_id: str, payload: EmployeePayload, db: Session = De
     item.email = payload.email
     item.is_active = payload.isActive
     item.default_hourly_rate = decimal_or_none(payload.defaultHourlyRate)
+    item.weekly_capacity_hours = decimal_or_none(payload.weeklyCapacityHours)
+    _replace_employee_staffing(item, payload)
     db.commit()
     db.refresh(item)
-    return employee_payload(item)
+    return employee_payload(item, include_staffing=True)
 
 
 @router.delete("/employees/{employee_id}")
