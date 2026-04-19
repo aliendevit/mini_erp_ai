@@ -6,7 +6,7 @@ from decimal import Decimal
 from typing import Any
 
 from fastapi import HTTPException
-from pydantic import BaseModel, Field, ValidationError, field_validator
+from pydantic import BaseModel, Field, ValidationError, field_validator, model_validator
 from sqlalchemy.orm import Session
 
 from ..models import Customer, Employee, EmployeeAssignment, Order, Proposal, ProposalMessage, ProposalStatus, Site
@@ -51,6 +51,20 @@ def _extract_json_object(text: str) -> dict[str, Any]:
     if not isinstance(data, dict):
         raise HTTPException(status_code=502, detail="Gemini JSON response was not an object.")
     return data
+
+
+def _distribute_hours(total_hours: float, buckets: int) -> list[float]:
+    if buckets <= 0:
+        return []
+    if total_hours <= 0:
+        return [0.0 for _ in range(buckets)]
+
+    rounded_total = round(float(total_hours), 2)
+    base_value = round(rounded_total / buckets, 2)
+    values = [base_value for _ in range(buckets)]
+    correction = round(rounded_total - sum(values), 2)
+    values[-1] = round(values[-1] + correction, 2)
+    return values
 
 
 class ExtractedProposalSite(BaseModel):
@@ -111,6 +125,46 @@ class ExtractedProposal(BaseModel):
         if value is None or str(value).strip() == "":
             return "EUR"
         return str(value).strip().upper()
+
+    @model_validator(mode="after")
+    def _fill_missing_site_hours(self) -> "ExtractedProposal":
+        total_hours = float(self.estimatedHours or 0)
+        if total_hours <= 0 or not self.proposedSites:
+            return self
+
+        known_indices: list[int] = []
+        missing_indices: list[int] = []
+        known_total = 0.0
+
+        for index, site in enumerate(self.proposedSites):
+            try:
+                hours = float(site.estimatedHours) if site.estimatedHours is not None else None
+            except (TypeError, ValueError):
+                hours = None
+
+            if hours is None or hours <= 0:
+                missing_indices.append(index)
+            else:
+                known_indices.append(index)
+                known_total += hours
+
+        if not missing_indices:
+            return self
+
+        if known_total <= 0:
+            allocations = _distribute_hours(total_hours, len(self.proposedSites))
+            for index, hours in enumerate(allocations):
+                self.proposedSites[index].estimatedHours = hours
+            return self
+
+        remaining = round(total_hours - known_total, 2)
+        if remaining <= 0:
+            return self
+
+        allocations = _distribute_hours(remaining, len(missing_indices))
+        for index, hours in zip(missing_indices, allocations):
+            self.proposedSites[index].estimatedHours = hours
+        return self
 
 
 def _chat_lines(messages: list[ProposalMessage]) -> str:
@@ -183,6 +237,9 @@ def build_proposal_prompt(messages: list[ProposalMessage]) -> str:
             "Do not invent missing facts. Use null or empty arrays instead.",
             "Use EUR as currency unless the transcript explicitly states another currency.",
             "Use DE as customerCountry when the project is clearly in Germany and no other country is stated.",
+            "If total estimatedHours is known and there is more than one proposed site, always provide estimatedHours for every site.",
+            "When exact per-site hours are not stated, infer a reasonable split from scope, area, and task complexity.",
+            "The sum of proposedSites[].estimatedHours should match the top-level estimatedHours whenever possible.",
             "Prefer German business wording inside summary and orderDescription.",
             "",
             f"Required JSON schema: {json.dumps(schema, ensure_ascii=True)}",

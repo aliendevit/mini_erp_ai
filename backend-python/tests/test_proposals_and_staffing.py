@@ -95,6 +95,38 @@ class ProposalAndStaffingTests(unittest.TestCase):
         self.assertEqual(extracted.requiredCertifications, [])
         self.assertEqual(extracted.proposedSites, [])
 
+    def test_extracted_proposal_distributes_site_hours_when_missing(self) -> None:
+        extracted = ExtractedProposal.model_validate(
+            {
+                "summary": "Kurzfassung",
+                "orderTitle": "Sanierung",
+                "estimatedHours": 120,
+                "proposedSites": [
+                    {"siteName": "Treppenhaus", "estimatedHours": None},
+                    {"siteName": "Kellerflur", "estimatedHours": None},
+                ],
+            }
+        )
+
+        self.assertEqual(extracted.proposedSites[0].estimatedHours, 60.0)
+        self.assertEqual(extracted.proposedSites[1].estimatedHours, 60.0)
+
+    def test_extracted_proposal_fills_remaining_site_hours(self) -> None:
+        extracted = ExtractedProposal.model_validate(
+            {
+                "summary": "Kurzfassung",
+                "orderTitle": "Sanierung",
+                "estimatedHours": 120,
+                "proposedSites": [
+                    {"siteName": "Treppenhaus", "estimatedHours": 70},
+                    {"siteName": "Kellerflur", "estimatedHours": None},
+                ],
+            }
+        )
+
+        self.assertEqual(extracted.proposedSites[0].estimatedHours, 70.0)
+        self.assertEqual(extracted.proposedSites[1].estimatedHours, 50.0)
+
     def test_recommend_staff_filters_blocked_and_prefers_matching_employee(self) -> None:
         available = build_employee("Anna Maler", "Maler")
         blocked = build_employee("Ben Elektrik", "Elektrik")
