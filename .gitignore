@@ -13,8 +13,11 @@ frontend/.next/
 # Local env and databases
 backend-python/.env
 frontend/.env.local
+.env
+.env.local
 backend-python/app.db
 *.db
+env/
 
 # Logs
 *.log
