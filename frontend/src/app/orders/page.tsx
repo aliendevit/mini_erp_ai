@@ -2,7 +2,9 @@
 
 import Link from 'next/link';
 import { useEffect, useState } from 'react';
-import { apiGet, apiJson, DELETE_CONFIRM } from '../../lib/api';
+
+import { useI18n } from '../../lib/i18n';
+import { apiGet, apiJson } from '../../lib/api';
 
 type Customer = { id: string; companyName: string };
 
@@ -24,10 +26,11 @@ const empty: Partial<Order> = {
   title: '',
   description: '',
   status: 'open',
-  defaultHourlyRate: ''
+  defaultHourlyRate: '',
 };
 
 export default function OrdersPage() {
+  const { messages: m } = useI18n();
   const [customers, setCustomers] = useState<Customer[]>([]);
   const [items, setItems] = useState<Order[]>([]);
   const [form, setForm] = useState<Partial<Order>>(empty);
@@ -35,43 +38,44 @@ export default function OrdersPage() {
   const [loading, setLoading] = useState(false);
 
   async function load() {
-    const [cs, os] = await Promise.all([
+    const [nextCustomers, nextOrders] = await Promise.all([
       apiGet<Customer[]>('/customers'),
-      apiGet<Order[]>('/orders')
+      apiGet<Order[]>('/orders'),
     ]);
-    setCustomers(cs);
-    setItems(os);
-    if (!editingId && !form.customerId && cs.length > 0) {
-      setForm((f) => ({ ...f, customerId: cs[0].id }));
+    setCustomers(nextCustomers);
+    setItems(nextOrders);
+    if (!editingId && !form.customerId && nextCustomers.length > 0) {
+      setForm((current) => ({ ...current, customerId: nextCustomers[0].id }));
     }
   }
 
   useEffect(() => {
-    load().catch((e) => alert(e.message));
+    load().catch((error) => alert(error.message));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   function startNew() {
     setEditingId(null);
-    setForm((f) => ({ ...empty, customerId: customers[0]?.id || '' }));
+    setForm({ ...empty, customerId: customers[0]?.id || '' });
   }
 
-  function startEdit(o: Order) {
-    setEditingId(o.id);
+  function startEdit(order: Order) {
+    setEditingId(order.id);
     setForm({
-      id: o.id,
-      customerId: o.customerId,
-      orderNumber: o.orderNumber || '',
-      title: o.title,
-      description: o.description || '',
-      status: o.status || 'open',
-      defaultHourlyRate: o.defaultHourlyRate || ''
+      id: order.id,
+      customerId: order.customerId,
+      orderNumber: order.orderNumber || '',
+      title: order.title,
+      description: order.description || '',
+      status: order.status || 'open',
+      defaultHourlyRate: order.defaultHourlyRate || '',
     });
   }
 
   async function save() {
-    if (!form.customerId) return alert('Bitte Kunde auswählen.');
-    if (!form.title?.trim()) return alert('Titel ist erforderlich.');
+    if (!form.customerId) return alert(m.ordersPage.customerRequired);
+    if (!form.title?.trim()) return alert(m.ordersPage.titleRequired);
+
     setLoading(true);
     try {
       const payload = {
@@ -81,7 +85,7 @@ export default function OrdersPage() {
         description: form.description || null,
         status: form.status || 'open',
         defaultHourlyRate: form.defaultHourlyRate || null,
-        currency: 'EUR'
+        currency: 'EUR',
       };
       if (editingId) {
         await apiJson(`/orders/${editingId}`, 'PUT', payload);
@@ -90,48 +94,48 @@ export default function OrdersPage() {
       }
       await load();
       startNew();
-    } catch (e: any) {
-      alert(e.message);
+    } catch (error: any) {
+      alert(error.message);
     } finally {
       setLoading(false);
     }
   }
 
   async function del(id: string) {
-    if (!confirm(DELETE_CONFIRM)) return;
+    if (!confirm(m.common.deleteConfirm)) return;
     try {
       await apiJson(`/orders/${id}`, 'DELETE');
       await load();
       if (editingId === id) startNew();
-    } catch (e: any) {
-      alert(e.message);
+    } catch (error: any) {
+      alert(error.message);
     }
   }
 
   return (
     <div className="card">
-      <h2>Aufträge</h2>
+      <h2>{m.ordersPage.heading}</h2>
 
       <div className="row">
         <div>
-          <label>Kunde *</label>
-          <select value={form.customerId || ''} onChange={(e) => setForm({ ...form, customerId: e.target.value })}>
-            {customers.map((c) => (
-              <option key={c.id} value={c.id}>{c.companyName}</option>
+          <label>{m.common.customer} *</label>
+          <select value={form.customerId || ''} onChange={(event) => setForm({ ...form, customerId: event.target.value })}>
+            {customers.map((customer) => (
+              <option key={customer.id} value={customer.id}>{customer.companyName}</option>
             ))}
-            {customers.length === 0 && <option value="">(Bitte zuerst Kunden anlegen)</option>}
+            {customers.length === 0 && <option value="">{m.ordersPage.noCustomersOption}</option>}
           </select>
         </div>
         <div>
-          <label>Auftragsnummer</label>
-          <input value={(form.orderNumber as string) || ''} onChange={(e) => setForm({ ...form, orderNumber: e.target.value })} />
+          <label>{m.ordersPage.orderNumber}</label>
+          <input value={(form.orderNumber as string) || ''} onChange={(event) => setForm({ ...form, orderNumber: event.target.value })} />
         </div>
         <div>
-          <label>Status</label>
-          <select value={form.status || 'open'} onChange={(e) => setForm({ ...form, status: e.target.value })}>
-            <option value="open">offen</option>
-            <option value="paused">pausiert</option>
-            <option value="closed">geschlossen</option>
+          <label>{m.common.status}</label>
+          <select value={form.status || 'open'} onChange={(event) => setForm({ ...form, status: event.target.value })}>
+            <option value="open">{m.statuses.order.open}</option>
+            <option value="paused">{m.statuses.order.paused}</option>
+            <option value="closed">{m.statuses.order.closed}</option>
           </select>
         </div>
       </div>
@@ -140,25 +144,25 @@ export default function OrdersPage() {
 
       <div className="row">
         <div>
-          <label>Titel *</label>
-          <input value={form.title || ''} onChange={(e) => setForm({ ...form, title: e.target.value })} />
+          <label>{m.common.title} *</label>
+          <input value={form.title || ''} onChange={(event) => setForm({ ...form, title: event.target.value })} />
         </div>
         <div>
-          <label>Standard-Stundensatz (€)</label>
-          <input value={(form.defaultHourlyRate as any) || ''} onChange={(e) => setForm({ ...form, defaultHourlyRate: e.target.value })} />
+          <label>{m.ordersPage.hourlyRate}</label>
+          <input value={(form.defaultHourlyRate as string) || ''} onChange={(event) => setForm({ ...form, defaultHourlyRate: event.target.value })} />
         </div>
       </div>
 
       <div className="spacer" />
       <div>
-        <label>Beschreibung</label>
-        <textarea value={form.description || ''} onChange={(e) => setForm({ ...form, description: e.target.value })} />
+        <label>{m.common.description}</label>
+        <textarea value={form.description || ''} onChange={(event) => setForm({ ...form, description: event.target.value })} />
       </div>
 
       <div className="spacer" />
       <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-        <button className="btn primary" onClick={save} disabled={loading}>{editingId ? 'Speichern' : 'Anlegen'}</button>
-        <button className="btn" onClick={startNew} disabled={loading}>Neu</button>
+        <button className="btn primary" onClick={save} disabled={loading}>{editingId ? m.common.save : m.common.create}</button>
+        <button className="btn" onClick={startNew} disabled={loading}>{m.common.createNew}</button>
       </div>
 
       <div className="spacer" />
@@ -166,35 +170,37 @@ export default function OrdersPage() {
       <table className="table">
         <thead>
           <tr>
-            <th>Titel</th>
-            <th>Kunde</th>
-            <th>Status</th>
-            <th style={{ width: 280 }}>Aktionen</th>
+            <th>{m.common.title}</th>
+            <th>{m.common.customer}</th>
+            <th>{m.common.status}</th>
+            <th style={{ width: 280 }}>{m.common.actions}</th>
           </tr>
         </thead>
         <tbody>
-          {items.map((o) => (
-            <tr key={o.id}>
-              <td>{o.title}</td>
-              <td>{o.customer?.companyName || '—'}</td>
-              <td>{o.status}</td>
+          {items.map((order) => (
+            <tr key={order.id}>
+              <td>{order.title}</td>
+              <td>{order.customer?.companyName || m.common.none}</td>
+              <td>{m.statuses.order[(order.status as 'open' | 'paused' | 'closed') || 'open'] || order.status}</td>
               <td>
                 <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-                  <Link className="btn" href={`/orders/${o.id}`}>Öffnen</Link>
-                  <button className="btn" onClick={() => startEdit(o)}>Bearbeiten</button>
-                  <button className="btn danger" onClick={() => del(o.id)}>Löschen</button>
+                  <Link className="btn" href={`/orders/${order.id}`}>{m.common.open}</Link>
+                  <button className="btn" onClick={() => startEdit(order)}>{m.common.edit}</button>
+                  <button className="btn danger" onClick={() => del(order.id)}>{m.common.delete}</button>
                 </div>
               </td>
             </tr>
           ))}
           {items.length === 0 && (
-            <tr><td colSpan={4} className="muted">Keine Aufträge vorhanden.</td></tr>
+            <tr>
+              <td colSpan={4} className="muted">{m.ordersPage.noOrders}</td>
+            </tr>
           )}
         </tbody>
       </table>
 
       <div className="spacer" />
-      <div className="muted">Hinweis: Löschen ist nur möglich, wenn keine Baustellen/Arbeitszeiten existieren (FK-Regeln).</div>
+      <div className="muted">{m.ordersPage.deleteHint}</div>
     </div>
   );
 }

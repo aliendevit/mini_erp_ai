@@ -1,7 +1,9 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { apiGet, apiJson, DELETE_CONFIRM } from '../../lib/api';
+
+import { useI18n } from '../../lib/i18n';
+import { apiGet, apiJson } from '../../lib/api';
 
 type AvailabilityBlock = {
   id?: string | null;
@@ -57,6 +59,7 @@ function listText(values?: string[] | null): string {
 }
 
 export default function EmployeesPage() {
+  const { messages: m } = useI18n();
   const [items, setItems] = useState<Employee[]>([]);
   const [form, setForm] = useState<Partial<Employee>>(empty);
   const [editingId, setEditingId] = useState<string | null>(null);
@@ -113,13 +116,13 @@ export default function EmployeesPage() {
 
   async function save() {
     if (!form.firstName?.trim() || !form.lastName?.trim()) {
-      return alert('Vorname und Nachname sind erforderlich.');
+      return alert(m.employeesPage.nameRequired);
     }
     const invalidBlock = (form.availabilityBlocks || []).find(
       (block) => (block.startDate && !block.endDate) || (!block.startDate && block.endDate)
     );
     if (invalidBlock) {
-      return alert('Jeder Abwesenheitsblock braucht Start- und Enddatum.');
+      return alert(m.employeesPage.availabilityInvalid);
     }
 
     setLoading(true);
@@ -154,7 +157,7 @@ export default function EmployeesPage() {
   }
 
   async function del(id: string) {
-    if (!confirm(DELETE_CONFIRM)) return;
+    if (!confirm(m.common.deleteConfirm)) return;
     try {
       await apiJson(`/employees/${id}`, 'DELETE');
       await load();
@@ -166,19 +169,19 @@ export default function EmployeesPage() {
 
   return (
     <div className="card">
-      <h2>Mitarbeiter</h2>
+      <h2>{m.employeesPage.heading}</h2>
 
       <div className="row">
         <div>
-          <label>Vorname *</label>
+          <label>{m.employeesPage.firstName} *</label>
           <input value={form.firstName || ''} onChange={(event) => setForm({ ...form, firstName: event.target.value })} />
         </div>
         <div>
-          <label>Nachname *</label>
+          <label>{m.employeesPage.lastName} *</label>
           <input value={form.lastName || ''} onChange={(event) => setForm({ ...form, lastName: event.target.value })} />
         </div>
         <div>
-          <label>Geburtsdatum</label>
+          <label>{m.employeesPage.birthDate}</label>
           <input type="date" value={(form.birthDate as string) || ''} onChange={(event) => setForm({ ...form, birthDate: event.target.value })} />
         </div>
       </div>
@@ -186,41 +189,35 @@ export default function EmployeesPage() {
       <div className="spacer" />
       <div className="row">
         <div>
-          <label>Telefon</label>
+          <label>{m.common.phone}</label>
           <input value={form.phone || ''} onChange={(event) => setForm({ ...form, phone: event.target.value })} />
         </div>
         <div>
-          <label>E-Mail</label>
+          <label>{m.common.email}</label>
           <input value={form.email || ''} onChange={(event) => setForm({ ...form, email: event.target.value })} />
         </div>
         <div>
-          <label>Standard-Stundensatz (EUR)</label>
-          <input
-            value={(form.defaultHourlyRate as string) || ''}
-            onChange={(event) => setForm({ ...form, defaultHourlyRate: event.target.value })}
-          />
+          <label>{m.employeesPage.hourlyRate}</label>
+          <input value={(form.defaultHourlyRate as string) || ''} onChange={(event) => setForm({ ...form, defaultHourlyRate: event.target.value })} />
         </div>
         <div>
-          <label>Wochenkapazitaet (h)</label>
-          <input
-            value={(form.weeklyCapacityHours as string) || ''}
-            onChange={(event) => setForm({ ...form, weeklyCapacityHours: event.target.value })}
-          />
+          <label>{m.employeesPage.weeklyCapacity}</label>
+          <input value={(form.weeklyCapacityHours as string) || ''} onChange={(event) => setForm({ ...form, weeklyCapacityHours: event.target.value })} />
         </div>
       </div>
 
       <div className="spacer" />
       <div className="row">
         <div>
-          <label>Strasse</label>
+          <label>{m.common.street}</label>
           <input value={form.street || ''} onChange={(event) => setForm({ ...form, street: event.target.value })} />
         </div>
         <div>
-          <label>PLZ</label>
+          <label>{m.common.zipCode}</label>
           <input value={form.zipCode || ''} onChange={(event) => setForm({ ...form, zipCode: event.target.value })} />
         </div>
         <div>
-          <label>Stadt</label>
+          <label>{m.common.city}</label>
           <input value={form.city || ''} onChange={(event) => setForm({ ...form, city: event.target.value })} />
         </div>
       </div>
@@ -228,25 +225,19 @@ export default function EmployeesPage() {
       <div className="spacer" />
       <div className="row">
         <div>
-          <label>Skills</label>
-          <textarea
-            value={listText(form.skills)}
-            onChange={(event) => setForm({ ...form, skills: parseList(event.target.value) })}
-          />
+          <label>{m.common.skills}</label>
+          <textarea value={listText(form.skills)} onChange={(event) => setForm({ ...form, skills: parseList(event.target.value) })} />
         </div>
         <div>
-          <label>Zertifikate</label>
-          <textarea
-            value={listText(form.certifications)}
-            onChange={(event) => setForm({ ...form, certifications: parseList(event.target.value) })}
-          />
+          <label>{m.common.certifications}</label>
+          <textarea value={listText(form.certifications)} onChange={(event) => setForm({ ...form, certifications: parseList(event.target.value) })} />
         </div>
       </div>
 
       <div className="spacer" />
       <div style={{ display: 'flex', justifyContent: 'space-between', gap: 8, flexWrap: 'wrap' }}>
-        <h2>Abwesenheitsbloecke</h2>
-        <button className="btn" onClick={addAvailability}>Block hinzufuegen</button>
+        <h2>{m.employeesPage.availabilityHeading}</h2>
+        <button className="btn" onClick={addAvailability}>{m.employeesPage.addBlock}</button>
       </div>
       <div className="spacer" />
       <div style={{ display: 'grid', gap: 10 }}>
@@ -254,41 +245,30 @@ export default function EmployeesPage() {
           <div key={`${block.id || 'new'}-${index}`} className="card">
             <div className="row">
               <div>
-                <label>Start</label>
-                <input
-                  type="date"
-                  value={block.startDate || ''}
-                  onChange={(event) => updateAvailability(index, { startDate: event.target.value })}
-                />
+                <label>{m.employeesPage.availabilityStart}</label>
+                <input type="date" value={block.startDate || ''} onChange={(event) => updateAvailability(index, { startDate: event.target.value })} />
               </div>
               <div>
-                <label>Ende</label>
-                <input
-                  type="date"
-                  value={block.endDate || ''}
-                  onChange={(event) => updateAvailability(index, { endDate: event.target.value })}
-                />
+                <label>{m.employeesPage.availabilityEnd}</label>
+                <input type="date" value={block.endDate || ''} onChange={(event) => updateAvailability(index, { endDate: event.target.value })} />
               </div>
               <div>
-                <label>Grund</label>
-                <input
-                  value={block.reason || ''}
-                  onChange={(event) => updateAvailability(index, { reason: event.target.value })}
-                />
+                <label>{m.employeesPage.availabilityReason}</label>
+                <input value={block.reason || ''} onChange={(event) => updateAvailability(index, { reason: event.target.value })} />
               </div>
               <div style={{ alignSelf: 'end' }}>
-                <button className="btn danger" onClick={() => removeAvailability(index)}>Entfernen</button>
+                <button className="btn danger" onClick={() => removeAvailability(index)}>{m.common.remove}</button>
               </div>
             </div>
           </div>
         ))}
-        {(form.availabilityBlocks || []).length === 0 && <div className="muted">Keine Abwesenheitsbloecke.</div>}
+        {(form.availabilityBlocks || []).length === 0 && <div className="muted">{m.employeesPage.noAvailability}</div>}
       </div>
 
       <div className="spacer" />
       <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-        <button className="btn primary" onClick={save} disabled={loading}>{editingId ? 'Speichern' : 'Anlegen'}</button>
-        <button className="btn" onClick={startNew} disabled={loading}>Neu</button>
+        <button className="btn primary" onClick={save} disabled={loading}>{editingId ? m.common.save : m.common.create}</button>
+        <button className="btn" onClick={startNew} disabled={loading}>{m.common.createNew}</button>
       </div>
 
       <div className="spacer" />
@@ -296,11 +276,11 @@ export default function EmployeesPage() {
       <table className="table">
         <thead>
           <tr>
-            <th>Name</th>
-            <th>Kontakt</th>
-            <th>Skills</th>
-            <th>Kapazitaet</th>
-            <th style={{ width: 220 }}>Aktionen</th>
+            <th>{m.common.name}</th>
+            <th>{m.common.contact}</th>
+            <th>{m.common.skills}</th>
+            <th>{m.employeesPage.capacity}</th>
+            <th style={{ width: 220 }}>{m.common.actions}</th>
           </tr>
         </thead>
         <tbody>
@@ -310,23 +290,23 @@ export default function EmployeesPage() {
                 {item.firstName} {item.lastName}
                 <div className="muted">{listText(item.certifications)}</div>
               </td>
-              <td>{item.phone || item.email || '-'}</td>
-              <td>{listText(item.skills) || '-'}</td>
+              <td>{item.phone || item.email || m.common.none}</td>
+              <td>{listText(item.skills) || m.common.none}</td>
               <td>
-                {item.weeklyCapacityHours || '40'} h/Woche
-                <div className="muted">{item.availabilityBlocks.length} Bloecke</div>
+                {item.weeklyCapacityHours || '40'} h
+                <div className="muted">{item.availabilityBlocks.length} {m.employeesPage.blocks}</div>
               </td>
               <td>
                 <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-                  <button className="btn" onClick={() => startEdit(item)}>Bearbeiten</button>
-                  <button className="btn danger" onClick={() => del(item.id)}>Loeschen</button>
+                  <button className="btn" onClick={() => startEdit(item)}>{m.common.edit}</button>
+                  <button className="btn danger" onClick={() => del(item.id)}>{m.common.delete}</button>
                 </div>
               </td>
             </tr>
           ))}
           {items.length === 0 && (
             <tr>
-              <td colSpan={5} className="muted">Keine Mitarbeiter vorhanden.</td>
+              <td colSpan={5} className="muted">{m.employeesPage.noEmployees}</td>
             </tr>
           )}
         </tbody>

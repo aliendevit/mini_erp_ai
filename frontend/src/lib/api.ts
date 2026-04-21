@@ -6,7 +6,8 @@ export const DELETE_CONFIRM =
 async function safeMessage(res: Response): Promise<string> {
   try {
     const data = await res.json();
-    if (data?.message) return String(data.message);
+    if (typeof data?.message === 'string') return data.message;
+    if (typeof data?.detail === 'string') return data.detail;
   } catch {
     // ignore
   }

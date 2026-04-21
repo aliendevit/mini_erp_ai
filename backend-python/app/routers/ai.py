@@ -1,8 +1,13 @@
 from __future__ import annotations
 
+import io
+import logging
+import wave
+from datetime import datetime, timezone
 from collections.abc import Iterable
+from typing import Literal
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, File, Form, UploadFile
 from fastapi.responses import StreamingResponse
 from sqlalchemy import select
 from sqlalchemy.orm import Session, selectinload
@@ -17,6 +22,7 @@ from ..schemas import (
     ProposalDraftPayload,
 )
 from ..services.ai_summary import build_work_summary
+from ..services.assemblyai_client import transcribe_audio
 from ..services.gemini_client import ensure_gemini_ready, stream_text
 from ..services.proposals import (
     append_message,
@@ -29,6 +35,24 @@ from ..services.staffing import recommend_staff_for_proposal
 from ..utils import as_datetime, decimal_or_none, end_of_utc_day, ensure, json_dumps, not_found, proposal_payload
 
 router = APIRouter()
+logger = logging.getLogger(__name__)
+
+SUPPORTED_WAV_CONTENT_TYPES = {
+    "audio/wav",
+    "audio/wave",
+    "audio/x-wav",
+    "audio/vnd.wave",
+}
+SUPPORTED_AUDIO_CONTENT_TYPES = SUPPORTED_WAV_CONTENT_TYPES | {
+    "audio/webm",
+    "audio/ogg",
+    "audio/mp4",
+    "audio/mpeg",
+    "audio/x-m4a",
+    "audio/mp4a-latm",
+}
+MAX_AUDIO_BYTES = 10 * 1024 * 1024
+MAX_AUDIO_DURATION_MS = 90_000
 
 
 def _proposal_query():
@@ -40,6 +64,19 @@ def _get_proposal(db: Session, proposal_id: str) -> Proposal:
     if not proposal:
         raise not_found()
     return proposal
+
+
+def _wav_duration_ms(audio_bytes: bytes) -> int | None:
+    try:
+        with wave.open(io.BytesIO(audio_bytes), "rb") as wav_file:
+            frame_count = wav_file.getnframes()
+            frame_rate = wav_file.getframerate()
+    except (wave.Error, EOFError):
+        return None
+
+    if frame_count <= 0 or frame_rate <= 0:
+        return None
+    return int((frame_count / float(frame_rate)) * 1000)
 
 
 @router.post("/ai/work-summary")
@@ -90,6 +127,17 @@ def update_intake(proposal_id: str, payload: ProposalDraftPayload, db: Session =
     return proposal_payload(proposal, include_messages=True)
 
 
+@router.delete("/ai/intakes/{proposal_id}/messages")
+def clear_intake_messages(proposal_id: str, db: Session = Depends(get_db)) -> dict:
+    proposal = _get_proposal(db, proposal_id)
+    proposal.messages.clear()
+    proposal.updated_at = datetime.now(timezone.utc)
+    db.add(proposal)
+    db.commit()
+    db.refresh(proposal)
+    return proposal_payload(proposal, include_messages=True)
+
+
 @router.post("/ai/intakes/{proposal_id}/messages/stream")
 def intake_message_stream(proposal_id: str, payload: AIIntakeMessagePayload, db: Session = Depends(get_db)) -> StreamingResponse:
     proposal = _get_proposal(db, proposal_id)
@@ -118,6 +166,83 @@ def intake_message_stream(proposal_id: str, payload: AIIntakeMessagePayload, db:
         "X-Accel-Buffering": "no",
     }
     return StreamingResponse(generate(), media_type="text/plain; charset=utf-8", headers=headers)
+
+
+@router.post("/ai/intakes/{proposal_id}/messages/transcribe")
+async def transcribe_intake_audio(
+    proposal_id: str,
+    audio: UploadFile = File(...),
+    locale_hint: Literal["de", "en", "ar"] | None = Form(default=None, alias="localeHint"),
+    duration_ms_hint: int | None = Form(default=None, alias="durationMs"),
+    db: Session = Depends(get_db),
+) -> dict:
+    _get_proposal(db, proposal_id)
+
+    try:
+        raw_content_type = (audio.content_type or "").lower()
+        content_type = raw_content_type.split(";", 1)[0].strip()
+        ensure(content_type in SUPPORTED_AUDIO_CONTENT_TYPES, "Nur WAV-, WebM-, Ogg- oder MP4-Audio wird unterstuetzt.", 415)
+
+        raw_audio = await audio.read(MAX_AUDIO_BYTES + 1)
+        size_bytes = len(raw_audio)
+        ensure(bool(raw_audio), "Die Audiodatei ist leer.", 400)
+        ensure(size_bytes <= MAX_AUDIO_BYTES, "Die Audiodatei ist zu gross (max. 10 MB).", 413)
+
+        if content_type in SUPPORTED_WAV_CONTENT_TYPES:
+            duration_ms = _wav_duration_ms(raw_audio)
+            ensure(duration_ms is not None, "Ungueltige WAV-Datei.", 400)
+        else:
+            duration_ms = duration_ms_hint
+            ensure(duration_ms is not None and duration_ms > 0, "Die Audioaufnahme enthaelt keine gueltige Dauer.", 400)
+        ensure(duration_ms <= MAX_AUDIO_DURATION_MS, "Die Aufnahme darf hoechstens 90 Sekunden lang sein.", 400)
+
+        logger.info(
+            "AI intake transcription request: proposal_id=%s locale_hint=%s content_type=%s raw_content_type=%s size_bytes=%s duration_ms=%s",
+            proposal_id,
+            locale_hint,
+            content_type,
+            raw_content_type,
+            size_bytes,
+            duration_ms,
+        )
+
+        result = transcribe_audio(raw_audio, mime_type=content_type or "application/octet-stream", locale_hint=locale_hint)
+        transcript = str(result.get("transcript") or "").strip()
+        debug_text = str(result.get("debugText") or "")
+        provider = result.get("provider") or "assemblyai"
+
+        if not transcript:
+            logger.warning(
+                "AI intake transcription blank: proposal_id=%s locale_hint=%s duration_ms=%s size_bytes=%s provider=%s debug=%s",
+                proposal_id,
+                locale_hint,
+                duration_ms,
+                size_bytes,
+                provider,
+                debug_text,
+            )
+            detail = "Kein verwertbarer Text in der Aufnahme erkannt."
+            if debug_text:
+                detail += f" Provider-Debug: {debug_text}"
+            ensure(False, detail, 422)
+
+        logger.info(
+            "AI intake transcription success: proposal_id=%s locale_hint=%s duration_ms=%s transcript_chars=%s provider=%s",
+            proposal_id,
+            locale_hint,
+            duration_ms,
+            len(transcript),
+            provider,
+        )
+
+        return {
+            "transcript": transcript,
+            "detectedLanguage": result.get("detectedLanguage"),
+            "durationMs": duration_ms,
+            "provider": provider,
+        }
+    finally:
+        await audio.close()
 
 
 @router.post("/ai/intakes/{proposal_id}/proposal")

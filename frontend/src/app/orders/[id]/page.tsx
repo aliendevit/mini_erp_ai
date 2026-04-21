@@ -1,12 +1,13 @@
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
+import { useEffect, useMemo, useState } from 'react';
 import { useParams, useRouter } from 'next/navigation';
-import { apiGet, apiJson, DELETE_CONFIRM } from '../../../lib/api';
+
+import { useI18n } from '../../../lib/i18n';
+import { apiGet, apiJson } from '../../../lib/api';
 
 type Customer = { id: string; companyName: string };
-
 type Employee = { id: string; firstName: string; lastName: string };
 
 type Assignment = {
@@ -48,7 +49,7 @@ const emptyOrder: Partial<Order> = {
   title: '',
   description: '',
   status: 'open',
-  defaultHourlyRate: ''
+  defaultHourlyRate: '',
 };
 
 const emptySite: Partial<Site> = {
@@ -57,10 +58,11 @@ const emptySite: Partial<Site> = {
   zipCode: '',
   city: '',
   notes: '',
-  isActive: true
+  isActive: true,
 };
 
 export default function OrderDetailPage() {
+  const { messages: m } = useI18n();
   const params = useParams<{ id: string }>();
   const router = useRouter();
   const id = params?.id;
@@ -69,50 +71,47 @@ export default function OrderDetailPage() {
   const [employees, setEmployees] = useState<Employee[]>([]);
   const [order, setOrder] = useState<Order | null>(null);
   const [orderForm, setOrderForm] = useState<Partial<Order>>(emptyOrder);
-
   const [siteForm, setSiteForm] = useState<Partial<Site>>(emptySite);
   const [editingSiteId, setEditingSiteId] = useState<string | null>(null);
-
   const [assignSiteId, setAssignSiteId] = useState<string>('');
   const [assignEmployeeId, setAssignEmployeeId] = useState<string>('');
 
   const siteOptions = useMemo(() => order?.sites || [], [order]);
 
   async function load() {
-    const [o, cs, es] = await Promise.all([
+    const [nextOrder, nextCustomers, nextEmployees] = await Promise.all([
       apiGet<Order>(`/orders/${id}`),
       apiGet<Customer[]>('/customers'),
-      apiGet<Employee[]>('/employees')
+      apiGet<Employee[]>('/employees'),
     ]);
-    setOrder(o);
-    setCustomers(cs);
-    setEmployees(es);
+    setOrder(nextOrder);
+    setCustomers(nextCustomers);
+    setEmployees(nextEmployees);
     setOrderForm({
-      id: o.id,
-      customerId: o.customerId,
-      orderNumber: o.orderNumber || '',
-      title: o.title,
-      description: o.description || '',
-      status: o.status || 'open',
-      defaultHourlyRate: o.defaultHourlyRate || ''
+      id: nextOrder.id,
+      customerId: nextOrder.customerId,
+      orderNumber: nextOrder.orderNumber || '',
+      title: nextOrder.title,
+      description: nextOrder.description || '',
+      status: nextOrder.status || 'open',
+      defaultHourlyRate: nextOrder.defaultHourlyRate || '',
     });
 
-    // defaults for assignment dropdowns
-    const firstSite = o.sites[0]?.id || '';
-    const firstEmp = es[0]?.id || '';
-    setAssignSiteId((prev) => prev || firstSite);
-    setAssignEmployeeId((prev) => prev || firstEmp);
+    const firstSite = nextOrder.sites[0]?.id || '';
+    const firstEmployee = nextEmployees[0]?.id || '';
+    setAssignSiteId((current) => current || firstSite);
+    setAssignEmployeeId((current) => current || firstEmployee);
   }
 
   useEffect(() => {
     if (!id) return;
-    load().catch((e) => alert(e.message));
+    load().catch((error) => alert(error.message));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [id]);
 
   async function saveOrder() {
-    if (!orderForm.customerId) return alert('Bitte Kunde auswählen.');
-    if (!orderForm.title?.trim()) return alert('Titel ist erforderlich.');
+    if (!orderForm.customerId) return alert(m.ordersPage.customerRequired);
+    if (!orderForm.title?.trim()) return alert(m.ordersPage.titleRequired);
 
     try {
       await apiJson(`/orders/${id}`, 'PUT', {
@@ -122,22 +121,22 @@ export default function OrderDetailPage() {
         description: orderForm.description || null,
         status: orderForm.status || 'open',
         defaultHourlyRate: orderForm.defaultHourlyRate || null,
-        currency: 'EUR'
+        currency: 'EUR',
       });
       await load();
-      alert('Gespeichert.');
-    } catch (e: any) {
-      alert(e.message);
+      alert(m.common.updateSuccess);
+    } catch (error: any) {
+      alert(error.message);
     }
   }
 
   async function deleteOrder() {
-    if (!confirm(DELETE_CONFIRM)) return;
+    if (!confirm(m.common.deleteConfirm)) return;
     try {
       await apiJson(`/orders/${id}`, 'DELETE');
       router.push('/orders');
-    } catch (e: any) {
-      alert(e.message);
+    } catch (error: any) {
+      alert(error.message);
     }
   }
 
@@ -146,21 +145,21 @@ export default function OrderDetailPage() {
     setSiteForm({ ...emptySite });
   }
 
-  function startEditSite(s: Site) {
-    setEditingSiteId(s.id);
+  function startEditSite(site: Site) {
+    setEditingSiteId(site.id);
     setSiteForm({
-      id: s.id,
-      siteName: s.siteName,
-      street: s.street || '',
-      zipCode: s.zipCode || '',
-      city: s.city || '',
-      notes: s.notes || '',
-      isActive: s.isActive
+      id: site.id,
+      siteName: site.siteName,
+      street: site.street || '',
+      zipCode: site.zipCode || '',
+      city: site.city || '',
+      notes: site.notes || '',
+      isActive: site.isActive,
     });
   }
 
   async function saveSite() {
-    if (!siteForm.siteName?.trim()) return alert('Baustellenname ist erforderlich.');
+    if (!siteForm.siteName?.trim()) return alert(m.orderDetailPage.siteNameRequired);
     try {
       const payload = {
         orderId: id,
@@ -169,7 +168,7 @@ export default function OrderDetailPage() {
         zipCode: siteForm.zipCode || null,
         city: siteForm.city || null,
         notes: siteForm.notes || null,
-        isActive: siteForm.isActive !== undefined ? Boolean(siteForm.isActive) : true
+        isActive: siteForm.isActive !== undefined ? Boolean(siteForm.isActive) : true,
       };
       if (editingSiteId) {
         await apiJson(`/sites/${editingSiteId}`, 'PUT', payload);
@@ -178,87 +177,89 @@ export default function OrderDetailPage() {
       }
       await load();
       startNewSite();
-    } catch (e: any) {
-      alert(e.message);
+    } catch (error: any) {
+      alert(error.message);
     }
   }
 
   async function deleteSite(siteId: string) {
-    if (!confirm(DELETE_CONFIRM)) return;
+    if (!confirm(m.common.deleteConfirm)) return;
     try {
       await apiJson(`/sites/${siteId}`, 'DELETE');
       await load();
       if (editingSiteId === siteId) startNewSite();
-    } catch (e: any) {
-      alert(e.message);
+    } catch (error: any) {
+      alert(error.message);
     }
   }
 
   async function addAssignment() {
-    if (!assignSiteId) return alert('Bitte Baustelle auswählen.');
-    if (!assignEmployeeId) return alert('Bitte Mitarbeiter auswählen.');
+    if (!assignSiteId) return alert(m.orderDetailPage.assignmentSiteRequired);
+    if (!assignEmployeeId) return alert(m.orderDetailPage.assignmentEmployeeRequired);
     try {
       await apiJson('/assignments', 'POST', {
         siteId: assignSiteId,
         employeeId: assignEmployeeId,
         startDate: null,
         endDate: null,
-        notes: null
+        notes: null,
       });
       await load();
-    } catch (e: any) {
-      alert(e.message);
+    } catch (error: any) {
+      alert(error.message);
     }
   }
 
   async function removeAssignment(assignmentId: string) {
-    if (!confirm(DELETE_CONFIRM)) return;
+    if (!confirm(m.common.deleteConfirm)) return;
     try {
       await apiJson(`/assignments/${assignmentId}`, 'DELETE');
       await load();
-    } catch (e: any) {
-      alert(e.message);
+    } catch (error: any) {
+      alert(error.message);
     }
   }
 
   if (!order) {
-    return <div className="card"><div className="muted">Lade…</div></div>;
+    return <div className="card"><div className="muted">{m.common.loading}</div></div>;
   }
+
+  const statusLabels = m.statuses.order;
 
   return (
     <div className="card">
       <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12, flexWrap: 'wrap' }}>
         <div>
-          <h2>Auftrag: {order.title}</h2>
-          <div className="muted">ID: {order.id}</div>
+          <h2>{m.orderDetailPage.headingPrefix}: {order.title}</h2>
+          <div className="muted">{m.common.id}: {order.id}</div>
         </div>
         <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
-          <Link className="btn" href="/orders">Zurück</Link>
-          <button className="btn danger" onClick={deleteOrder}>Auftrag löschen</button>
+          <Link className="btn" href="/orders">{m.common.back}</Link>
+          <button className="btn danger" onClick={deleteOrder}>{m.orderDetailPage.deleteOrder}</button>
         </div>
       </div>
 
       <div className="spacer" />
 
-      <h3>Auftrag bearbeiten</h3>
+      <h3>{m.orderDetailPage.editHeading}</h3>
       <div className="row">
         <div>
-          <label>Kunde *</label>
-          <select value={orderForm.customerId || ''} onChange={(e) => setOrderForm({ ...orderForm, customerId: e.target.value })}>
-            {customers.map((c) => <option key={c.id} value={c.id}>{c.companyName}</option>)}
-            {customers.length === 0 && <option value="">(Bitte zuerst Kunden anlegen)</option>}
+          <label>{m.common.customer} *</label>
+          <select value={orderForm.customerId || ''} onChange={(event) => setOrderForm({ ...orderForm, customerId: event.target.value })}>
+            {customers.map((customer) => <option key={customer.id} value={customer.id}>{customer.companyName}</option>)}
+            {customers.length === 0 && <option value="">{m.orderDetailPage.noCustomersOption}</option>}
           </select>
         </div>
         <div>
-          <label>Auftragsnummer</label>
-          <input value={(orderForm.orderNumber as string) || ''} onChange={(e) => setOrderForm({ ...orderForm, orderNumber: e.target.value })} />
+          <label>{m.ordersPage.orderNumber}</label>
+          <input value={(orderForm.orderNumber as string) || ''} onChange={(event) => setOrderForm({ ...orderForm, orderNumber: event.target.value })} />
         </div>
         <div>
-          <label>Status</label>
-          <select value={orderForm.status || 'open'} onChange={(e) => setOrderForm({ ...orderForm, status: e.target.value })}>
-            <option value="open">offen</option>
-            <option value="paused">pausiert</option>
-            <option value="closed">geschlossen</option>
+          <label>{m.common.status}</label>
+          <select value={orderForm.status || 'open'} onChange={(event) => setOrderForm({ ...orderForm, status: event.target.value })}>
+            <option value="open">{statusLabels.open}</option>
+            <option value="paused">{statusLabels.paused}</option>
+            <option value="closed">{statusLabels.closed}</option>
           </select>
         </div>
       </div>
@@ -267,58 +268,58 @@ export default function OrderDetailPage() {
 
       <div className="row">
         <div>
-          <label>Titel *</label>
-          <input value={orderForm.title || ''} onChange={(e) => setOrderForm({ ...orderForm, title: e.target.value })} />
+          <label>{m.common.title} *</label>
+          <input value={orderForm.title || ''} onChange={(event) => setOrderForm({ ...orderForm, title: event.target.value })} />
         </div>
         <div>
-          <label>Standard-Stundensatz (€)</label>
-          <input value={(orderForm.defaultHourlyRate as any) || ''} onChange={(e) => setOrderForm({ ...orderForm, defaultHourlyRate: e.target.value })} />
+          <label>{m.ordersPage.hourlyRate}</label>
+          <input value={(orderForm.defaultHourlyRate as string) || ''} onChange={(event) => setOrderForm({ ...orderForm, defaultHourlyRate: event.target.value })} />
         </div>
       </div>
 
       <div className="spacer" />
       <div>
-        <label>Beschreibung</label>
-        <textarea value={orderForm.description || ''} onChange={(e) => setOrderForm({ ...orderForm, description: e.target.value })} />
+        <label>{m.common.description}</label>
+        <textarea value={orderForm.description || ''} onChange={(event) => setOrderForm({ ...orderForm, description: event.target.value })} />
       </div>
 
       <div className="spacer" />
-      <button className="btn primary" onClick={saveOrder}>Speichern</button>
+      <button className="btn primary" onClick={saveOrder}>{m.common.save}</button>
 
       <div className="spacer" />
       <hr />
 
-      <h3>Baustellen</h3>
+      <h3>{m.common.sites}</h3>
 
       <div className="row">
         <div>
-          <label>Baustellenname *</label>
-          <input value={siteForm.siteName || ''} onChange={(e) => setSiteForm({ ...siteForm, siteName: e.target.value })} />
+          <label>{m.common.site} *</label>
+          <input value={siteForm.siteName || ''} onChange={(event) => setSiteForm({ ...siteForm, siteName: event.target.value })} />
         </div>
         <div>
-          <label>Straße</label>
-          <input value={(siteForm.street as string) || ''} onChange={(e) => setSiteForm({ ...siteForm, street: e.target.value })} />
+          <label>{m.common.street}</label>
+          <input value={(siteForm.street as string) || ''} onChange={(event) => setSiteForm({ ...siteForm, street: event.target.value })} />
         </div>
         <div>
-          <label>PLZ</label>
-          <input value={(siteForm.zipCode as string) || ''} onChange={(e) => setSiteForm({ ...siteForm, zipCode: e.target.value })} />
+          <label>{m.common.zipCode}</label>
+          <input value={(siteForm.zipCode as string) || ''} onChange={(event) => setSiteForm({ ...siteForm, zipCode: event.target.value })} />
         </div>
         <div>
-          <label>Stadt</label>
-          <input value={(siteForm.city as string) || ''} onChange={(e) => setSiteForm({ ...siteForm, city: e.target.value })} />
+          <label>{m.common.city}</label>
+          <input value={(siteForm.city as string) || ''} onChange={(event) => setSiteForm({ ...siteForm, city: event.target.value })} />
         </div>
       </div>
 
       <div className="spacer" />
       <div>
-        <label>Notizen</label>
-        <textarea value={(siteForm.notes as string) || ''} onChange={(e) => setSiteForm({ ...siteForm, notes: e.target.value })} />
+        <label>{m.common.notes}</label>
+        <textarea value={(siteForm.notes as string) || ''} onChange={(event) => setSiteForm({ ...siteForm, notes: event.target.value })} />
       </div>
 
       <div className="spacer" />
       <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-        <button className="btn primary" onClick={saveSite}>{editingSiteId ? 'Speichern' : 'Baustelle anlegen'}</button>
-        <button className="btn" onClick={startNewSite}>Neu</button>
+        <button className="btn primary" onClick={saveSite}>{editingSiteId ? m.common.save : m.orderDetailPage.addSite}</button>
+        <button className="btn" onClick={startNewSite}>{m.orderDetailPage.newSite}</button>
       </div>
 
       <div className="spacer" />
@@ -326,70 +327,70 @@ export default function OrderDetailPage() {
       <table className="table">
         <thead>
           <tr>
-            <th>Baustelle</th>
-            <th>Adresse</th>
-            <th>Mitarbeiter</th>
-            <th style={{ width: 260 }}>Aktionen</th>
+            <th>{m.common.site}</th>
+            <th>{m.orderDetailPage.address}</th>
+            <th>{m.orderDetailPage.assignedEmployees}</th>
+            <th style={{ width: 260 }}>{m.common.actions}</th>
           </tr>
         </thead>
         <tbody>
-          {order.sites.map((s) => (
-            <tr key={s.id}>
-              <td>{s.siteName}</td>
-              <td>{[s.street, [s.zipCode, s.city].filter(Boolean).join(' ')].filter(Boolean).join(', ') || '—'}</td>
+          {order.sites.map((site) => (
+            <tr key={site.id}>
+              <td>{site.siteName}</td>
+              <td>{[site.street, [site.zipCode, site.city].filter(Boolean).join(' ')].filter(Boolean).join(', ') || m.common.none}</td>
               <td>
-                {s.assignments.length > 0
-                  ? s.assignments.map((a) => (
-                      <div key={a.id} style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
-                        <span>{a.employee.firstName} {a.employee.lastName}</span>
-                        <button className="btn danger secondary" onClick={() => removeAssignment(a.id)}>Entfernen</button>
+                {site.assignments.length > 0
+                  ? site.assignments.map((assignment) => (
+                      <div key={assignment.id} style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+                        <span>{assignment.employee.firstName} {assignment.employee.lastName}</span>
+                        <button className="btn danger secondary" onClick={() => removeAssignment(assignment.id)}>{m.common.remove}</button>
                       </div>
                     ))
-                  : '—'}
+                  : m.common.none}
               </td>
               <td>
                 <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-                  <button className="btn" onClick={() => startEditSite(s)}>Bearbeiten</button>
-                  <button className="btn danger" onClick={() => deleteSite(s.id)}>Löschen</button>
+                  <button className="btn" onClick={() => startEditSite(site)}>{m.common.edit}</button>
+                  <button className="btn danger" onClick={() => deleteSite(site.id)}>{m.common.delete}</button>
                 </div>
               </td>
             </tr>
           ))}
           {order.sites.length === 0 && (
-            <tr><td colSpan={4} className="muted">Keine Baustellen vorhanden.</td></tr>
+            <tr><td colSpan={4} className="muted">{m.orderDetailPage.noSites}</td></tr>
           )}
         </tbody>
       </table>
 
       <div className="spacer" />
-      <div className="muted">Hinweis: Löschen ist nur möglich, wenn keine Arbeitszeiten/Rechnungspositionen/Zuordnungen existieren (FK-Regeln).</div>
+      <div className="muted">{m.orderDetailPage.deleteSitesHint}</div>
 
       <div className="spacer" />
       <hr />
 
-      <h3>Mitarbeiter zuweisen</h3>
+      <h3>{m.orderDetailPage.assignmentHeading}</h3>
       <div className="row">
         <div>
-          <label>Baustelle *</label>
-          <select value={assignSiteId} onChange={(e) => setAssignSiteId(e.target.value)}>
-            {siteOptions.map((s) => <option key={s.id} value={s.id}>{s.siteName}</option>)}
-            {siteOptions.length === 0 && <option value="">(Bitte zuerst Baustelle anlegen)</option>}
+          <label>{m.common.site} *</label>
+          <select value={assignSiteId} onChange={(event) => setAssignSiteId(event.target.value)}>
+            {siteOptions.map((site) => <option key={site.id} value={site.id}>{site.siteName}</option>)}
+            {siteOptions.length === 0 && <option value="">{m.orderDetailPage.noSitesOption}</option>}
           </select>
         </div>
         <div>
-          <label>Mitarbeiter *</label>
-          <select value={assignEmployeeId} onChange={(e) => setAssignEmployeeId(e.target.value)}>
-            {employees.map((e) => <option key={e.id} value={e.id}>{e.firstName} {e.lastName}</option>)}
-            {employees.length === 0 && <option value="">(Bitte zuerst Mitarbeiter anlegen)</option>}
+          <label>{m.common.employee} *</label>
+          <select value={assignEmployeeId} onChange={(event) => setAssignEmployeeId(event.target.value)}>
+            {employees.map((employee) => <option key={employee.id} value={employee.id}>{employee.firstName} {employee.lastName}</option>)}
+            {employees.length === 0 && <option value="">{m.orderDetailPage.noEmployeesOption}</option>}
           </select>
         </div>
         <div style={{ alignSelf: 'end' }}>
-          <button className="btn primary" onClick={addAssignment} disabled={!assignSiteId || !assignEmployeeId}>Zuweisen</button>
+          <button className="btn primary" onClick={addAssignment} disabled={!assignSiteId || !assignEmployeeId}>{m.common.create}</button>
         </div>
       </div>
 
       <div className="spacer" />
-      <div className="muted">Hinweis: Eine Zuordnung kann nicht gelöscht werden, wenn bereits Arbeitszeiten für diese Baustelle erfasst wurden (FK-Regeln).</div>
+      <div className="muted">{m.orderDetailPage.deleteAssignmentsHint}</div>
     </div>
   );
 }

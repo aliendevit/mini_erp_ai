@@ -30,6 +30,33 @@ def _dedupe_strings(values: list[str]) -> list[str]:
     return result
 
 
+def _contains_arabic(text: str) -> bool:
+    for char in text:
+        codepoint = ord(char)
+        if (0x0600 <= codepoint <= 0x06FF) or (0x0750 <= codepoint <= 0x077F) or (0x08A0 <= codepoint <= 0x08FF):
+            return True
+    return False
+
+
+def _manager_messages(messages: list[ProposalMessage]) -> list[str]:
+    return [message.content for message in messages if message.role == "user" and message.content]
+
+
+def _latest_manager_message(messages: list[ProposalMessage]) -> str:
+    for message in reversed(messages):
+        if message.role == "user" and message.content:
+            return message.content
+    return ""
+
+
+def _conversation_language_mode(messages: list[ProposalMessage]) -> str:
+    latest_manager_message = _latest_manager_message(messages)
+    manager_text = "\n".join(_manager_messages(messages))
+    if _contains_arabic(latest_manager_message) or _contains_arabic(manager_text):
+        return "arabic"
+    return "default"
+
+
 def _extract_json_object(text: str) -> dict[str, Any]:
     candidate = text.strip()
     try:
@@ -178,6 +205,14 @@ def _chat_lines(messages: list[ProposalMessage]) -> str:
 def build_intake_chat_prompt(proposal: Proposal, messages: list[ProposalMessage]) -> str:
     known_customer = proposal.customer_company_name or "unknown"
     known_title = proposal.order_title or "unknown"
+    language_mode = _conversation_language_mode(messages)
+    language_rules = [
+        "- Reply in the same language as the manager's latest message.",
+        "- If the manager writes in Arabic, reply entirely in Arabic.",
+        "- Keep phone numbers, email addresses, street addresses, and company names exactly as provided.",
+    ]
+    if language_mode == "arabic":
+        language_rules.append("- The current manager language is Arabic, so your full reply must be Arabic.")
     return "\n".join(
         [
             "You are an ERP intake assistant for a German construction company.",
@@ -187,6 +222,7 @@ def build_intake_chat_prompt(proposal: Proposal, messages: list[ProposalMessage]
             "- Use plain business language.",
             "- Do not invent facts that are not present in the conversation.",
             "- Keep replies short and practical.",
+            *language_rules,
             f"Known customer: {known_customer}",
             f"Known order title: {known_title}",
             "",
@@ -230,6 +266,20 @@ def build_proposal_prompt(messages: list[ProposalMessage]) -> str:
         "estimatedHours": "number|null",
         "currency": "string",
     }
+    language_mode = _conversation_language_mode(messages)
+    language_rules = [
+        "Keep phone numbers, email addresses, street addresses, and company names exactly as provided.",
+    ]
+    if language_mode == "arabic":
+        language_rules.extend(
+            [
+                "Write all human-readable proposal values in Arabic.",
+                "This includes summary, orderTitle, orderDescription, proposed site names, site notes, requiredSkills, and requiredCertifications.",
+                "Do not switch proposal wording to German or English when the manager's conversation is Arabic.",
+            ]
+        )
+    else:
+        language_rules.append("Prefer German business wording inside summary and orderDescription.")
     return "\n".join(
         [
             "You convert a client intake transcript into a structured proposal draft.",
@@ -240,7 +290,7 @@ def build_proposal_prompt(messages: list[ProposalMessage]) -> str:
             "If total estimatedHours is known and there is more than one proposed site, always provide estimatedHours for every site.",
             "When exact per-site hours are not stated, infer a reasonable split from scope, area, and task complexity.",
             "The sum of proposedSites[].estimatedHours should match the top-level estimatedHours whenever possible.",
-            "Prefer German business wording inside summary and orderDescription.",
+            *language_rules,
             "",
             f"Required JSON schema: {json.dumps(schema, ensure_ascii=True)}",
             "",

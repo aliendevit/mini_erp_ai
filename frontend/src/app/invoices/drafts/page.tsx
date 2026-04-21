@@ -2,9 +2,11 @@
 
 import Link from 'next/link';
 import { useEffect, useMemo, useState } from 'react';
+
+import { useI18n } from '../../../lib/i18n';
 import { apiGet } from '../../../lib/api';
-import { DateInput } from '../../ui/DateInput';
 import { toYMD } from '../../../lib/date';
+import { DateInput } from '../../ui/DateInput';
 
 type Group = {
   keyId: string;
@@ -16,17 +18,18 @@ type Group = {
 type Payload = { groupBy: string; groups: Group[] };
 
 export default function DraftsPage() {
+  const { messages: m } = useI18n();
   const [groupBy, setGroupBy] = useState<'employee' | 'site' | 'order'>('employee');
   const [groups, setGroups] = useState<Group[]>([]);
   const [from, setFrom] = useState<Date | undefined>(undefined);
   const [to, setTo] = useState<Date | undefined>(undefined);
 
   const query = useMemo(() => {
-    const p = new URLSearchParams();
-    p.set('groupBy', groupBy);
-    if (from) p.set('from', toYMD(from));
-    if (to) p.set('to', toYMD(to));
-    return p.toString();
+    const params = new URLSearchParams();
+    params.set('groupBy', groupBy);
+    if (from) params.set('from', toYMD(from));
+    if (to) params.set('to', toYMD(to));
+    return params.toString();
   }, [groupBy, from, to]);
 
   async function load() {
@@ -35,34 +38,36 @@ export default function DraftsPage() {
   }
 
   useEffect(() => {
-    load().catch((e) => alert(e.message));
+    load().catch((error) => alert(error.message));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [query]);
 
   return (
     <div className="card">
-      <h2>Entwurf-Rechnungen</h2>
+      <h2>{m.invoiceDraftsPage.heading}</h2>
 
       <div className="row">
         <div>
-          <label>Gruppieren nach</label>
-          <select value={groupBy} onChange={(e) => setGroupBy(e.target.value as any)}>
-            <option value="employee">Mitarbeiter</option>
-            <option value="site">Baustelle</option>
-            <option value="order">Auftrag</option>
+          <label>{m.invoiceDraftsPage.groupBy}</label>
+          <select value={groupBy} onChange={(event) => setGroupBy(event.target.value as 'employee' | 'site' | 'order')}>
+            <option value="employee">{m.statuses.groupBy.employee}</option>
+            <option value="site">{m.statuses.groupBy.site}</option>
+            <option value="order">{m.statuses.groupBy.order}</option>
           </select>
         </div>
 
-        <DateInput label="Von" value={from} onChange={setFrom} />
-        <DateInput label="Bis" value={to} onChange={setTo} />
+        <DateInput label={m.common.start} value={from} onChange={setFrom} />
+        <DateInput label={m.common.end} value={to} onChange={setTo} />
         <div style={{ alignSelf: 'end' }}>
           <button className="btn" type="button" onClick={() => { setFrom(undefined); setTo(undefined); }}>
-            Zurücksetzen
+            {m.common.reset}
           </button>
         </div>
 
         <div style={{ alignSelf: 'end' }}>
-          <Link className="btn" href="/invoices">Alle Rechnungen</Link>
+          <Link className="btn" href="/invoices">
+            {m.invoiceDraftsPage.allInvoices}
+          </Link>
         </div>
       </div>
 
@@ -71,30 +76,30 @@ export default function DraftsPage() {
       <table className="table">
         <thead>
           <tr>
-            <th>Gruppe</th>
-            <th style={{ textAlign: 'right' }}>Entwürfe</th>
-            <th style={{ textAlign: 'right' }}>Stunden gesamt</th>
-            <th style={{ width: 260 }}>Aktionen</th>
+            <th>{m.common.group}</th>
+            <th style={{ textAlign: 'right' }}>{m.invoiceDraftsPage.draftCount}</th>
+            <th style={{ textAlign: 'right' }}>{m.invoiceDraftsPage.totalHours}</th>
+            <th style={{ width: 260 }}>{m.common.actions}</th>
           </tr>
         </thead>
         <tbody>
-          {groups.map((g) => (
-            <tr key={g.keyId}>
-              <td>{g.keyName}</td>
-              <td style={{ textAlign: 'right' }}>{g.invoiceCount}</td>
-              <td style={{ textAlign: 'right' }}>{Number(g.totalHours).toFixed(2)}</td>
+          {groups.map((group) => (
+            <tr key={group.keyId}>
+              <td>{group.keyName}</td>
+              <td style={{ textAlign: 'right' }}>{group.invoiceCount}</td>
+              <td style={{ textAlign: 'right' }}>{Number(group.totalHours).toFixed(2)}</td>
               <td>
                 <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
                   <Link
                     className="btn"
                     href={`/invoices/drafts/group?${new URLSearchParams({
                       groupBy,
-                      key: g.keyId,
+                      key: group.keyId,
                       ...(from ? { from: toYMD(from) } : {}),
-                      ...(to ? { to: toYMD(to) } : {})
+                      ...(to ? { to: toYMD(to) } : {}),
                     }).toString()}`}
                   >
-                    Öffnen & zusammenführen
+                    {m.invoiceDraftsPage.openAndMerge}
                   </Link>
                 </div>
               </td>
@@ -102,16 +107,14 @@ export default function DraftsPage() {
           ))}
           {groups.length === 0 && (
             <tr>
-              <td colSpan={4} className="muted">Keine Entwurf-Rechnungen vorhanden.</td>
+              <td colSpan={4} className="muted">{m.invoiceDraftsPage.noDrafts}</td>
             </tr>
           )}
         </tbody>
       </table>
 
       <div className="spacer" />
-      <div className="muted">
-        Hinweis: Zusammenführen ist nur möglich, wenn alle Entwürfe denselben Kunden haben und zur gleichen Gruppe gehören.
-      </div>
+      <div className="muted">{m.invoiceDraftsPage.mergeHint}</div>
     </div>
   );
 }

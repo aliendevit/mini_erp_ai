@@ -2,10 +2,11 @@
 
 import Link from 'next/link';
 import { useEffect, useState } from 'react';
-import { apiGet, apiJson, DELETE_CONFIRM } from '../../lib/api';
+
+import { useI18n } from '../../lib/i18n';
+import { apiGet, apiJson } from '../../lib/api';
 
 type Customer = { id: string; companyName: string };
-
 type Order = { id: string; title: string; customer?: Customer };
 
 type Site = {
@@ -20,42 +21,50 @@ type Site = {
   isActive: boolean;
 };
 
-const empty: Partial<Site> = { orderId: '', siteName: '', street: '', zipCode: '', city: '', notes: '', isActive: true };
+const empty: Partial<Site> = {
+  orderId: '',
+  siteName: '',
+  street: '',
+  zipCode: '',
+  city: '',
+  notes: '',
+  isActive: true,
+};
 
 export default function SitesPage() {
+  const { messages: m } = useI18n();
   const [orders, setOrders] = useState<Order[]>([]);
   const [items, setItems] = useState<Site[]>([]);
   const [form, setForm] = useState<Partial<Site>>(empty);
   const [editingId, setEditingId] = useState<string | null>(null);
 
   async function load() {
-    const [os, ss] = await Promise.all([
-      apiGet<Order[]>('/orders'),
-      apiGet<Site[]>('/sites')
-    ]);
-    setOrders(os);
-    setItems(ss);
-    if (!editingId && !form.orderId && os.length > 0) setForm((f) => ({ ...f, orderId: os[0].id }));
+    const [nextOrders, nextSites] = await Promise.all([apiGet<Order[]>('/orders'), apiGet<Site[]>('/sites')]);
+    setOrders(nextOrders);
+    setItems(nextSites);
+    if (!editingId && !form.orderId && nextOrders.length > 0) {
+      setForm((current) => ({ ...current, orderId: nextOrders[0].id }));
+    }
   }
 
   useEffect(() => {
-    load().catch((e) => alert(e.message));
+    load().catch((error) => alert(error.message));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   function startNew() {
     setEditingId(null);
-    setForm((f) => ({ ...empty, orderId: orders[0]?.id || '' }));
+    setForm({ ...empty, orderId: orders[0]?.id || '' });
   }
 
-  function startEdit(s: Site) {
-    setEditingId(s.id);
-    setForm({ ...s, street: s.street || '', zipCode: s.zipCode || '', city: s.city || '', notes: s.notes || '' });
+  function startEdit(site: Site) {
+    setEditingId(site.id);
+    setForm({ ...site, street: site.street || '', zipCode: site.zipCode || '', city: site.city || '', notes: site.notes || '' });
   }
 
   async function save() {
-    if (!form.orderId) return alert('Bitte Auftrag auswählen.');
-    if (!form.siteName?.trim()) return alert('Baustellenname ist erforderlich.');
+    if (!form.orderId) return alert(m.sitesPage.orderRequired);
+    if (!form.siteName?.trim()) return alert(m.sitesPage.siteNameRequired);
     try {
       const payload = {
         orderId: form.orderId,
@@ -64,7 +73,7 @@ export default function SitesPage() {
         zipCode: form.zipCode || null,
         city: form.city || null,
         notes: form.notes || null,
-        isActive: true
+        isActive: true,
       };
       if (editingId) {
         await apiJson(`/sites/${editingId}`, 'PUT', payload);
@@ -73,46 +82,48 @@ export default function SitesPage() {
       }
       await load();
       startNew();
-    } catch (e: any) {
-      alert(e.message);
+    } catch (error: any) {
+      alert(error.message);
     }
   }
 
   async function del(id: string) {
-    if (!confirm(DELETE_CONFIRM)) return;
+    if (!confirm(m.common.deleteConfirm)) return;
     try {
       await apiJson(`/sites/${id}`, 'DELETE');
       await load();
       if (editingId === id) startNew();
-    } catch (e: any) {
-      alert(e.message);
+    } catch (error: any) {
+      alert(error.message);
     }
   }
 
   return (
     <div className="card">
-      <h2>Baustellen</h2>
-      <div className="muted">Stand-alone Übersicht + CRUD. Zusätzlich findest du Baustellen auch im jeweiligen Auftrag.</div>
+      <h2>{m.sitesPage.heading}</h2>
+      <div className="muted">{m.sitesPage.description}</div>
 
       <div className="spacer" />
 
       <div className="row">
         <div>
-          <label>Auftrag *</label>
-          <select value={form.orderId || ''} onChange={(e) => setForm({ ...form, orderId: e.target.value })}>
-            {orders.map((o) => (
-              <option key={o.id} value={o.id}>{o.title} ({o.customer?.companyName || '—'})</option>
+          <label>{m.common.order} *</label>
+          <select value={form.orderId || ''} onChange={(event) => setForm({ ...form, orderId: event.target.value })}>
+            {orders.map((order) => (
+              <option key={order.id} value={order.id}>
+                {order.title} ({order.customer?.companyName || m.common.none})
+              </option>
             ))}
-            {orders.length === 0 && <option value="">(Bitte zuerst Auftrag anlegen)</option>}
+            {orders.length === 0 && <option value="">{m.sitesPage.noOrdersOption}</option>}
           </select>
         </div>
         <div>
-          <label>Name *</label>
-          <input value={form.siteName || ''} onChange={(e) => setForm({ ...form, siteName: e.target.value })} />
+          <label>{m.common.name} *</label>
+          <input value={form.siteName || ''} onChange={(event) => setForm({ ...form, siteName: event.target.value })} />
         </div>
         <div>
-          <label>Stadt</label>
-          <input value={form.city || ''} onChange={(e) => setForm({ ...form, city: e.target.value })} />
+          <label>{m.common.city}</label>
+          <input value={form.city || ''} onChange={(event) => setForm({ ...form, city: event.target.value })} />
         </div>
       </div>
 
@@ -120,23 +131,23 @@ export default function SitesPage() {
 
       <div className="row">
         <div>
-          <label>Straße</label>
-          <input value={form.street || ''} onChange={(e) => setForm({ ...form, street: e.target.value })} />
+          <label>{m.common.street}</label>
+          <input value={form.street || ''} onChange={(event) => setForm({ ...form, street: event.target.value })} />
         </div>
         <div>
-          <label>PLZ</label>
-          <input value={form.zipCode || ''} onChange={(e) => setForm({ ...form, zipCode: e.target.value })} />
+          <label>{m.common.zipCode}</label>
+          <input value={form.zipCode || ''} onChange={(event) => setForm({ ...form, zipCode: event.target.value })} />
         </div>
         <div>
-          <label>Notizen</label>
-          <input value={form.notes || ''} onChange={(e) => setForm({ ...form, notes: e.target.value })} />
+          <label>{m.common.notes}</label>
+          <input value={form.notes || ''} onChange={(event) => setForm({ ...form, notes: event.target.value })} />
         </div>
       </div>
 
       <div className="spacer" />
       <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-        <button className="btn primary" onClick={save}>{editingId ? 'Speichern' : 'Anlegen'}</button>
-        <button className="btn" onClick={startNew}>Neu</button>
+        <button className="btn primary" onClick={save}>{editingId ? m.common.save : m.common.create}</button>
+        <button className="btn" onClick={startNew}>{m.common.createNew}</button>
       </div>
 
       <div className="spacer" />
@@ -144,35 +155,37 @@ export default function SitesPage() {
       <table className="table">
         <thead>
           <tr>
-            <th>Baustelle</th>
-            <th>Auftrag</th>
-            <th>Kunde</th>
-            <th style={{ width: 260 }}>Aktionen</th>
+            <th>{m.common.site}</th>
+            <th>{m.common.order}</th>
+            <th>{m.common.customer}</th>
+            <th style={{ width: 260 }}>{m.common.actions}</th>
           </tr>
         </thead>
         <tbody>
-          {items.map((s) => (
-            <tr key={s.id}>
-              <td>{s.siteName}</td>
-              <td>{s.order?.title || '—'}</td>
-              <td>{s.order?.customer?.companyName || '—'}</td>
+          {items.map((site) => (
+            <tr key={site.id}>
+              <td>{site.siteName}</td>
+              <td>{site.order?.title || m.common.none}</td>
+              <td>{site.order?.customer?.companyName || m.common.none}</td>
               <td>
                 <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-                  <Link className="btn" href={`/orders/${s.orderId}`}>Zum Auftrag</Link>
-                  <button className="btn" onClick={() => startEdit(s)}>Bearbeiten</button>
-                  <button className="btn danger" onClick={() => del(s.id)}>Löschen</button>
+                  <Link className="btn" href={`/orders/${site.orderId}`}>{m.sitesPage.toOrder}</Link>
+                  <button className="btn" onClick={() => startEdit(site)}>{m.common.edit}</button>
+                  <button className="btn danger" onClick={() => del(site.id)}>{m.common.delete}</button>
                 </div>
               </td>
             </tr>
           ))}
           {items.length === 0 && (
-            <tr><td colSpan={4} className="muted">Keine Baustellen vorhanden.</td></tr>
+            <tr>
+              <td colSpan={4} className="muted">{m.sitesPage.noSites}</td>
+            </tr>
           )}
         </tbody>
       </table>
 
       <div className="spacer" />
-      <div className="muted">Hinweis: Löschen ist nur möglich, wenn keine Arbeitszeiten/Zuordnungen existieren (FK-Regeln).</div>
+      <div className="muted">{m.sitesPage.deleteHint}</div>
     </div>
   );
 }

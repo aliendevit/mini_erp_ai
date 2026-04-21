@@ -1,6 +1,8 @@
 'use client';
 
 import { useEffect, useMemo, useState } from 'react';
+
+import { useI18n } from '../../lib/i18n';
 import { API_BASE, apiGet } from '../../lib/api';
 
 type Employee = { id: string; firstName: string; lastName: string };
@@ -25,21 +27,15 @@ type TimesheetData = {
   totalHoursLabel: string;
 };
 
-const MONTHS = [
-  'Januar', 'Februar', 'März', 'April', 'Mai', 'Juni',
-  'Juli', 'August', 'September', 'Oktober', 'November', 'Dezember'
-];
-
 const YEARS = [2026, 2027, 2028, 2029, 2030];
 
 export default function StundenTabellePage() {
+  const { messages: m } = useI18n();
   const [employees, setEmployees] = useState<Employee[]>([]);
   const [employeeId, setEmployeeId] = useState<string>('');
-
   const now = new Date();
   const [month, setMonth] = useState<number>(now.getMonth() + 1);
   const [year, setYear] = useState<number>(2026);
-
   const [data, setData] = useState<TimesheetData | null>(null);
   const [loading, setLoading] = useState(false);
 
@@ -48,26 +44,26 @@ export default function StundenTabellePage() {
 
   useEffect(() => {
     (async () => {
-      const emps = await apiGet<Employee[]>('/employees');
-      setEmployees(emps);
-      if (!employeeId && emps[0]) setEmployeeId(emps[0].id);
-    })().catch((e) => alert(e.message));
+      const nextEmployees = await apiGet<Employee[]>('/employees');
+      setEmployees(nextEmployees);
+      if (!employeeId && nextEmployees[0]) setEmployeeId(nextEmployees[0].id);
+    })().catch((error) => alert(error.message));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   async function loadTable() {
-    if (!employeeId) return alert('Bitte Mitarbeiter auswählen.');
+    if (!employeeId) return alert(m.timesheetPage.selectEmployee);
     setLoading(true);
     try {
-      const qs = new URLSearchParams({
+      const query = new URLSearchParams({
         employeeId,
         month: String(month),
-        year: String(year)
+        year: String(year),
       });
-      const d = await apiGet<TimesheetData>(`/timesheets?${qs.toString()}`);
-      setData(d);
-    } catch (e: any) {
-      alert(e.message);
+      const nextData = await apiGet<TimesheetData>(`/timesheets?${query.toString()}`);
+      setData(nextData);
+    } catch (error: any) {
+      alert(error.message);
     } finally {
       setLoading(false);
     }
@@ -75,53 +71,53 @@ export default function StundenTabellePage() {
 
   const pdfHref = useMemo(() => {
     if (!employeeId) return '#';
-    const qs = new URLSearchParams({ employeeId, month: String(month), year: String(year) });
-    return `${API_BASE}/timesheets/pdf?${qs.toString()}`;
+    const query = new URLSearchParams({ employeeId, month: String(month), year: String(year) });
+    return `${API_BASE}/timesheets/pdf?${query.toString()}`;
   }, [employeeId, month, year]);
 
   const wordHref = useMemo(() => {
     if (!employeeId) return '#';
-    const qs = new URLSearchParams({ employeeId, month: String(month), year: String(year) });
-    return `${API_BASE}/timesheets/word?${qs.toString()}`;
+    const query = new URLSearchParams({ employeeId, month: String(month), year: String(year) });
+    return `${API_BASE}/timesheets/word?${query.toString()}`;
   }, [employeeId, month, year]);
 
   return (
     <div className="card">
-      <h2>Stundentabelle</h2>
-      <div className="muted">Monatsübersicht pro Mitarbeiter inkl. PDF- und Word-Export.</div>
+      <h2>{m.timesheetPage.heading}</h2>
+      <div className="muted">{m.timesheetPage.description}</div>
 
       <div className="spacer" />
 
       <div className="row">
         <div>
-          <label>Mitarbeiter</label>
-          <select value={employeeId} onChange={(e) => setEmployeeId(e.target.value)}>
-            {employees.map((e) => (
-              <option key={e.id} value={e.id}>
-                {e.firstName} {e.lastName}
+          <label>{m.common.employee}</label>
+          <select value={employeeId} onChange={(event) => setEmployeeId(event.target.value)}>
+            {employees.map((employee) => (
+              <option key={employee.id} value={employee.id}>
+                {employee.firstName} {employee.lastName}
               </option>
             ))}
-            {employees.length === 0 && <option value="">(Bitte zuerst Mitarbeiter anlegen)</option>}
+            {employees.length === 0 && <option value="">{m.timesheetPage.noEmployeesOption}</option>}
           </select>
         </div>
 
         <div>
-          <label>Monat</label>
-          <select value={month} onChange={(e) => setMonth(Number(e.target.value))}>
-            {MONTHS.map((m, idx) => (
-              <option key={m} value={idx + 1}>
-                {m}
+          <label>{m.common.group}</label>
+          <select value={month} onChange={(event) => setMonth(Number(event.target.value))}>
+            {m.timesheetPage.monthNames.map((monthName, index) => (
+              <option key={monthName} value={index + 1}>
+                {monthName}
               </option>
             ))}
           </select>
         </div>
 
         <div>
-          <label>Year</label>
-          <select value={year} onChange={(e) => setYear(Number(e.target.value))}>
-            {YEARS.map((y) => (
-              <option key={y} value={y}>
-                {y}
+          <label>{m.common.year}</label>
+          <select value={year} onChange={(event) => setYear(Number(event.target.value))}>
+            {YEARS.map((currentYear) => (
+              <option key={currentYear} value={currentYear}>
+                {currentYear}
               </option>
             ))}
           </select>
@@ -129,13 +125,13 @@ export default function StundenTabellePage() {
 
         <div style={{ alignSelf: 'end', display: 'flex', gap: 8, flexWrap: 'wrap' }}>
           <button className="btn primary" onClick={loadTable} disabled={loading}>
-            {loading ? 'Lade…' : 'Tabelle anzeigen'}
+            {loading ? m.common.loading : m.timesheetPage.loadTable}
           </button>
 
-          <a className="btn" href={pdfHref} target="_blank" rel="noreferrer" onClick={(e) => !employeeId && e.preventDefault()}>
+          <a className="btn" href={pdfHref} target="_blank" rel="noreferrer" onClick={(event) => !employeeId && event.preventDefault()}>
             PDF
           </a>
-          <a className="btn" href={wordHref} target="_blank" rel="noreferrer" onClick={(e) => !employeeId && e.preventDefault()}>
+          <a className="btn" href={wordHref} target="_blank" rel="noreferrer" onClick={(event) => !employeeId && event.preventDefault()}>
             Word
           </a>
         </div>
@@ -143,7 +139,7 @@ export default function StundenTabellePage() {
 
       <div className="spacer" />
 
-      {!data && <div className="muted">Bitte Auswahl treffen und „Tabelle anzeigen“ klicken.</div>}
+      {!data && <div className="muted">{m.timesheetPage.selectPrompt}</div>}
 
       {data && (
         <>
@@ -157,9 +153,11 @@ export default function StundenTabellePage() {
 
           <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12, flexWrap: 'wrap', marginTop: 8 }}>
             <div style={{ fontWeight: 700 }}>
-              Stunden Zettel: {data.monthName} {data.year}
+              {m.timesheetPage.sheetTitle}: {data.monthName} {data.year}
             </div>
-            <div style={{ fontWeight: 700 }}>Name: {data.employee.lastName}</div>
+            <div style={{ fontWeight: 700 }}>
+              {m.common.name}: {data.employee.lastName}
+            </div>
           </div>
 
           <div className="spacer" />
@@ -169,20 +167,21 @@ export default function StundenTabellePage() {
               <tr>
                 <th>{data.monthName}</th>
                 <th>
-                  Arbeitszeit<br />
-                  <span className="muted">(Abzüglich Pause)</span>
+                  {m.timesheetPage.workingTime}
+                  <br />
+                  <span className="muted">{m.timesheetPage.breakDeducted}</span>
                 </th>
-                <th>Beginn</th>
-                <th>Ende</th>
+                <th>{m.common.start}</th>
+                <th>{m.common.end}</th>
               </tr>
             </thead>
             <tbody>
-              {data.rows.map((r) => (
-                <tr key={r.ymd}>
-                  <td>{r.dateLabel}</td>
-                  <td>{r.workLabel}</td>
-                  <td>{r.begin}</td>
-                  <td>{r.end}</td>
+              {data.rows.map((row) => (
+                <tr key={row.ymd}>
+                  <td>{row.dateLabel}</td>
+                  <td>{row.workLabel}</td>
+                  <td>{row.begin}</td>
+                  <td>{row.end}</td>
                 </tr>
               ))}
             </tbody>
@@ -190,13 +189,13 @@ export default function StundenTabellePage() {
 
           <div className="spacer" />
 
-          <div style={{ fontWeight: 700 }}>Gesamtstunden: {data.totalHoursLabel} Std</div>
+          <div style={{ fontWeight: 700 }}>{m.timesheetPage.totalHours}: {data.totalHoursLabel} Std</div>
 
           <div className="spacer" />
 
           <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12 }}>
-            <div>Arbeitsnehmer:</div>
-            <div>Arbeitsgeber:</div>
+            <div>{m.timesheetPage.worker}:</div>
+            <div>{m.timesheetPage.employer}:</div>
           </div>
         </>
       )}

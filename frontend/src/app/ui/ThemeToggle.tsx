@@ -2,6 +2,8 @@
 
 import { useEffect, useState } from 'react';
 
+import { useI18n } from '../../lib/i18n';
+
 type Theme = 'dark' | 'light';
 const STORAGE_KEY = 'sa_theme';
 
@@ -25,12 +27,13 @@ function applyTheme(theme: Theme) {
 export function ThemeToggle() {
   const [mounted, setMounted] = useState(false);
   const [theme, setTheme] = useState<Theme>('dark');
+  const { messages } = useI18n();
 
   useEffect(() => {
     setMounted(true);
-    const t = getInitialTheme();
-    setTheme(t);
-    applyTheme(t);
+    const nextTheme = getInitialTheme();
+    setTheme(nextTheme);
+    applyTheme(nextTheme);
   }, []);
 
   if (!mounted) return null;
@@ -45,8 +48,8 @@ export function ThemeToggle() {
   };
 
   return (
-    <button className="btn" type="button" onClick={toggle} title="Theme wechseln">
-      {theme === 'dark' ? '☀️ Hell' : '🌙 Dunkel'}
+    <button className="btn" type="button" onClick={toggle} title={messages.theme.switchTitle}>
+      {theme === 'dark' ? `☀️ ${messages.theme.light}` : `🌙 ${messages.theme.dark}`}
     </button>
   );
 }

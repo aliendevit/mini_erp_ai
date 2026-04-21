@@ -59,6 +59,7 @@ input, select, textarea {
   */
   background: rgba(255, 255, 255, 0.96);
   color: #0b0c0f;
+  text-align: start;
 }
 
 input[type="checkbox"] {
@@ -108,3 +109,38 @@ label { font-size: 12px; color: var(--muted); display: block; margin-bottom: 6px
 .muted { color: var(--muted); }
 
 .spacer { height: 10px; }
+
+html[dir='rtl'] body {
+  direction: rtl;
+}
+
+html[dir='rtl'] .header {
+  flex-direction: row-reverse;
+}
+
+html[dir='rtl'] .headerRight {
+  justify-content: flex-start;
+  flex-direction: row-reverse;
+}
+
+html[dir='rtl'] .nav {
+  flex-direction: row-reverse;
+}
+
+html[dir='rtl'] .card,
+html[dir='rtl'] .table th,
+html[dir='rtl'] .table td,
+html[dir='rtl'] label,
+html[dir='rtl'] h1,
+html[dir='rtl'] h2,
+html[dir='rtl'] h3 {
+  text-align: right;
+}
+
+html[dir='rtl'] .table th {
+  text-align: right;
+}
+
+html[dir='rtl'] .row {
+  direction: rtl;
+}

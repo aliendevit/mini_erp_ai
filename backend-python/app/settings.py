@@ -29,6 +29,8 @@ class Settings(BaseModel):
     cors_origin: str = os.getenv("CORS_ORIGIN", "http://localhost:3000")
     gemini_api_key: str = os.getenv("GEMINI_API_KEY", "").strip()
     gemini_model: str = os.getenv("GEMINI_MODEL", "gemini-1.5-flash").strip()
+    assemblyai_api_key: str = os.getenv("ASSEMBLYAI_API_KEY", "").strip()
+    assemblyai_api_base: str = os.getenv("ASSEMBLYAI_API_BASE", "https://api.assemblyai.com").rstrip("/")
 
 
 @lru_cache(maxsize=1)

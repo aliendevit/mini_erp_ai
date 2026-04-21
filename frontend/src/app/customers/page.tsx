@@ -1,7 +1,9 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { apiGet, apiJson, DELETE_CONFIRM } from '../../lib/api';
+
+import { useI18n } from '../../lib/i18n';
+import { apiGet, apiJson } from '../../lib/api';
 
 type Customer = {
   id: string;
@@ -27,10 +29,11 @@ const empty: Partial<Customer> = {
   contactName: '',
   contactPhone: '',
   contactEmail: '',
-  notes: ''
+  notes: '',
 };
 
 export default function CustomersPage() {
+  const { messages: m } = useI18n();
   const [items, setItems] = useState<Customer[]>([]);
   const [form, setForm] = useState<Partial<Customer>>(empty);
   const [editingId, setEditingId] = useState<string | null>(null);
@@ -42,7 +45,7 @@ export default function CustomersPage() {
   }
 
   useEffect(() => {
-    load().catch((e) => alert(e.message));
+    load().catch((error) => alert(error.message));
   }, []);
 
   function startNew() {
@@ -50,13 +53,13 @@ export default function CustomersPage() {
     setForm({ ...empty });
   }
 
-  function startEdit(c: Customer) {
-    setEditingId(c.id);
-    setForm({ ...c });
+  function startEdit(customer: Customer) {
+    setEditingId(customer.id);
+    setForm({ ...customer });
   }
 
   async function save() {
-    if (!form.companyName?.trim()) return alert('Firmenname ist erforderlich.');
+    if (!form.companyName?.trim()) return alert(m.customersPage.companyNameRequired);
     setLoading(true);
     try {
       if (editingId) {
@@ -66,40 +69,40 @@ export default function CustomersPage() {
       }
       await load();
       startNew();
-    } catch (e: any) {
-      alert(e.message);
+    } catch (error: any) {
+      alert(error.message);
     } finally {
       setLoading(false);
     }
   }
 
   async function del(id: string) {
-    if (!confirm(DELETE_CONFIRM)) return;
+    if (!confirm(m.common.deleteConfirm)) return;
     try {
       await apiJson(`/customers/${id}`, 'DELETE');
       await load();
       if (editingId === id) startNew();
-    } catch (e: any) {
-      alert(e.message);
+    } catch (error: any) {
+      alert(error.message);
     }
   }
 
   return (
     <div className="card">
-      <h2>Kunden</h2>
+      <h2>{m.customersPage.heading}</h2>
 
       <div className="row">
         <div>
-          <label>Firmenname *</label>
-          <input value={form.companyName || ''} onChange={(e) => setForm({ ...form, companyName: e.target.value })} />
+          <label>{m.customersPage.companyName} *</label>
+          <input value={form.companyName || ''} onChange={(event) => setForm({ ...form, companyName: event.target.value })} />
         </div>
         <div>
-          <label>USt-IdNr</label>
-          <input value={form.vatId || ''} onChange={(e) => setForm({ ...form, vatId: e.target.value })} />
+          <label>{m.customersPage.vatId}</label>
+          <input value={form.vatId || ''} onChange={(event) => setForm({ ...form, vatId: event.target.value })} />
         </div>
         <div>
-          <label>Land</label>
-          <input value={form.country || ''} onChange={(e) => setForm({ ...form, country: e.target.value })} />
+          <label>{m.common.country}</label>
+          <input value={form.country || ''} onChange={(event) => setForm({ ...form, country: event.target.value })} />
         </div>
       </div>
 
@@ -107,16 +110,16 @@ export default function CustomersPage() {
 
       <div className="row">
         <div>
-          <label>Straße</label>
-          <input value={form.street || ''} onChange={(e) => setForm({ ...form, street: e.target.value })} />
+          <label>{m.common.street}</label>
+          <input value={form.street || ''} onChange={(event) => setForm({ ...form, street: event.target.value })} />
         </div>
         <div>
-          <label>PLZ</label>
-          <input value={form.zipCode || ''} onChange={(e) => setForm({ ...form, zipCode: e.target.value })} />
+          <label>{m.common.zipCode}</label>
+          <input value={form.zipCode || ''} onChange={(event) => setForm({ ...form, zipCode: event.target.value })} />
         </div>
         <div>
-          <label>Stadt</label>
-          <input value={form.city || ''} onChange={(e) => setForm({ ...form, city: e.target.value })} />
+          <label>{m.common.city}</label>
+          <input value={form.city || ''} onChange={(event) => setForm({ ...form, city: event.target.value })} />
         </div>
       </div>
 
@@ -124,33 +127,33 @@ export default function CustomersPage() {
 
       <div className="row">
         <div>
-          <label>Ansprechpartner</label>
-          <input value={form.contactName || ''} onChange={(e) => setForm({ ...form, contactName: e.target.value })} />
+          <label>{m.customersPage.contactName}</label>
+          <input value={form.contactName || ''} onChange={(event) => setForm({ ...form, contactName: event.target.value })} />
         </div>
         <div>
-          <label>Telefon</label>
-          <input value={form.contactPhone || ''} onChange={(e) => setForm({ ...form, contactPhone: e.target.value })} />
+          <label>{m.common.phone}</label>
+          <input value={form.contactPhone || ''} onChange={(event) => setForm({ ...form, contactPhone: event.target.value })} />
         </div>
         <div>
-          <label>E-Mail</label>
-          <input value={form.contactEmail || ''} onChange={(e) => setForm({ ...form, contactEmail: e.target.value })} />
+          <label>{m.common.email}</label>
+          <input value={form.contactEmail || ''} onChange={(event) => setForm({ ...form, contactEmail: event.target.value })} />
         </div>
       </div>
 
       <div className="spacer" />
       <div>
-        <label>Notizen</label>
-        <textarea value={form.notes || ''} onChange={(e) => setForm({ ...form, notes: e.target.value })} />
+        <label>{m.common.notes}</label>
+        <textarea value={form.notes || ''} onChange={(event) => setForm({ ...form, notes: event.target.value })} />
       </div>
 
       <div className="spacer" />
 
       <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
         <button className="btn primary" onClick={save} disabled={loading}>
-          {editingId ? 'Speichern' : 'Anlegen'}
+          {editingId ? m.common.save : m.common.create}
         </button>
         <button className="btn" onClick={startNew} disabled={loading}>
-          Neu
+          {m.common.createNew}
         </button>
       </div>
 
@@ -159,29 +162,29 @@ export default function CustomersPage() {
       <table className="table">
         <thead>
           <tr>
-            <th>Firma</th>
-            <th>Ort</th>
-            <th>Kontakt</th>
-            <th style={{ width: 220 }}>Aktionen</th>
+            <th>{m.customersPage.company}</th>
+            <th>{m.customersPage.place}</th>
+            <th>{m.common.contact}</th>
+            <th style={{ width: 220 }}>{m.common.actions}</th>
           </tr>
         </thead>
         <tbody>
-          {items.map((c) => (
-            <tr key={c.id}>
-              <td>{c.companyName}</td>
-              <td>{[c.zipCode, c.city].filter(Boolean).join(' ') || '—'}</td>
-              <td>{c.contactName || '—'}</td>
+          {items.map((customer) => (
+            <tr key={customer.id}>
+              <td>{customer.companyName}</td>
+              <td>{[customer.zipCode, customer.city].filter(Boolean).join(' ') || m.common.none}</td>
+              <td>{customer.contactName || m.common.none}</td>
               <td>
                 <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-                  <button className="btn" onClick={() => startEdit(c)}>Bearbeiten</button>
-                  <button className="btn danger" onClick={() => del(c.id)}>Löschen</button>
+                  <button className="btn" onClick={() => startEdit(customer)}>{m.common.edit}</button>
+                  <button className="btn danger" onClick={() => del(customer.id)}>{m.common.delete}</button>
                 </div>
               </td>
             </tr>
           ))}
           {items.length === 0 && (
             <tr>
-              <td colSpan={4} className="muted">Keine Kunden vorhanden.</td>
+              <td colSpan={4} className="muted">{m.customersPage.noCustomers}</td>
             </tr>
           )}
         </tbody>

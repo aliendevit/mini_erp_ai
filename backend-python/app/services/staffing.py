@@ -16,8 +16,81 @@ DEFAULT_WEEKLY_CAPACITY = 40.0
 ASSIGNMENT_PRESSURE_HOURS_PER_WEEK = 4.0
 
 
+_SKILL_ALIASES: dict[str, tuple[str, ...]] = {
+    "maler": (
+        "maler",
+        "malerarbeiten",
+        "lackierer",
+        "painting",
+        "painter",
+        "decorator",
+        "dehan",
+        "????",
+        "????",
+    ),
+    "spachteln": (
+        "spachteln",
+        "spachtel",
+        "filling",
+        "filler",
+        "?????",
+    ),
+    "schleifen": (
+        "schleifen",
+        "schleif",
+        "sanding",
+        "sand",
+        "?????",
+    ),
+    "trockenbau-reparaturen": (
+        "trockenbau-reparaturen",
+        "trockenbaureparaturen",
+        "drywall repair",
+        "drywall repairs",
+        "drywall repair specialist",
+        "??????? ?????",
+        "??????? ?????",
+        "????? ?????",
+        "????? ?????",
+    ),
+    "trockenbau": (
+        "trockenbau",
+        "drywall",
+        "drywall worker",
+        "drywall work",
+        "??? ????",
+        "???",
+        "???? ???",
+    ),
+    "feuchtigkeitsschutz": (
+        "feuchtigkeitsschutz",
+        "abdichtung",
+        "moisture protection",
+        "damp-proof",
+        "damp proof",
+        "moisture protection / damp-proof coating",
+        "????? ?? ???????",
+        "???????",
+        "??? ?????",
+        "??? ???????",
+    ),
+}
+
+
+def _canonical_term(value: str) -> str:
+    normalized = value.strip().lower()
+    if not normalized:
+        return ""
+    for canonical, aliases in _SKILL_ALIASES.items():
+        if normalized == canonical or normalized in aliases:
+            return canonical
+        if any(alias and alias in normalized for alias in aliases):
+            return canonical
+    return normalized
+
+
 def _lower_terms(values: list[str]) -> set[str]:
-    return {value.strip().lower() for value in values if value and value.strip()}
+    return {_canonical_term(value) for value in values if value and _canonical_term(value)}
 
 
 def _as_utc(value: datetime) -> datetime:

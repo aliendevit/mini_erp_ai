@@ -1,6 +1,8 @@
 'use client';
 
 import { useEffect, useMemo, useState } from 'react';
+
+import { useI18n } from '../../lib/i18n';
 import { apiGet, apiJson } from '../../lib/api';
 
 type SeqState = {
@@ -17,6 +19,7 @@ function currentYear() {
 
 export function InvoiceSequenceSetting() {
   const year = useMemo(() => currentYear(), []);
+  const { messages: m } = useI18n();
   const [loading, setLoading] = useState(true);
   const [state, setState] = useState<SeqState | null>(null);
   const [value, setValue] = useState<string>('');
@@ -29,11 +32,11 @@ export function InvoiceSequenceSetting() {
     setError('');
     setOk('');
     try {
-      const s = await apiGet<SeqState>(`/settings/invoice-sequence?year=${year}`);
-      setState(s);
-      setValue(String(s.effectiveNextSeq));
-    } catch (e: any) {
-      setError(e?.message || 'Fehler beim Laden.');
+      const nextState = await apiGet<SeqState>(`/settings/invoice-sequence?year=${year}`);
+      setState(nextState);
+      setValue(String(nextState.effectiveNextSeq));
+    } catch (error: any) {
+      setError(error?.message || m.invoiceSequence.loadError);
     } finally {
       setLoading(false);
     }
@@ -49,14 +52,14 @@ export function InvoiceSequenceSetting() {
     setError('');
     setOk('');
     try {
-      const n = Number(value);
-      const payload = { year, nextSeq: Number.isFinite(n) ? Math.floor(n) : value };
-      const s = await apiJson<SeqState>(`/settings/invoice-sequence`, 'PUT', payload);
-      setState(s);
-      setValue(String(s.effectiveNextSeq));
-      setOk('Gespeichert.');
-    } catch (e: any) {
-      setError(e?.message || 'Fehler beim Speichern.');
+      const nextValue = Number(value);
+      const payload = { year, nextSeq: Number.isFinite(nextValue) ? Math.floor(nextValue) : value };
+      const nextState = await apiJson<SeqState>(`/settings/invoice-sequence`, 'PUT', payload);
+      setState(nextState);
+      setValue(String(nextState.effectiveNextSeq));
+      setOk(m.invoiceSequence.saved);
+    } catch (error: any) {
+      setError(error?.message || m.invoiceSequence.saveError);
     } finally {
       setSaving(false);
     }
@@ -64,50 +67,45 @@ export function InvoiceSequenceSetting() {
 
   return (
     <div className="card" style={{ marginBottom: 12 }}>
-      <h2>Nächste Rechnungsnummer</h2>
+      <h2>{m.invoiceSequence.heading}</h2>
       <div className="muted" style={{ marginBottom: 10 }}>
-        Setze hier bei Bedarf die nächste Seriennummer für dieses Jahr (z.B. wenn bisher manuell nummeriert wurde).
-        Kleinere/ungültige Werte werden ignoriert.
+        {m.invoiceSequence.description}
       </div>
 
       <div className="row" style={{ alignItems: 'end' }}>
         <div>
-          <label>Jahr</label>
+          <label>{m.common.year}</label>
           <input value={String(year)} disabled />
         </div>
 
         <div>
-          <label>Nächste Seriennummer (XXXX)</label>
-          <input
-            value={value}
-            onChange={(e) => setValue(e.target.value)}
-            inputMode="numeric"
-            disabled={loading || saving}
-          />
+          <label>{m.invoiceSequence.nextSeqLabel}</label>
+          <input value={value} onChange={(event) => setValue(event.target.value)} inputMode="numeric" disabled={loading || saving} />
         </div>
 
         <div>
-          <label>Vorschau</label>
+          <label>{m.common.preview}</label>
           <input value={state?.effectiveInvoiceNumber || ''} disabled />
         </div>
 
         <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
           <button className="btn primary" type="button" onClick={save} disabled={loading || saving}>
-            {saving ? 'Speichern…' : 'Speichern'}
+            {saving ? `${m.common.save}...` : m.common.save}
           </button>
           <button className="btn" type="button" onClick={load} disabled={loading || saving}>
-            Aktualisieren
+            {m.common.refresh}
           </button>
         </div>
       </div>
 
-      {loading && <div className="muted" style={{ marginTop: 10 }}>Lade…</div>}
+      {loading && <div className="muted" style={{ marginTop: 10 }}>{m.common.loading}</div>}
       {error && <div style={{ marginTop: 10 }}>{error}</div>}
       {ok && <div className="muted" style={{ marginTop: 10 }}>{ok}</div>}
 
       {state && (
         <div className="muted" style={{ marginTop: 10 }}>
-          DB-Nächste: {state.dbNextSeq} {state.configuredNextSeq ? `• Gesetzt: ${state.configuredNextSeq}` : ''}
+          {m.invoiceSequence.dbNext}: {state.dbNextSeq}{' '}
+          {state.configuredNextSeq ? `• ${m.invoiceSequence.configured}: ${state.configuredNextSeq}` : ''}
         </div>
       )}
     </div>

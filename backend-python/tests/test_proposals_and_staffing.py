@@ -16,7 +16,14 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from app.database import Base
 from app.models import Employee, EmployeeAvailabilityBlock, EmployeeSkill, Proposal, ProposalMessage
 from app.schemas import ProposalDraftPayload
-from app.services.proposals import ExtractedProposal, apply_proposal_update, confirm_proposal, extract_proposal_from_messages
+from app.services.proposals import (
+    ExtractedProposal,
+    apply_proposal_update,
+    build_intake_chat_prompt,
+    build_proposal_prompt,
+    confirm_proposal,
+    extract_proposal_from_messages,
+)
 from app.services.staffing import recommend_staff_for_proposal
 
 
@@ -67,6 +74,16 @@ class ProposalAndStaffingTests(unittest.TestCase):
         self.assertEqual(proposal.status, "draft")
         self.assertIn("Elektrik", proposal.required_skills_json or "")
         self.assertIn("Baustelle 1", proposal.proposed_sites_json or "")
+
+    def test_arabic_conversation_prompts_force_arabic_output(self) -> None:
+        proposal = Proposal(status="intake", customer_company_name="\u0634\u0631\u0643\u0629 \u0627\u0644\u0646\u0648\u0631")
+        messages = [ProposalMessage(role="user", content="\u0645\u0631\u062d\u0628\u0627\u060c \u0646\u062d\u062a\u0627\u062c \u0625\u0644\u0649 \u0639\u0631\u0636 \u062a\u0631\u0645\u064a\u0645 \u0628\u0627\u0644\u0644\u063a\u0629 \u0627\u0644\u0639\u0631\u0628\u064a\u0629.")]
+
+        chat_prompt = build_intake_chat_prompt(proposal, messages)
+        proposal_prompt = build_proposal_prompt(messages)
+
+        self.assertIn("reply entirely in Arabic", chat_prompt)
+        self.assertIn("Write all human-readable proposal values in Arabic", proposal_prompt)
 
     def test_extract_proposal_raises_for_invalid_gemini_json(self) -> None:
         proposal = Proposal(status="intake")
@@ -167,6 +184,36 @@ class ProposalAndStaffingTests(unittest.TestCase):
         self.assertEqual(site["recommendations"][0]["employeeId"], available.id)
         self.assertEqual(site["excludedEmployees"][0]["employeeId"], blocked.id)
         self.assertIsNotNone(recommendations["pricePreview"])
+
+    def test_recommend_staff_matches_arabic_skill_terms(self) -> None:
+        painter = build_employee("Amina Team", "Malerarbeiten")
+        self.db.add(painter)
+
+        proposal = Proposal(status="draft", order_title="?????", estimated_hours=Decimal("8.0"))
+        apply_proposal_update(
+            proposal,
+            ProposalDraftPayload(
+                customerCompanyName="???? ?????",
+                orderTitle="?????",
+                summary="????? ?????",
+                preferredStartDate=datetime(2026, 4, 21, tzinfo=timezone.utc),
+                preferredEndDate=datetime(2026, 4, 22, tzinfo=timezone.utc),
+                proposedSites=[
+                    {
+                        "siteName": "??????",
+                        "requiredSkills": ["????"],
+                        "estimatedHours": 8,
+                    }
+                ],
+                requiredSkills=["????"],
+            ),
+        )
+        self.db.add(proposal)
+        self.db.commit()
+
+        recommendations = recommend_staff_for_proposal(self.db, proposal)
+
+        self.assertEqual(recommendations["sites"][0]["recommendations"][0]["employeeId"], painter.id)
 
     def test_confirm_proposal_creates_customer_order_site_and_assignments(self) -> None:
         employee = build_employee("Clara Team", "Maler", rate="50")

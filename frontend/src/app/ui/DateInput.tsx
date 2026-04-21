@@ -1,6 +1,8 @@
 'use client';
 
 import { useEffect, useMemo, useRef, useState } from 'react';
+
+import { useI18n } from '../../lib/i18n';
 import { formatDE, parseDE, parseYMD, toYMD } from '../../lib/date';
 
 type Props = {
@@ -10,12 +12,8 @@ type Props = {
   placeholder?: string;
 };
 
-/**
- * Date input with:
- * - Typing support (TT.MM.JJJJ)
- * - Native calendar picker via a hidden <input type="date"> (button opens it)
- */
 export function DateInput({ label, value, onChange, placeholder }: Props) {
+  const { messages: m } = useI18n();
   const [text, setText] = useState<string>(value ? formatDE(value) : '');
   const [invalid, setInvalid] = useState(false);
   const pickerRef = useRef<HTMLInputElement | null>(null);
@@ -30,18 +28,18 @@ export function DateInput({ label, value, onChange, placeholder }: Props) {
   }, [value]);
 
   function openPicker() {
-    const el: any = pickerRef.current;
-    if (!el) return;
+    const element: any = pickerRef.current;
+    if (!element) return;
     try {
-      if (typeof el.showPicker === 'function') {
-        el.showPicker();
+      if (typeof element.showPicker === 'function') {
+        element.showPicker();
       } else {
-        el.focus();
-        el.click?.();
+        element.focus();
+        element.click?.();
       }
     } catch {
       try {
-        el.focus();
+        element.focus();
       } catch {}
     }
   }
@@ -49,14 +47,14 @@ export function DateInput({ label, value, onChange, placeholder }: Props) {
   function onTextChange(next: string) {
     setText(next);
 
-    const t = next.trim();
-    if (!t) {
+    const trimmed = next.trim();
+    if (!trimmed) {
       setInvalid(false);
       onChange(undefined);
       return;
     }
 
-    const parsed = parseDE(t);
+    const parsed = parseDE(trimmed);
     if (parsed) {
       setInvalid(false);
       onChange(parsed);
@@ -68,10 +66,10 @@ export function DateInput({ label, value, onChange, placeholder }: Props) {
   }
 
   function onPickerChange(ymd: string) {
-    const dt = parseYMD(ymd);
-    if (dt) {
+    const nextDate = parseYMD(ymd);
+    if (nextDate) {
       setInvalid(false);
-      onChange(dt);
+      onChange(nextDate);
     } else {
       onChange(undefined);
     }
@@ -83,27 +81,32 @@ export function DateInput({ label, value, onChange, placeholder }: Props) {
       <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
         <input
           value={text}
-          onChange={(e) => onTextChange(e.target.value)}
-          placeholder={placeholder || 'TT.MM.JJJJ'}
+          onChange={(event) => onTextChange(event.target.value)}
+          placeholder={placeholder || m.dateInput.placeholder}
           inputMode="numeric"
         />
 
-        <button type="button" className="btn" onClick={openPicker} title={`${label} auswählen`} style={{ whiteSpace: 'nowrap' }}>
+        <button
+          type="button"
+          className="btn"
+          onClick={openPicker}
+          title={`${label} ${m.dateInput.pick}`}
+          style={{ whiteSpace: 'nowrap' }}
+        >
           📅
         </button>
 
-        {/* Hidden native date picker */}
         <input
           ref={pickerRef}
           type="date"
           value={pickerValue}
-          onChange={(e) => onPickerChange(e.target.value)}
+          onChange={(event) => onPickerChange(event.target.value)}
           style={{ position: 'absolute', left: -9999, width: 1, height: 1, opacity: 0 }}
           tabIndex={-1}
           aria-hidden="true"
         />
       </div>
-      {invalid && <div className="muted" style={{ marginTop: 4 }}>Ungültiges Datum (Format: TT.MM.JJJJ)</div>}
+      {invalid && <div className="muted" style={{ marginTop: 4 }}>{m.dateInput.invalid}</div>}
     </div>
   );
 }

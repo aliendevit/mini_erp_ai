@@ -1,8 +1,12 @@
 'use client';
 
 import Link from 'next/link';
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { API_BASE, apiGet, apiJson } from '../../lib/api';
+import { type BrowserSpeechRecognition, getSpeechRecognitionCtor, isSpeechRecognitionSupported, localeToSpeechRecognitionLang } from '../../lib/browser-speech';
+import { type NativeAudioRecordingSession, isNativeAudioRecordingSupported, startNativeAudioRecording } from '../../lib/native-audio-recorder';
+import { useI18n } from '../../lib/i18n';
+import { type WavRecordingSession, isWavRecordingSupported, startMonoWavRecording } from '../../lib/wav-recorder';
 
 type Customer = {
   id: string;
@@ -75,6 +79,20 @@ type RecommendationPayload = {
   currency?: string | null;
 };
 
+type TranscriptionResponse = {
+  transcript: string;
+  detectedLanguage?: string | null;
+  durationMs?: number | null;
+  provider: string;
+};
+
+type RecordingPreview = {
+  url: string;
+  durationMs: number;
+  sizeBytes: number;
+  peak: number | null;
+};
+
 type ProposalDraft = {
   id: string;
   status: string;
@@ -129,6 +147,8 @@ const emptyDraft: Partial<ProposalDraft> = {
   recommendedTeam: null,
 };
 
+const MAX_RECORDING_MS = 90_000;
+
 function parseList(value: string): string[] {
   return value
     .split(/[,\n;]/)
@@ -155,14 +175,23 @@ function normalizeRecommendations(value: unknown): RecommendationPayload | null 
 async function safeMessage(res: Response): Promise<string> {
   try {
     const data = await res.json();
-    if (data?.message) return String(data.message);
+    if (typeof data?.message === 'string') return data.message;
+    if (typeof data?.detail === 'string') return data.detail;
   } catch {
     // ignore
   }
   return `${res.status} ${res.statusText}`;
 }
 
+function formatDuration(durationMs: number): string {
+  const totalSeconds = Math.max(0, Math.round(durationMs / 1000));
+  const minutes = Math.floor(totalSeconds / 60);
+  const seconds = totalSeconds % 60;
+  return `${String(minutes).padStart(2, '0')}:${String(seconds).padStart(2, '0')}`;
+}
+
 export default function AIIntakePage() {
+  const { locale, messages: m } = useI18n();
   const [intakes, setIntakes] = useState<ProposalDraft[]>([]);
   const [customers, setCustomers] = useState<Customer[]>([]);
   const [selectedId, setSelectedId] = useState<string>('');
@@ -176,6 +205,25 @@ export default function AIIntakePage() {
   const [siteSelections, setSiteSelections] = useState<Record<number, string[]>>({});
   const [existingCustomerId, setExistingCustomerId] = useState('');
   const [lastResult, setLastResult] = useState<{ orderId?: string; customerId?: string } | null>(null);
+  const [voiceNotice, setVoiceNotice] = useState('');
+  const [recordingPreview, setRecordingPreview] = useState<RecordingPreview | null>(null);
+  const [recording, setRecording] = useState(false);
+  const [recordingElapsedMs, setRecordingElapsedMs] = useState(0);
+  const [transcribing, setTranscribing] = useState(false);
+  const recorderRef = useRef<WavRecordingSession | NativeAudioRecordingSession | null>(null);
+  const speechRecognitionRef = useRef<BrowserSpeechRecognition | null>(null);
+  const speechTranscriptRef = useRef('');
+  const speechCancelledRef = useRef(false);
+  const speechErrorRef = useRef<string | null>(null);
+  const speechAutoStoppedRef = useRef(false);
+  const speechStopRequestedRef = useRef(false);
+  const speechRetryCountRef = useRef(0);
+  const recordingStartedAtRef = useRef<number | null>(null);
+  const supportsBrowserSpeech = useMemo(() => isSpeechRecognitionSupported(), []);
+  const supportsNativeRecording = useMemo(() => isNativeAudioRecordingSupported(), []);
+  const supportsWavRecording = useMemo(() => isWavRecordingSupported(), []);
+  const supportsVoice = supportsNativeRecording || supportsBrowserSpeech || supportsWavRecording;
+  const interactionLocked = busy || streaming || recording || transcribing;
 
   async function loadLists(preferredId?: string) {
     const [intakeRows, customerRows] = await Promise.all([
@@ -237,6 +285,354 @@ export default function AIIntakePage() {
 
   const siteCount = useMemo(() => (draft.proposedSites || []).length, [draft.proposedSites]);
 
+  useEffect(() => {
+    if (!recording) return;
+    const timer = window.setInterval(() => {
+      const startedAt = recordingStartedAtRef.current;
+      if (!startedAt) return;
+      const elapsed = Date.now() - startedAt;
+      setRecordingElapsedMs(elapsed);
+      if (elapsed >= MAX_RECORDING_MS && (recorderRef.current || speechRecognitionRef.current)) {
+        void stopRecording(true);
+      }
+    }, 250);
+    return () => window.clearInterval(timer);
+  }, [recording]);
+
+  useEffect(() => {
+    return () => {
+      const recorder = recorderRef.current;
+      recorderRef.current = null;
+      if (recorder) {
+        void recorder.cancel();
+      }
+      const recognition = speechRecognitionRef.current;
+      speechRecognitionRef.current = null;
+      if (recognition) {
+        try {
+          recognition.abort();
+        } catch {}
+      }
+      setRecordingPreview((current) => {
+        if (current?.url) {
+          URL.revokeObjectURL(current.url);
+        }
+        return null;
+      });
+    };
+  }, []);
+
+  function clearVoiceFeedback() {
+    setChatError('');
+    setVoiceNotice('');
+  }
+
+  function replaceRecordingPreview(next: RecordingPreview | null) {
+    setRecordingPreview((current) => {
+      if (current?.url) {
+        URL.revokeObjectURL(current.url);
+      }
+      return next;
+    });
+  }
+
+  function recordingErrorMessage(error: unknown): string {
+    if (error instanceof DOMException) {
+      if (error.name === 'NotAllowedError' || error.name === 'SecurityError') return m.aiIntakePage.voicePermissionDenied;
+      if (error.name === 'NotFoundError' || error.name === 'DevicesNotFoundError') return m.aiIntakePage.voiceNoMicrophone;
+    }
+    if (error instanceof Error) {
+      if (error.message === 'UNSUPPORTED') return m.aiIntakePage.voiceUnsupported;
+      if (error.message === 'NO_MICROPHONE') return m.aiIntakePage.voiceNoMicrophone;
+      return error.message;
+    }
+    return m.aiIntakePage.voiceTranscriptionFailed;
+  }
+
+  function speechRecognitionErrorMessage(errorCode: string | null | undefined): string {
+    if (errorCode === 'not-allowed' || errorCode === 'service-not-allowed') return m.aiIntakePage.voicePermissionDenied;
+    if (errorCode === 'audio-capture') return m.aiIntakePage.voiceNoMicrophone;
+    if (errorCode === 'no-speech') return m.aiIntakePage.voiceNoSpeech;
+    if (errorCode === 'aborted') return '';
+    return m.aiIntakePage.voiceTranscriptionFailed;
+  }
+
+  async function ensureSelectedIntakeId(): Promise<string | null> {
+    if (selectedId) return selectedId;
+    setBusy(true);
+    try {
+      const created = await createIntakeRecord();
+      await loadLists(created.id);
+      return created.id;
+    } catch (error: any) {
+      setChatError(error.message || m.aiIntakePage.createIntakeFailed);
+      return null;
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  function finalizeSpeechRecognition() {
+    const transcript = speechTranscriptRef.current.trim();
+    const cancelled = speechCancelledRef.current;
+    const errorCode = speechErrorRef.current;
+    const autoStopped = speechAutoStoppedRef.current;
+
+    speechRecognitionRef.current = null;
+    speechTranscriptRef.current = '';
+    speechCancelledRef.current = false;
+    speechErrorRef.current = null;
+    speechAutoStoppedRef.current = false;
+    speechStopRequestedRef.current = false;
+    speechRetryCountRef.current = 0;
+    recordingStartedAtRef.current = null;
+    setRecording(false);
+    setRecordingElapsedMs(0);
+
+    if (cancelled) {
+      return;
+    }
+
+    if (transcript) {
+      setChatInput((current) => (current.trim() ? `${current.trimEnd()}\n${transcript}` : transcript));
+      setVoiceNotice(
+        autoStopped ? `${m.aiIntakePage.voiceTooLong} ${m.aiIntakePage.voiceReviewHint}` : m.aiIntakePage.voiceReviewHint
+      );
+      return;
+    }
+
+    if (!errorCode) {
+      setChatError(m.aiIntakePage.voiceNoSpeech);
+      return;
+    }
+
+    const message = speechRecognitionErrorMessage(errorCode);
+    if (message) {
+      setChatError(message);
+    } else if (autoStopped) {
+      setVoiceNotice(m.aiIntakePage.voiceTooLong);
+    }
+  }
+
+  async function startRecording() {
+    clearVoiceFeedback();
+    replaceRecordingPreview(null);
+    if (!supportsVoice) {
+      setChatError(m.aiIntakePage.voiceUnsupported);
+      return;
+    }
+
+    if (supportsNativeRecording) {
+      try {
+        const recorder = await startNativeAudioRecording();
+        recorderRef.current = recorder;
+        recordingStartedAtRef.current = Date.now();
+        setRecordingElapsedMs(0);
+        setRecording(true);
+        return;
+      } catch (error) {
+        recorderRef.current = null;
+        setRecording(false);
+        setChatError(recordingErrorMessage(error));
+        return;
+      }
+    }
+
+    if (supportsBrowserSpeech) {
+      const RecognitionCtor = getSpeechRecognitionCtor();
+      if (!RecognitionCtor) {
+        setChatError(m.aiIntakePage.voiceUnsupported);
+        return;
+      }
+
+      try {
+        const recognition = new RecognitionCtor();
+        speechRecognitionRef.current = recognition;
+        speechTranscriptRef.current = '';
+        speechCancelledRef.current = false;
+        speechErrorRef.current = null;
+        speechAutoStoppedRef.current = false;
+        speechStopRequestedRef.current = false;
+        speechRetryCountRef.current = 0;
+        recognition.lang = localeToSpeechRecognitionLang(locale);
+        recognition.interimResults = true;
+        recognition.continuous = true;
+        recognition.onresult = (event) => {
+          const transcripts: string[] = [];
+          for (const result of Array.from(event.results || [])) {
+            const firstAlternative = result?.[0];
+            if (firstAlternative?.transcript) {
+              transcripts.push(firstAlternative.transcript);
+            }
+          }
+          speechTranscriptRef.current = transcripts.join(' ').trim();
+        };
+        recognition.onerror = (event) => {
+          speechErrorRef.current = event.error || 'unknown';
+        };
+        recognition.onend = () => {
+          const elapsed = recordingStartedAtRef.current ? Date.now() - recordingStartedAtRef.current : 0;
+          const shouldRetryNoSpeech =
+            !speechStopRequestedRef.current &&
+            !speechCancelledRef.current &&
+            !speechTranscriptRef.current.trim() &&
+            speechErrorRef.current === 'no-speech' &&
+            elapsed < MAX_RECORDING_MS &&
+            speechRetryCountRef.current < 2;
+
+          if (shouldRetryNoSpeech) {
+            speechRetryCountRef.current += 1;
+            speechErrorRef.current = null;
+            try {
+              recognition.start();
+              return;
+            } catch {}
+          }
+
+          finalizeSpeechRecognition();
+        };
+        recordingStartedAtRef.current = Date.now();
+        setRecordingElapsedMs(0);
+        setRecording(true);
+        recognition.start();
+        return;
+      } catch (error) {
+        speechRecognitionRef.current = null;
+        setRecording(false);
+        setChatError(recordingErrorMessage(error));
+        return;
+      }
+    }
+
+    try {
+      const recorder = await startMonoWavRecording();
+      recorderRef.current = recorder;
+      recordingStartedAtRef.current = Date.now();
+      setRecordingElapsedMs(0);
+      setRecording(true);
+    } catch (error) {
+      recorderRef.current = null;
+      setRecording(false);
+      setChatError(recordingErrorMessage(error));
+    }
+  }
+
+  async function cancelRecording() {
+    replaceRecordingPreview(null);
+    clearVoiceFeedback();
+
+    const recognition = speechRecognitionRef.current;
+    if (recognition) {
+      speechCancelledRef.current = true;
+      speechErrorRef.current = 'aborted';
+      speechAutoStoppedRef.current = false;
+      speechStopRequestedRef.current = true;
+      recordingStartedAtRef.current = null;
+      setRecording(false);
+      setRecordingElapsedMs(0);
+      try {
+        recognition.abort();
+      } catch {}
+      return;
+    }
+
+    const recorder = recorderRef.current;
+    recorderRef.current = null;
+    recordingStartedAtRef.current = null;
+    setRecording(false);
+    setRecordingElapsedMs(0);
+    if (!recorder) return;
+    try {
+      await recorder.cancel();
+    } catch {}
+  }
+
+  async function stopRecording(autoStopped = false) {
+    const recognition = speechRecognitionRef.current;
+    if (recognition) {
+      speechAutoStoppedRef.current = autoStopped;
+      speechStopRequestedRef.current = true;
+      try {
+        recognition.stop();
+      } catch {}
+      return;
+    }
+
+    const recorder = recorderRef.current;
+    if (!recorder) return;
+
+    recorderRef.current = null;
+    recordingStartedAtRef.current = null;
+    setRecording(false);
+    clearVoiceFeedback();
+
+    try {
+      const result = await recorder.stop();
+      setRecordingElapsedMs(result.durationMs);
+      replaceRecordingPreview({
+        url: URL.createObjectURL(result.blob),
+        durationMs: result.durationMs,
+        sizeBytes: result.blob.size,
+        peak: result.peak,
+      });
+      if (!result.blob.size || result.durationMs <= 0 || (typeof result.peak === 'number' && result.peak < 0.003)) {
+        setChatError(m.aiIntakePage.voiceNoSpeech);
+        if (autoStopped) setVoiceNotice(m.aiIntakePage.voiceTooLong);
+        return;
+      }
+
+      const intakeId = await ensureSelectedIntakeId();
+      if (!intakeId) return;
+
+      const file = new File([result.blob], result.fileName || 'ai-intake.webm', { type: result.mimeType || 'audio/webm' });
+      const formData = new FormData();
+      formData.set('audio', file);
+      formData.set('localeHint', locale);
+      formData.set('durationMs', String(result.durationMs));
+
+      setTranscribing(true);
+      const res = await fetch(`${API_BASE}/ai/intakes/${intakeId}/messages/transcribe`, {
+        method: 'POST',
+        body: formData,
+      });
+      if (!res.ok) throw new Error(await safeMessage(res));
+
+      const payload = (await res.json()) as TranscriptionResponse;
+      const transcript = String(payload.transcript || '').trim();
+      if (!transcript) {
+        throw new Error(m.aiIntakePage.voiceNoSpeech);
+      }
+
+      setChatInput((current) => (current.trim() ? `${current.trimEnd()}\n${transcript}` : transcript));
+      setVoiceNotice(
+        autoStopped ? `${m.aiIntakePage.voiceTooLong} ${m.aiIntakePage.voiceReviewHint}` : m.aiIntakePage.voiceReviewHint
+      );
+    } catch (error) {
+      setChatError(recordingErrorMessage(error));
+    } finally {
+      setTranscribing(false);
+    }
+  }
+
+  async function clearMessages() {
+    if (!selectedId) return alert(m.aiIntakePage.createIntakeFirst);
+    if (!messages.length) return;
+    if (!window.confirm(m.aiIntakePage.clearConversationConfirm)) return;
+
+    setBusy(true);
+    try {
+      const updated = await apiJson<ProposalDraft>(`/ai/intakes/${selectedId}/messages`, 'DELETE');
+      setMessages(updated.messages || []);
+      setChatInput('');
+      clearVoiceFeedback();
+      replaceRecordingPreview(null);
+    } catch (error: any) {
+      alert(error.message);
+    } finally {
+      setBusy(false);
+    }
+  }
+
   async function createIntake() {
     setBusy(true);
     try {
@@ -277,25 +673,12 @@ export default function AIIntakePage() {
   }
 
   async function sendMessage() {
-    let intakeId = selectedId;
     const content = chatInput.trim();
-    if (!content) return;
-    setChatError('');
+    if (!content || recording || transcribing) return;
+    clearVoiceFeedback();
 
-    if (!intakeId) {
-      setBusy(true);
-      try {
-        const created = await createIntakeRecord();
-        intakeId = created.id;
-        await loadLists(intakeId);
-      } catch (error: any) {
-        setChatError(error.message || 'Intake konnte nicht angelegt werden.');
-        setBusy(false);
-        return;
-      } finally {
-        setBusy(false);
-      }
-    }
+    const intakeId = await ensureSelectedIntakeId();
+    if (!intakeId) return;
 
     const userMessage: ProposalMessage = {
       id: `user-${Date.now()}`,
@@ -322,7 +705,7 @@ export default function AIIntakePage() {
         throw new Error(await safeMessage(res));
       }
       if (!res.body) {
-        throw new Error('Streaming wird von diesem Browser nicht unterstuetzt.');
+        throw new Error(m.aiIntakePage.browserStreamingUnsupported);
       }
 
       const reader = res.body.getReader();
@@ -340,14 +723,14 @@ export default function AIIntakePage() {
 
       const normalized = full.replace(/\s+/g, ' ').trim();
       if (normalized.startsWith('[ERROR]')) {
-        setChatError(full.replace(/^\s*\[ERROR\]\s*/, '').trim() || 'Gemini-Antwort fehlgeschlagen.');
+        setChatError(full.replace(/^\s*\[ERROR\]\s*/, '').trim() || m.aiIntakePage.responseFailed);
         return;
       }
 
       await loadIntake(intakeId);
       await loadLists(intakeId);
     } catch (error: any) {
-      setChatError(error.message || 'Nachricht konnte nicht gesendet werden.');
+      setChatError(error.message || m.aiIntakePage.messageSendFailed);
       await loadIntake(intakeId).catch(() => undefined);
     } finally {
       setStreaming(false);
@@ -355,7 +738,7 @@ export default function AIIntakePage() {
   }
 
   async function generateProposal() {
-    if (!selectedId) return alert('Bitte zuerst einen Intake anlegen.');
+    if (!selectedId) return alert(m.aiIntakePage.createIntakeFirst);
     setBusy(true);
     try {
       const updated = await apiJson<ProposalDraft>(`/ai/intakes/${selectedId}/proposal`, 'POST');
@@ -371,7 +754,7 @@ export default function AIIntakePage() {
   }
 
   async function recommendAssignments() {
-    if (!selectedId) return alert('Bitte zuerst einen Intake anlegen.');
+    if (!selectedId) return alert(m.aiIntakePage.createIntakeFirst);
     await saveDraft();
     setBusy(true);
     try {
@@ -393,7 +776,7 @@ export default function AIIntakePage() {
   }
 
   async function confirmProposal() {
-    if (!selectedId) return alert('Bitte zuerst einen Intake anlegen.');
+    if (!selectedId) return alert(m.aiIntakePage.createIntakeFirst);
     await saveDraft();
     setBusy(true);
     try {
@@ -416,7 +799,7 @@ export default function AIIntakePage() {
         proposedSites: response.proposal.proposedSites || [],
       });
       setLastResult(response.result);
-      alert('Vorschlag wurde in Kunden-/Auftragsdaten umgewandelt.');
+      alert(m.aiIntakePage.convertedAlert);
       await loadLists(selectedId);
     } catch (error: any) {
       alert(error.message);
@@ -485,13 +868,13 @@ export default function AIIntakePage() {
     <div className="grid" style={{ gridTemplateColumns: '280px 1fr', alignItems: 'start' }}>
       <div className="card">
         <div style={{ display: 'flex', justifyContent: 'space-between', gap: 8, alignItems: 'center' }}>
-          <h2>AI Intake</h2>
-          <button className="btn primary" onClick={createIntake} disabled={busy || streaming}>
-            Neu
+          <h2>{m.aiIntakePage.intake}</h2>
+          <button className="btn primary" onClick={createIntake} disabled={interactionLocked}>
+            {m.common.createNew}
           </button>
         </div>
         <div className="spacer" />
-        <div className="muted">Chat -&gt; Vorschlag -&gt; Team -&gt; Auftragsanlage</div>
+        <div className="muted">{m.aiIntakePage.flow}</div>
         <div className="spacer" />
         <div style={{ display: 'grid', gap: 8 }}>
           {intakes.map((item) => (
@@ -503,13 +886,16 @@ export default function AIIntakePage() {
                 borderColor: item.id === selectedId ? 'rgba(125,180,255,0.7)' : undefined,
               }}
               onClick={() => loadIntake(item.id).catch((error) => alert(error.message))}
+              disabled={interactionLocked}
             >
-              <div style={{ fontWeight: 700 }}>{item.orderTitle || 'Unbenannter Intake'}</div>
-              <div className="muted">{item.customerCompanyName || 'Kein Kunde'}</div>
-              <div className="muted">Status: {item.status}</div>
+              <div style={{ fontWeight: 700 }}>{item.orderTitle || m.aiIntakePage.unnamed}</div>
+              <div className="muted">{item.customerCompanyName || m.aiIntakePage.noCustomer}</div>
+              <div className="muted">
+                {m.common.status}: {item.status}
+              </div>
             </button>
           ))}
-          {intakes.length === 0 && <div className="muted">Noch keine Intakes vorhanden.</div>}
+          {intakes.length === 0 && <div className="muted">{m.aiIntakePage.noIntakes}</div>}
         </div>
       </div>
 
@@ -517,15 +903,18 @@ export default function AIIntakePage() {
         <div className="card">
           <div style={{ display: 'flex', justifyContent: 'space-between', gap: 8, flexWrap: 'wrap' }}>
             <div>
-              <h2>Konversation</h2>
-              <div className="muted">Erfasste Anforderungen mit Gemini-Unterstuetzung</div>
+              <h2>{m.aiIntakePage.conversation}</h2>
+              <div className="muted">{m.aiIntakePage.conversationDesc}</div>
             </div>
             <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-              <button className="btn" onClick={generateProposal} disabled={!selectedId || busy || streaming}>
-                Vorschlag erzeugen
+              <button className="btn" onClick={generateProposal} disabled={!selectedId || interactionLocked}>
+                {m.aiIntakePage.generateProposal}
               </button>
-              <button className="btn" onClick={saveDraft} disabled={!selectedId || busy || streaming}>
-                Entwurf speichern
+              <button className="btn" onClick={saveDraft} disabled={!selectedId || interactionLocked}>
+                {m.aiIntakePage.saveDraft}
+              </button>
+              <button className="btn" onClick={clearMessages} disabled={!selectedId || interactionLocked || messages.length === 0}>
+                {m.aiIntakePage.clearConversation}
               </button>
             </div>
           </div>
@@ -540,19 +929,69 @@ export default function AIIntakePage() {
                   background: message.role === 'assistant' ? 'rgba(125,180,255,0.08)' : 'transparent',
                 }}
               >
-                <div style={{ fontWeight: 700 }}>{message.role === 'assistant' ? 'Assistent' : 'Manager'}</div>
+                <div style={{ fontWeight: 700 }}>
+                  {message.role === 'assistant' ? m.aiIntakePage.assistant : m.aiIntakePage.manager}
+                </div>
                 <div style={{ whiteSpace: 'pre-wrap' }}>{message.content}</div>
               </div>
             ))}
-            {messages.length === 0 && <div className="muted">Noch keine Unterhaltung.</div>}
+            {messages.length === 0 && <div className="muted">{m.aiIntakePage.noConversation}</div>}
           </div>
 
           <div className="spacer" />
           <textarea
             value={chatInput}
-            onChange={(event) => setChatInput(event.target.value)}
-            placeholder="Neue Nachricht an den Intake-Assistenten..."
+            onChange={(event) => {
+              setChatInput(event.target.value);
+              if (voiceNotice) setVoiceNotice('');
+            }}
+            placeholder={m.aiIntakePage.messagePlaceholder}
           />
+          <div className="spacer" />
+          {supportsVoice ? (
+            <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
+              {!recording ? (
+                <button className="btn" onClick={startRecording} disabled={interactionLocked}>
+                  {m.aiIntakePage.voiceStart}
+                </button>
+              ) : (
+                <>
+                  <button className="btn" onClick={() => void stopRecording()} disabled={transcribing}>
+                    {m.aiIntakePage.voiceStop}
+                  </button>
+                  <button className="btn" onClick={() => void cancelRecording()} disabled={transcribing}>
+                    {m.aiIntakePage.voiceCancel}
+                  </button>
+                  <span className="muted">
+                    {m.aiIntakePage.voiceRecording}: {formatDuration(recordingElapsedMs)}
+                  </span>
+                </>
+              )}
+              {transcribing && <span className="muted">{m.aiIntakePage.voiceTranscribing}</span>}
+            </div>
+          ) : (
+            <div className="muted">{m.aiIntakePage.voiceUnsupported}</div>
+          )}
+          {voiceNotice && (
+            <>
+              <div className="spacer" />
+              <div className="muted">{voiceNotice}</div>
+            </>
+          )}
+          {recordingPreview && (
+            <>
+              <div className="spacer" />
+              <div className="card" style={{ display: 'grid', gap: 8 }}>
+                <div style={{ fontWeight: 700 }}>{m.aiIntakePage.recordingPreview}</div>
+                <audio controls src={recordingPreview.url} style={{ width: '100%' }} />
+                <div className="muted">
+                  {m.aiIntakePage.recordingDuration}: {formatDuration(recordingPreview.durationMs)} |{' '}
+                  {m.aiIntakePage.recordingPeak}: {recordingPreview.peak == null ? '-' : recordingPreview.peak.toFixed(3)} |{' '}
+                  {m.aiIntakePage.recordingSize}: {(recordingPreview.sizeBytes / 1024).toFixed(1)} KB
+                </div>
+              </div>
+            </>
+          )}
           {chatError && (
             <>
               <div className="spacer" />
@@ -562,45 +1001,47 @@ export default function AIIntakePage() {
             </>
           )}
           <div className="spacer" />
-          <button className="btn primary" onClick={sendMessage} disabled={busy || streaming || !chatInput.trim()}>
-            {streaming ? 'Streaming...' : 'Nachricht senden'}
+          <button className="btn primary" onClick={sendMessage} disabled={interactionLocked || !chatInput.trim()}>
+            {streaming ? m.aiIntakePage.streaming : m.aiIntakePage.sendMessage}
           </button>
         </div>
 
         <div className="card">
           <div style={{ display: 'flex', justifyContent: 'space-between', gap: 8, flexWrap: 'wrap' }}>
             <div>
-              <h2>Vorschlag</h2>
-              <div className="muted">Manuell pruefen und korrigieren, bevor Daten angelegt werden.</div>
+              <h2>{m.aiIntakePage.proposal}</h2>
+              <div className="muted">{m.aiIntakePage.proposalDesc}</div>
             </div>
-            <div className="muted">Status: {draft.status || 'intake'}</div>
+            <div className="muted">
+              {m.common.status}: {draft.status || 'intake'}
+            </div>
           </div>
 
           <div className="spacer" />
           <div className="row">
             <div>
-              <label>Firmenname</label>
+              <label>{m.aiIntakePage.companyName}</label>
               <input
                 value={draft.customerCompanyName || ''}
                 onChange={(event) => setDraft((current) => ({ ...current, customerCompanyName: event.target.value }))}
               />
             </div>
             <div>
-              <label>Kontaktname</label>
+              <label>{m.aiIntakePage.contactName}</label>
               <input
                 value={draft.contactName || ''}
                 onChange={(event) => setDraft((current) => ({ ...current, contactName: event.target.value }))}
               />
             </div>
             <div>
-              <label>Kontakttelefon</label>
+              <label>{m.aiIntakePage.contactPhone}</label>
               <input
                 value={draft.contactPhone || ''}
                 onChange={(event) => setDraft((current) => ({ ...current, contactPhone: event.target.value }))}
               />
             </div>
             <div>
-              <label>Kontakt-E-Mail</label>
+              <label>{m.aiIntakePage.contactEmail}</label>
               <input
                 value={draft.contactEmail || ''}
                 onChange={(event) => setDraft((current) => ({ ...current, contactEmail: event.target.value }))}
@@ -611,14 +1052,14 @@ export default function AIIntakePage() {
           <div className="spacer" />
           <div className="row">
             <div>
-              <label>Auftragstitel</label>
+              <label>{m.aiIntakePage.orderTitle}</label>
               <input
                 value={draft.orderTitle || ''}
                 onChange={(event) => setDraft((current) => ({ ...current, orderTitle: event.target.value }))}
               />
             </div>
             <div>
-              <label>Zeitraum Start</label>
+              <label>{m.aiIntakePage.periodStart}</label>
               <input
                 type="date"
                 value={draft.preferredStartDate ? String(draft.preferredStartDate).substring(0, 10) : ''}
@@ -628,7 +1069,7 @@ export default function AIIntakePage() {
               />
             </div>
             <div>
-              <label>Zeitraum Ende</label>
+              <label>{m.aiIntakePage.periodEnd}</label>
               <input
                 type="date"
                 value={draft.preferredEndDate ? String(draft.preferredEndDate).substring(0, 10) : ''}
@@ -638,7 +1079,7 @@ export default function AIIntakePage() {
               />
             </div>
             <div>
-              <label>Gesamtstunden</label>
+              <label>{m.aiIntakePage.totalHours}</label>
               <input
                 value={draft.estimatedHours ?? ''}
                 onChange={(event) => setDraft((current) => ({ ...current, estimatedHours: event.target.value }))}
@@ -649,7 +1090,7 @@ export default function AIIntakePage() {
           <div className="spacer" />
           <div className="row">
             <div>
-              <label>Benoetigte Skills</label>
+              <label>{m.aiIntakePage.requiredSkills}</label>
               <textarea
                 value={listText(draft.requiredSkills)}
                 onChange={(event) =>
@@ -658,7 +1099,7 @@ export default function AIIntakePage() {
               />
             </div>
             <div>
-              <label>Benoetigte Zertifikate</label>
+              <label>{m.aiIntakePage.requiredCertifications}</label>
               <textarea
                 value={listText(draft.requiredCertifications)}
                 onChange={(event) =>
@@ -673,7 +1114,7 @@ export default function AIIntakePage() {
 
           <div className="spacer" />
           <div>
-            <label>Zusammenfassung</label>
+            <label>{m.common.summary}</label>
             <textarea
               value={draft.summary || ''}
               onChange={(event) => setDraft((current) => ({ ...current, summary: event.target.value }))}
@@ -682,7 +1123,7 @@ export default function AIIntakePage() {
 
           <div className="spacer" />
           <div>
-            <label>Auftragsbeschreibung</label>
+            <label>{m.aiIntakePage.orderDescription}</label>
             <textarea
               value={draft.orderDescription || ''}
               onChange={(event) => setDraft((current) => ({ ...current, orderDescription: event.target.value }))}
@@ -691,42 +1132,44 @@ export default function AIIntakePage() {
 
           <div className="spacer" />
           <div style={{ display: 'flex', justifyContent: 'space-between', gap: 8, flexWrap: 'wrap' }}>
-            <h2>Baustellen</h2>
-            <button className="btn" onClick={addSite}>Baustelle hinzufuegen</button>
+            <h2>{m.common.sites}</h2>
+            <button className="btn" onClick={addSite}>{m.aiIntakePage.addSite}</button>
           </div>
           <div className="spacer" />
           <div style={{ display: 'grid', gap: 12 }}>
             {(draft.proposedSites || []).map((site, index) => (
               <div key={`${site.siteName}-${index}`} className="card">
                 <div style={{ display: 'flex', justifyContent: 'space-between', gap: 8, flexWrap: 'wrap' }}>
-                  <div style={{ fontWeight: 700 }}>Baustelle {index + 1}</div>
-                  <button className="btn danger" onClick={() => removeSite(index)}>Entfernen</button>
+                  <div style={{ fontWeight: 700 }}>
+                    {m.aiIntakePage.siteLabel} {index + 1}
+                  </div>
+                  <button className="btn danger" onClick={() => removeSite(index)}>{m.common.remove}</button>
                 </div>
                 <div className="spacer" />
                 <div className="row">
                   <div>
-                    <label>Name</label>
+                    <label>{m.common.name}</label>
                     <input
                       value={site.siteName || ''}
                       onChange={(event) => updateSite(index, { siteName: event.target.value })}
                     />
                   </div>
                   <div>
-                    <label>Strasse</label>
+                    <label>{m.common.street}</label>
                     <input
                       value={site.street || ''}
                       onChange={(event) => updateSite(index, { street: event.target.value })}
                     />
                   </div>
                   <div>
-                    <label>PLZ</label>
+                    <label>{m.common.zipCode}</label>
                     <input
                       value={site.zipCode || ''}
                       onChange={(event) => updateSite(index, { zipCode: event.target.value })}
                     />
                   </div>
                   <div>
-                    <label>Stadt</label>
+                    <label>{m.common.city}</label>
                     <input
                       value={site.city || ''}
                       onChange={(event) => updateSite(index, { city: event.target.value })}
@@ -736,14 +1179,14 @@ export default function AIIntakePage() {
                 <div className="spacer" />
                 <div className="row">
                   <div>
-                    <label>Skills</label>
+                    <label>{m.common.skills}</label>
                     <textarea
                       value={listText(site.requiredSkills)}
                       onChange={(event) => updateSite(index, { requiredSkills: parseList(event.target.value) })}
                     />
                   </div>
                   <div>
-                    <label>Zertifikate</label>
+                    <label>{m.common.certifications}</label>
                     <textarea
                       value={listText(site.requiredCertifications)}
                       onChange={(event) =>
@@ -752,7 +1195,7 @@ export default function AIIntakePage() {
                     />
                   </div>
                   <div>
-                    <label>Stunden</label>
+                    <label>{m.common.hours}</label>
                     <input
                       value={site.estimatedHours ?? ''}
                       onChange={(event) =>
@@ -764,25 +1207,25 @@ export default function AIIntakePage() {
                   </div>
                 </div>
                 <div className="spacer" />
-                <label>Notizen</label>
+                <label>{m.common.notes}</label>
                 <textarea
                   value={site.notes || ''}
                   onChange={(event) => updateSite(index, { notes: event.target.value })}
                 />
               </div>
             ))}
-            {siteCount === 0 && <div className="muted">Noch keine Baustellen im Vorschlag.</div>}
+            {siteCount === 0 && <div className="muted">{m.aiIntakePage.noSites}</div>}
           </div>
         </div>
 
         <div className="card">
           <div style={{ display: 'flex', justifyContent: 'space-between', gap: 8, flexWrap: 'wrap' }}>
             <div>
-              <h2>Personalvorschlaege</h2>
-              <div className="muted">Deterministische Auswahl nach Skills, Kapazitaet und Historie.</div>
+              <h2>{m.aiIntakePage.recommendations}</h2>
+              <div className="muted">{m.aiIntakePage.recommendationsDesc}</div>
             </div>
-            <button className="btn primary" onClick={recommendAssignments} disabled={!selectedId || busy || streaming}>
-              Empfehlungen berechnen
+            <button className="btn primary" onClick={recommendAssignments} disabled={!selectedId || interactionLocked}>
+              {m.aiIntakePage.calculateRecommendations}
             </button>
           </div>
 
@@ -790,12 +1233,12 @@ export default function AIIntakePage() {
             <>
               <div className="spacer" />
               <div className="muted">
-                Zeitraum: {recommendations.window.startDate.substring(0, 10)} bis{' '}
-                {recommendations.window.endDate.substring(0, 10)} ({recommendations.window.weeks} Wochen)
+                {m.aiIntakePage.timeframe}: {recommendations.window.startDate.substring(0, 10)} -{' '}
+                {recommendations.window.endDate.substring(0, 10)} ({recommendations.window.weeks} {m.aiIntakePage.weeksUnit})
               </div>
               {recommendations.pricePreview != null && (
                 <div className="muted">
-                  Preisvorschau: {recommendations.pricePreview} {recommendations.currency || 'EUR'}
+                  {m.aiIntakePage.pricePreview}: {recommendations.pricePreview} {recommendations.currency || 'EUR'}
                 </div>
               )}
               <div className="spacer" />
@@ -804,18 +1247,18 @@ export default function AIIntakePage() {
                   <div key={site.siteIndex} className="card">
                     <div style={{ fontWeight: 700 }}>{site.siteName}</div>
                     <div className="muted">
-                      Stunden: {site.estimatedHours} | Skills: {listText(site.requiredSkills)} | Zertifikate:{' '}
+                      {m.common.hours}: {site.estimatedHours} | {m.common.skills}: {listText(site.requiredSkills)} | {m.common.certifications}:{' '}
                       {listText(site.requiredCertifications)}
                     </div>
                     <div className="spacer" />
                     <table className="table">
                       <thead>
                         <tr>
-                          <th>Auswahl</th>
-                          <th>Mitarbeiter</th>
-                          <th>Score</th>
-                          <th>Grund</th>
-                          <th>Kapazitaet</th>
+                          <th>{m.aiIntakePage.select}</th>
+                          <th>{m.common.employee}</th>
+                          <th>{m.aiIntakePage.score}</th>
+                          <th>{m.aiIntakePage.reason}</th>
+                          <th>{m.aiIntakePage.capacity}</th>
                         </tr>
                       </thead>
                       <tbody>
@@ -831,25 +1274,25 @@ export default function AIIntakePage() {
                             <td>{employee.employeeName}</td>
                             <td>{employee.score}</td>
                             <td>
-                              Skills: {listText(employee.matchedSkills)}
+                              {m.common.skills}: {listText(employee.matchedSkills)}
                               <br />
-                              Zertifikate: {listText(employee.matchedCertifications)}
+                              {m.common.certifications}: {listText(employee.matchedCertifications)}
                               <br />
-                              Historie: {employee.recentEntries} Eintraege
+                              {m.aiIntakePage.history}: {employee.recentEntries} {m.aiIntakePage.entries}
                             </td>
                             <td>
-                              Frei: {employee.capacity.remainingHours}h
-                              {employee.capacity.capacityDefaulted ? ' (Default 40h)' : ''}
+                              {m.aiIntakePage.freeHours}: {employee.capacity.remainingHours}h
+                              {employee.capacity.capacityDefaulted ? ` (${m.aiIntakePage.defaultCapacity})` : ''}
                               <br />
-                              Gebucht: {employee.capacity.loggedHours}h
+                              {m.aiIntakePage.bookedHours}: {employee.capacity.loggedHours}h
                               <br />
-                              Druck aus Zuweisungen: {employee.capacity.assignmentPressureHours}h
+                              {m.aiIntakePage.assignmentPressure}: {employee.capacity.assignmentPressureHours}h
                             </td>
                           </tr>
                         ))}
                         {site.recommendations.length === 0 && (
                           <tr>
-                            <td colSpan={5} className="muted">Keine geeigneten Mitarbeiter gefunden.</td>
+                            <td colSpan={5} className="muted">{m.aiIntakePage.noMatchingEmployees}</td>
                           </tr>
                         )}
                       </tbody>
@@ -858,7 +1301,7 @@ export default function AIIntakePage() {
                       <>
                         <div className="spacer" />
                         <div className="muted">
-                          Ausgeschlossen: {site.excludedEmployees.map((employee) => `${employee.employeeName} (${employee.details})`).join(', ')}
+                          {m.aiIntakePage.excluded}: {site.excludedEmployees.map((employee) => `${employee.employeeName} (${employee.details})`).join(', ')}
                         </div>
                       </>
                     )}
@@ -869,18 +1312,18 @@ export default function AIIntakePage() {
           ) : (
             <>
               <div className="spacer" />
-              <div className="muted">Noch keine Empfehlungen berechnet.</div>
+              <div className="muted">{m.aiIntakePage.noRecommendations}</div>
             </>
           )}
         </div>
 
         <div className="card">
-          <h2>Bestaetigung</h2>
+          <h2>{m.aiIntakePage.confirmation}</h2>
           <div className="row">
             <div>
-              <label>Bestehenden Kunden verwenden (optional)</label>
+              <label>{m.aiIntakePage.useExistingCustomer}</label>
               <select value={existingCustomerId} onChange={(event) => setExistingCustomerId(event.target.value)}>
-                <option value="">Neuen Kunden aus Vorschlag anlegen</option>
+                <option value="">{m.aiIntakePage.createNewCustomer}</option>
                 {customers.map((customer) => (
                   <option key={customer.id} value={customer.id}>
                     {customer.companyName}
@@ -889,14 +1332,14 @@ export default function AIIntakePage() {
               </select>
             </div>
             <div>
-              <label>Geschaetzter Preis</label>
+              <label>{m.aiIntakePage.estimatedPrice}</label>
               <input
                 value={draft.estimatedPrice ?? ''}
                 onChange={(event) => setDraft((current) => ({ ...current, estimatedPrice: event.target.value }))}
               />
             </div>
             <div>
-              <label>Waehrung</label>
+              <label>{m.aiIntakePage.currency}</label>
               <input
                 value={draft.currency || 'EUR'}
                 onChange={(event) => setDraft((current) => ({ ...current, currency: event.target.value }))}
@@ -904,14 +1347,15 @@ export default function AIIntakePage() {
             </div>
           </div>
           <div className="spacer" />
-          <button className="btn primary" onClick={confirmProposal} disabled={!selectedId || busy || streaming}>
-            Vorschlag in Auftrag umwandeln
+          <button className="btn primary" onClick={confirmProposal} disabled={!selectedId || interactionLocked}>
+            {m.aiIntakePage.confirm}
           </button>
           {lastResult?.orderId && (
             <>
               <div className="spacer" />
               <div className="muted">
-                Angelegt: <Link href={`/orders/${lastResult.orderId}`}>Auftrag oeffnen</Link>
+                {m.aiIntakePage.orderCreated}:{' '}
+                <Link href={`/orders/${lastResult.orderId}`}>{m.aiIntakePage.openOrder}</Link>
               </div>
             </>
           )}
