@@ -21,3 +21,9 @@ env/
 
 # Logs
 *.log
+
+# Env templates with local placeholders
+.env.example
+*.env.example
+.env.local.example
+*.env.local.example
