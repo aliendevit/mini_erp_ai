@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from datetime import date, datetime
-from typing import Literal
+from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -16,6 +16,33 @@ class CustomerPayload(BaseModel):
     contactName: str | None = None
     contactPhone: str | None = None
     contactEmail: str | None = None
+    notes: str | None = None
+
+
+class CustomerWorkshopPayload(BaseModel):
+    name: str
+    contactName: str | None = None
+    phone: str | None = None
+    email: str | None = None
+    specialties: list[str] = Field(default_factory=list)
+    notes: str | None = None
+    relationshipStatus: Literal["known", "preferred", "one_time", "blocked"] = "known"
+    isActive: bool = True
+
+
+class PaymentRecordPayload(BaseModel):
+    proposalId: str | None = None
+    customerId: str | None = None
+    orderId: str | None = None
+    invoiceId: str | None = None
+    type: Literal["deposit", "advance", "installment", "final", "other"] = "deposit"
+    status: Literal["planned", "received", "refunded", "canceled"] = "planned"
+    amount: float | None = None
+    currency: str = "EUR"
+    dueDate: datetime | date | None = None
+    paidDate: datetime | date | None = None
+    method: str | None = None
+    reference: str | None = None
     notes: str | None = None
 
 
@@ -129,6 +156,29 @@ class AIIntakeMessagePayload(BaseModel):
     content: str = Field(..., min_length=1, max_length=10000)
 
 
+class ProposalPaymentDraftPayload(BaseModel):
+    type: Literal["deposit", "advance", "installment", "final", "other"] = "deposit"
+    status: Literal["planned", "received", "refunded", "canceled"] = "planned"
+    amount: float | None = None
+    currency: str = "EUR"
+    dueDate: datetime | date | None = None
+    paidDate: datetime | date | None = None
+    method: str | None = None
+    reference: str | None = None
+    notes: str | None = None
+
+
+class ProposalExternalWorkshopDraftPayload(BaseModel):
+    name: str = ""
+    contactName: str | None = None
+    phone: str | None = None
+    email: str | None = None
+    specialties: list[str] = Field(default_factory=list)
+    suggestedFor: list[str] = Field(default_factory=list)
+    relationshipStatus: Literal["known", "preferred", "one_time", "blocked"] = "known"
+    notes: str | None = None
+
+
 class ProposalSiteDraftPayload(BaseModel):
     siteName: str = ""
     street: str | None = None
@@ -138,6 +188,8 @@ class ProposalSiteDraftPayload(BaseModel):
     requiredSkills: list[str] = Field(default_factory=list)
     requiredCertifications: list[str] = Field(default_factory=list)
     estimatedHours: float | None = None
+    recommendedHeadcount: int | None = None
+    resourceStrategy: str | None = None
 
 
 class ProposalDraftPayload(BaseModel):
@@ -162,6 +214,10 @@ class ProposalDraftPayload(BaseModel):
     estimatedPrice: float | None = None
     currency: str | None = None
     recommendedTeam: dict | None = None
+    memorySummary: dict[str, Any] | None = None
+    paymentDrafts: list[ProposalPaymentDraftPayload] = Field(default_factory=list)
+    externalWorkshops: list[ProposalExternalWorkshopDraftPayload] = Field(default_factory=list)
+    staffingPlan: dict[str, Any] | None = None
 
 
 class ProposalSiteAssignmentPayload(BaseModel):
@@ -173,3 +229,4 @@ class AIIntakeConfirmPayload(BaseModel):
     existingCustomerId: str | None = None
     siteAssignments: list[ProposalSiteAssignmentPayload] = Field(default_factory=list)
     manualEstimatedPrice: float | None = None
+    paymentDrafts: list[ProposalPaymentDraftPayload] | None = None

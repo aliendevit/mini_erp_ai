@@ -1,6 +1,9 @@
 from __future__ import annotations
 
+import json
 import logging
+import urllib.error
+import urllib.request
 from collections.abc import Iterable
 from io import BytesIO
 from time import monotonic, sleep
@@ -18,6 +21,110 @@ _LOCALE_HINTS = {
     "en": "English",
     "ar": "Arabic",
 }
+
+
+def _looks_like_quota_error(exc: Exception) -> bool:
+    detail = getattr(exc, "detail", None)
+    text = f"{detail or ''} {str(exc)}".lower()
+    return any(token in text for token in ("429", "quota", "rate limit", "resource exhausted"))
+
+
+def _looks_like_missing_gemini(exc: Exception) -> bool:
+    detail = getattr(exc, "detail", None)
+    text = f"{detail or ''} {str(exc)}".lower()
+    return "missing gemini_api_key" in text or "google-generativeai is not installed" in text
+
+
+def _openrouter_enabled() -> bool:
+    return bool(get_settings().openrouter_api_key)
+
+
+def _openrouter_headers() -> dict[str, str]:
+    settings = get_settings()
+    headers = {
+        "Authorization": f"Bearer {settings.openrouter_api_key}",
+        "Content-Type": "application/json",
+    }
+    if settings.openrouter_site_url:
+        headers["HTTP-Referer"] = settings.openrouter_site_url
+    if settings.openrouter_app_name:
+        headers["X-Title"] = settings.openrouter_app_name
+    return headers
+
+
+def _strip_code_fences(text: str) -> str:
+    candidate = text.strip()
+    if not candidate.startswith("```"):
+        return candidate
+    lines = candidate.splitlines()
+    if lines and lines[0].strip().startswith("```"):
+        lines = lines[1:]
+    if lines and lines[-1].strip().startswith("```"):
+        lines = lines[:-1]
+    return "\n".join(lines).strip()
+
+
+def _openrouter_generate_text(prompt: str, response_mime_type: str | None = None) -> str:
+    settings = get_settings()
+    if not settings.openrouter_api_key:
+        raise HTTPException(
+            status_code=502,
+            detail="Gemini quota was reached and OPENROUTER_API_KEY is missing. Add it to backend-python/.env.",
+        )
+
+    messages: list[dict[str, str]] = []
+    if response_mime_type == "application/json":
+        messages.append(
+            {
+                "role": "system",
+                "content": (
+                    "You are a strict JSON API. Return exactly one valid JSON object only. "
+                    "Do not use markdown, code fences, comments, prose, or explanations. "
+                    "Use null, empty strings, or empty arrays when information is missing."
+                ),
+            }
+        )
+    messages.append({"role": "user", "content": prompt})
+
+    payload: dict[str, Any] = {
+        "model": settings.openrouter_model or "openrouter/free",
+        "messages": messages,
+        "temperature": 0.0 if response_mime_type == "application/json" else 0.2,
+    }
+    if response_mime_type == "application/json" and settings.openrouter_model != "openrouter/free":
+        payload["response_format"] = {"type": "json_object"}
+
+    request = urllib.request.Request(
+        f"{settings.openrouter_api_base}/chat/completions",
+        data=json.dumps(payload).encode("utf-8"),
+        headers=_openrouter_headers(),
+        method="POST",
+    )
+    try:
+        with urllib.request.urlopen(request, timeout=90) as response:
+            raw = response.read().decode("utf-8")
+    except urllib.error.HTTPError as exc:
+        body = exc.read().decode("utf-8", errors="replace")
+        raise HTTPException(status_code=502, detail=f"OpenRouter fallback failed: {exc.code} {body}") from exc
+    except Exception as exc:  # pragma: no cover - network errors vary
+        raise HTTPException(status_code=502, detail=f"OpenRouter fallback failed: {exc}") from exc
+
+    try:
+        data = json.loads(raw)
+        content = str(data["choices"][0]["message"].get("content") or "")
+        return _strip_code_fences(content)
+    except Exception as exc:
+        logger.warning("OpenRouter fallback returned an invalid response body: %s", raw[:500])
+        raise HTTPException(status_code=502, detail="OpenRouter fallback returned an invalid response.") from exc
+
+
+def _fallback_text_if_possible(exc: Exception, prompt: str, response_mime_type: str | None = None) -> str | None:
+    if not (_looks_like_quota_error(exc) or _looks_like_missing_gemini(exc)):
+        return None
+    if not _openrouter_enabled():
+        return None
+    logger.warning("Gemini unavailable/quota-limited; using OpenRouter fallback.")
+    return _openrouter_generate_text(prompt, response_mime_type=response_mime_type)
 
 
 def ensure_gemini_ready():
@@ -41,25 +148,34 @@ def _get_model(response_mime_type: str | None = None):
 
 
 def generate_text(prompt: str, response_mime_type: str | None = None) -> str:
-    model = _get_model(response_mime_type=response_mime_type)
     try:
+        model = _get_model(response_mime_type=response_mime_type)
         response = model.generate_content(prompt)
+        return (getattr(response, "text", "") or "").strip()
     except Exception as exc:  # pragma: no cover - provider/library errors vary
+        fallback = _fallback_text_if_possible(exc, prompt, response_mime_type=response_mime_type)
+        if fallback is not None:
+            return fallback
+        if isinstance(exc, HTTPException):
+            raise
         raise HTTPException(status_code=502, detail=str(exc)) from exc
-    return (getattr(response, "text", "") or "").strip()
 
 
 def stream_text(prompt: str) -> Iterable[str]:
-    model = _get_model()
     try:
+        model = _get_model()
         response = model.generate_content(prompt, stream=True)
         for chunk in response:
             text = getattr(chunk, "text", None)
             if text:
                 yield text
-    except HTTPException:
-        raise
     except Exception as exc:  # pragma: no cover - provider/library errors vary
+        fallback = _fallback_text_if_possible(exc, prompt)
+        if fallback is not None:
+            yield fallback
+            return
+        if isinstance(exc, HTTPException):
+            raise
         raise HTTPException(status_code=502, detail=str(exc)) from exc
 
 

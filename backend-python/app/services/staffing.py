@@ -8,8 +8,8 @@ from typing import Any
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session, selectinload
 
-from ..models import Employee, EmployeeAssignment, EmployeeAvailabilityBlock, Proposal, WorkEntry
-from .proposals import calculate_price_from_assignments, proposal_required_certifications, proposal_required_skills, proposal_sites, proposal_window
+from ..models import Customer, CustomerWorkshop, Employee, EmployeeAssignment, EmployeeAvailabilityBlock, Proposal, WorkEntry
+from .proposals import calculate_price_from_assignments, proposal_external_workshops, proposal_required_certifications, proposal_required_skills, proposal_sites, proposal_window
 
 
 DEFAULT_WEEKLY_CAPACITY = 40.0
@@ -159,6 +159,85 @@ def _site_hour_target(site: dict[str, Any], proposal_hours: float, site_count: i
     return 8.0
 
 
+def _find_matching_customer(db: Session, proposal: Proposal) -> Customer | None:
+    if proposal.converted_customer_id:
+        customer = db.get(Customer, proposal.converted_customer_id)
+        if customer:
+            return customer
+    name = (proposal.customer_company_name or "").strip().lower()
+    if not name:
+        return None
+    return db.scalar(select(Customer).where(func.lower(Customer.company_name) == name).limit(1))
+
+
+def _workshop_terms(workshop: CustomerWorkshop | dict[str, Any]) -> set[str]:
+    if isinstance(workshop, CustomerWorkshop):
+        values = []
+        try:
+            import json
+
+            values = json.loads(workshop.specialties_json or "[]")
+        except Exception:
+            values = []
+        return _lower_terms([str(value) for value in values])
+    return _lower_terms([str(value) for value in workshop.get("specialties") or []])
+
+
+def _rank_workshop_options(
+    known_workshops: list[CustomerWorkshop],
+    external_workshops: list[dict[str, Any]],
+    required_skills: set[str],
+    site_name: str | None,
+) -> list[dict[str, Any]]:
+    options: list[dict[str, Any]] = []
+    normalized_site = (site_name or "").strip().lower()
+
+    for workshop in known_workshops:
+        if not workshop.is_active or workshop.relationship_status == "blocked":
+            continue
+        terms = _workshop_terms(workshop)
+        matched = sorted(skill for skill in required_skills if skill in terms)
+        skill_score = (len(matched) / len(required_skills)) if required_skills else 0.6
+        relationship_bonus = 0.2 if workshop.relationship_status == "preferred" else 0.1
+        score = round(min(1.0, skill_score + relationship_bonus) * 100, 1)
+        options.append(
+            {
+                "kind": "known_customer_workshop",
+                "workshopId": workshop.id,
+                "name": workshop.name,
+                "score": score,
+                "matchedSkills": matched,
+                "relationshipStatus": workshop.relationship_status,
+                "reason": "Known contractor workshop linked to this customer.",
+                "notes": workshop.notes,
+            }
+        )
+
+    for index, workshop in enumerate(external_workshops):
+        terms = _workshop_terms(workshop)
+        suggested_for = [str(value).strip().lower() for value in workshop.get("suggestedFor") or []]
+        matched = sorted(skill for skill in required_skills if skill in terms)
+        site_bonus = 0.2 if normalized_site and any(normalized_site in value or value in normalized_site for value in suggested_for) else 0.0
+        skill_score = (len(matched) / len(required_skills)) if required_skills else 0.5
+        score = round(min(1.0, skill_score + site_bonus) * 100, 1)
+        options.append(
+            {
+                "kind": "transcript_external_workshop",
+                "workshopId": None,
+                "draftIndex": index,
+                "name": workshop.get("name"),
+                "score": score,
+                "matchedSkills": matched,
+                "relationshipStatus": workshop.get("relationshipStatus") or "known",
+                "reason": "External workshop/team mentioned in this intake transcript.",
+                "notes": workshop.get("notes"),
+            }
+        )
+
+    options.sort(key=lambda item: (-float(item.get("score") or 0), str(item.get("name") or "")))
+    return options
+
+
 def recommend_staff_for_proposal(db: Session, proposal: Proposal) -> dict[str, Any]:
     window_start, window_end = proposal_window(proposal)
     days = max(1, (window_end.date() - window_start.date()).days + 1)
@@ -166,6 +245,20 @@ def recommend_staff_for_proposal(db: Session, proposal: Proposal) -> dict[str, A
     proposal_hours = float(proposal.estimated_hours or 0)
     global_required_skills = _lower_terms(proposal_required_skills(proposal))
     global_required_certs = _lower_terms(proposal_required_certifications(proposal))
+
+    customer = _find_matching_customer(db, proposal)
+    known_workshops = (
+        db.scalars(
+            select(CustomerWorkshop)
+            .where(CustomerWorkshop.customer_id == customer.id)
+            .where(CustomerWorkshop.is_active.is_(True))
+            .where(CustomerWorkshop.relationship_status != "blocked")
+            .order_by(CustomerWorkshop.name.asc())
+        ).all()
+        if customer
+        else []
+    )
+    external_workshops = proposal_external_workshops(proposal)
 
     employees = db.scalars(
         select(Employee)
@@ -184,6 +277,7 @@ def recommend_staff_for_proposal(db: Session, proposal: Proposal) -> dict[str, A
         hour_target = _site_hour_target(site, proposal_hours, len(sites))
         recommendations: list[dict[str, Any]] = []
         excluded: list[dict[str, Any]] = []
+        workshop_recommendations = _rank_workshop_options(known_workshops, external_workshops, required_skills, site.get("siteName"))
 
         for employee in employees:
             employee_skills = _lower_terms([item.name for item in employee.skill_records if item.kind == "skill"])
@@ -261,6 +355,7 @@ def recommend_staff_for_proposal(db: Session, proposal: Proposal) -> dict[str, A
                 "requiredCertifications": sorted(required_certs),
                 "estimatedHours": round(hour_target, 2),
                 "recommendations": recommendations,
+                "workshopRecommendations": workshop_recommendations,
                 "excludedEmployees": excluded,
             }
         )
@@ -281,4 +376,5 @@ def recommend_staff_for_proposal(db: Session, proposal: Proposal) -> dict[str, A
         "sites": results,
         "pricePreview": float(price_preview) if price_preview is not None else None,
         "currency": proposal.currency,
+        "staffingPlan": getattr(proposal, "staffing_plan_json", None),
     }

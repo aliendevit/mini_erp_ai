@@ -28,8 +28,12 @@ from ..services.proposals import (
     append_message,
     apply_proposal_update,
     build_intake_chat_prompt,
+    clear_proposal_memory,
     confirm_proposal,
     extract_proposal_from_messages,
+    refresh_proposal_memory,
+    refresh_proposal_memory_locally,
+    sanitize_intake_assistant_reply,
 )
 from ..services.staffing import recommend_staff_for_proposal
 from ..utils import as_datetime, decimal_or_none, end_of_utc_day, ensure, json_dumps, not_found, proposal_payload
@@ -56,7 +60,7 @@ MAX_AUDIO_DURATION_MS = 90_000
 
 
 def _proposal_query():
-    return select(Proposal).options(selectinload(Proposal.messages)).order_by(Proposal.updated_at.desc())
+    return select(Proposal).options(selectinload(Proposal.messages), selectinload(Proposal.facts)).order_by(Proposal.updated_at.desc())
 
 
 def _get_proposal(db: Session, proposal_id: str) -> Proposal:
@@ -131,6 +135,7 @@ def update_intake(proposal_id: str, payload: ProposalDraftPayload, db: Session =
 def clear_intake_messages(proposal_id: str, db: Session = Depends(get_db)) -> dict:
     proposal = _get_proposal(db, proposal_id)
     proposal.messages.clear()
+    clear_proposal_memory(db, proposal)
     proposal.updated_at = datetime.now(timezone.utc)
     db.add(proposal)
     db.commit()
@@ -144,6 +149,13 @@ def intake_message_stream(proposal_id: str, payload: AIIntakeMessagePayload, db:
     append_message(db, proposal, "user", payload.content)
     db.commit()
     proposal = _get_proposal(db, proposal_id)
+    try:
+        refresh_proposal_memory_locally(db, proposal, proposal.messages)
+        db.commit()
+    except Exception as exc:
+        db.rollback()
+        logger.warning("AI intake memory refresh failed: proposal_id=%s error=%s", proposal_id, exc)
+    proposal = _get_proposal(db, proposal_id)
     ensure_gemini_ready()
 
     def generate() -> Iterable[str]:
@@ -152,9 +164,10 @@ def intake_message_stream(proposal_id: str, payload: AIIntakeMessagePayload, db:
             prompt = build_intake_chat_prompt(proposal, proposal.messages)
             for chunk in stream_text(prompt):
                 assistant_parts.append(chunk)
-                yield chunk
-            assistant_text = "".join(assistant_parts).strip()
+
+            assistant_text = sanitize_intake_assistant_reply("".join(assistant_parts))
             if assistant_text:
+                yield assistant_text
                 append_message(db, proposal, "assistant", assistant_text)
                 db.commit()
         except Exception as exc:
@@ -166,6 +179,48 @@ def intake_message_stream(proposal_id: str, payload: AIIntakeMessagePayload, db:
         "X-Accel-Buffering": "no",
     }
     return StreamingResponse(generate(), media_type="text/plain; charset=utf-8", headers=headers)
+
+
+@router.get("/ai/intakes/{proposal_id}/memory")
+def get_intake_memory(proposal_id: str, db: Session = Depends(get_db)) -> dict:
+    proposal = _get_proposal(db, proposal_id)
+    payload = proposal_payload(proposal, include_messages=True)
+    return {
+        "proposalId": proposal.id,
+        "facts": payload.get("facts", []),
+        "memorySummary": payload.get("memorySummary"),
+        "paymentDrafts": payload.get("paymentDrafts", []),
+        "externalWorkshops": payload.get("externalWorkshops", []),
+        "staffingPlan": payload.get("staffingPlan"),
+    }
+
+
+@router.post("/ai/intakes/{proposal_id}/memory/refresh")
+def refresh_intake_memory(proposal_id: str, db: Session = Depends(get_db)) -> dict:
+    proposal = _get_proposal(db, proposal_id)
+    ensure(bool(proposal.messages), "Bitte zuerst eine Unterhaltung fuehren.")
+    refresh_proposal_memory(db, proposal, proposal.messages)
+    db.commit()
+    proposal = _get_proposal(db, proposal_id)
+    payload = proposal_payload(proposal, include_messages=True)
+    return {
+        "proposalId": proposal.id,
+        "facts": payload.get("facts", []),
+        "memorySummary": payload.get("memorySummary"),
+        "paymentDrafts": payload.get("paymentDrafts", []),
+        "externalWorkshops": payload.get("externalWorkshops", []),
+        "staffingPlan": payload.get("staffingPlan"),
+    }
+
+
+@router.delete("/ai/intakes/{proposal_id}/memory")
+def delete_intake_memory(proposal_id: str, db: Session = Depends(get_db)) -> dict:
+    proposal = _get_proposal(db, proposal_id)
+    clear_proposal_memory(db, proposal)
+    proposal.updated_at = datetime.now(timezone.utc)
+    db.commit()
+    db.refresh(proposal)
+    return proposal_payload(proposal, include_messages=True)
 
 
 @router.post("/ai/intakes/{proposal_id}/messages/transcribe")
@@ -249,6 +304,12 @@ async def transcribe_intake_audio(
 def generate_proposal(proposal_id: str, db: Session = Depends(get_db)) -> dict:
     proposal = _get_proposal(db, proposal_id)
     ensure(bool(proposal.messages), "Bitte zuerst eine Unterhaltung fuehren.")
+    try:
+        refresh_proposal_memory_locally(db, proposal, proposal.messages)
+    except Exception as exc:
+        db.rollback()
+        proposal = _get_proposal(db, proposal_id)
+        logger.warning("AI intake local memory refresh before proposal failed: proposal_id=%s error=%s", proposal_id, exc)
     extract_proposal_from_messages(proposal, proposal.messages)
     db.commit()
     db.refresh(proposal)
@@ -282,6 +343,7 @@ def confirm_intake(proposal_id: str, payload: AIIntakeConfirmPayload, db: Sessio
         existing_customer_id=payload.existingCustomerId,
         site_assignments=site_assignments,
         manual_estimated_price=payload.manualEstimatedPrice,
+        payment_drafts=[item.model_dump() for item in payload.paymentDrafts] if payload.paymentDrafts is not None else None,
     )
     db.commit()
     db.refresh(proposal)

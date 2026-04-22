@@ -49,11 +49,37 @@ def _ensure_employee_staffing_columns() -> None:
             conn.execute(text(statement))
 
 
+def _ensure_ai_intake_columns() -> None:
+    inspector = inspect(engine)
+    if "Proposal" not in inspector.get_table_names():
+        return
+
+    column_names = {column["name"] for column in inspector.get_columns("Proposal")}
+    statements: list[str] = []
+    column_statements = {
+        "memorySummaryJson": 'ALTER TABLE "Proposal" ADD COLUMN "memorySummaryJson" TEXT',
+        "paymentDraftsJson": 'ALTER TABLE "Proposal" ADD COLUMN "paymentDraftsJson" TEXT',
+        "externalWorkshopsJson": 'ALTER TABLE "Proposal" ADD COLUMN "externalWorkshopsJson" TEXT',
+        "staffingPlanJson": 'ALTER TABLE "Proposal" ADD COLUMN "staffingPlanJson" TEXT',
+    }
+    for column_name, statement in column_statements.items():
+        if column_name not in column_names:
+            statements.append(statement)
+
+    if not statements:
+        return
+
+    with engine.begin() as conn:
+        for statement in statements:
+            conn.execute(text(statement))
+
+
 def init_db() -> None:
     from . import models  # noqa: F401
 
     Base.metadata.create_all(bind=engine)
     _ensure_employee_staffing_columns()
+    _ensure_ai_intake_columns()
 
 
 def get_db() -> Generator[Session, None, None]:

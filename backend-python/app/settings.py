@@ -31,6 +31,11 @@ class Settings(BaseModel):
     gemini_model: str = os.getenv("GEMINI_MODEL", "gemini-1.5-flash").strip()
     assemblyai_api_key: str = os.getenv("ASSEMBLYAI_API_KEY", "").strip()
     assemblyai_api_base: str = os.getenv("ASSEMBLYAI_API_BASE", "https://api.assemblyai.com").rstrip("/")
+    openrouter_api_key: str = os.getenv("OPENROUTER_API_KEY", "").strip()
+    openrouter_api_base: str = os.getenv("OPENROUTER_API_BASE", "https://openrouter.ai/api/v1").rstrip("/")
+    openrouter_model: str = os.getenv("OPENROUTER_MODEL", "openrouter/free").strip()
+    openrouter_site_url: str = os.getenv("OPENROUTER_SITE_URL", "http://localhost:3000").strip()
+    openrouter_app_name: str = os.getenv("OPENROUTER_APP_NAME", "Mini ERP AI").strip()
 
 
 @lru_cache(maxsize=1)

@@ -60,6 +60,31 @@ class Customer(Base):
 
     orders: Mapped[list["Order"]] = relationship(back_populates="customer")
     invoices: Mapped[list["Invoice"]] = relationship(back_populates="customer")
+    workshops: Mapped[list["CustomerWorkshop"]] = relationship(back_populates="customer")
+
+
+class CustomerWorkshop(Base):
+    __tablename__ = "CustomerWorkshop"
+    __table_args__ = (Index("CustomerWorkshop_customerId_idx", "customerId"),)
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid4()))
+    customer_id: Mapped[str] = mapped_column("customerId", String(36), ForeignKey("Customer.id"), nullable=False)
+    name: Mapped[str] = mapped_column(String, nullable=False)
+    contact_name: Mapped[str | None] = mapped_column("contactName", String)
+    phone: Mapped[str | None] = mapped_column(String)
+    email: Mapped[str | None] = mapped_column(String)
+    specialties_json: Mapped[str | None] = mapped_column("specialtiesJson", Text)
+    notes: Mapped[str | None] = mapped_column(Text)
+    relationship_status: Mapped[str] = mapped_column(
+        "relationshipStatus", String, nullable=False, default="known", server_default="known"
+    )
+    is_active: Mapped[bool] = mapped_column("isActive", Boolean, nullable=False, default=True, server_default="true")
+    created_at: Mapped[datetime] = mapped_column("createdAt", DateTime(timezone=True), server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(
+        "updatedAt", DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
+    )
+
+    customer: Mapped[Customer] = relationship(back_populates="workshops")
 
 
 class Order(Base):
@@ -233,6 +258,35 @@ class Invoice(Base):
     lines: Mapped[list["InvoiceLine"]] = relationship(back_populates="invoice")
 
 
+class PaymentRecord(Base):
+    __tablename__ = "PaymentRecord"
+    __table_args__ = (
+        Index("PaymentRecord_proposalId_idx", "proposalId"),
+        Index("PaymentRecord_customerId_idx", "customerId"),
+        Index("PaymentRecord_orderId_idx", "orderId"),
+        Index("PaymentRecord_invoiceId_idx", "invoiceId"),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid4()))
+    proposal_id: Mapped[str | None] = mapped_column("proposalId", String(36), ForeignKey("Proposal.id"))
+    customer_id: Mapped[str | None] = mapped_column("customerId", String(36), ForeignKey("Customer.id"))
+    order_id: Mapped[str | None] = mapped_column("orderId", String(36), ForeignKey("Order.id"))
+    invoice_id: Mapped[str | None] = mapped_column("invoiceId", String(36), ForeignKey("Invoice.id"))
+    payment_type: Mapped[str] = mapped_column("type", String, nullable=False, default="deposit", server_default="deposit")
+    status: Mapped[str] = mapped_column(String, nullable=False, default="planned", server_default="planned")
+    amount: Mapped[Decimal | None] = mapped_column(Numeric(10, 2))
+    currency: Mapped[str] = mapped_column(String, nullable=False, default="EUR", server_default="EUR")
+    due_date: Mapped[datetime | None] = mapped_column("dueDate", DateTime(timezone=True))
+    paid_date: Mapped[datetime | None] = mapped_column("paidDate", DateTime(timezone=True))
+    method: Mapped[str | None] = mapped_column(String)
+    reference: Mapped[str | None] = mapped_column(String)
+    notes: Mapped[str | None] = mapped_column(Text)
+    created_at: Mapped[datetime] = mapped_column("createdAt", DateTime(timezone=True), server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(
+        "updatedAt", DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
+    )
+
+
 class InvoiceLine(Base):
     __tablename__ = "InvoiceLine"
     __table_args__ = (
@@ -293,6 +347,10 @@ class Proposal(Base):
     estimated_price: Mapped[Decimal | None] = mapped_column("estimatedPrice", Numeric(10, 2))
     currency: Mapped[str] = mapped_column(String, nullable=False, default="EUR", server_default="EUR")
     recommended_team_json: Mapped[str | None] = mapped_column("recommendedTeamJson", Text)
+    memory_summary_json: Mapped[str | None] = mapped_column("memorySummaryJson", Text)
+    payment_drafts_json: Mapped[str | None] = mapped_column("paymentDraftsJson", Text)
+    external_workshops_json: Mapped[str | None] = mapped_column("externalWorkshopsJson", Text)
+    staffing_plan_json: Mapped[str | None] = mapped_column("staffingPlanJson", Text)
     converted_customer_id: Mapped[str | None] = mapped_column("convertedCustomerId", String(36), ForeignKey("Customer.id"))
     converted_order_id: Mapped[str | None] = mapped_column("convertedOrderId", String(36), ForeignKey("Order.id"))
     created_at: Mapped[datetime] = mapped_column("createdAt", DateTime(timezone=True), server_default=func.now())
@@ -303,6 +361,29 @@ class Proposal(Base):
     messages: Mapped[list["ProposalMessage"]] = relationship(
         back_populates="proposal", cascade="all, delete-orphan", order_by="ProposalMessage.created_at"
     )
+    facts: Mapped[list["ProposalFact"]] = relationship(
+        back_populates="proposal", cascade="all, delete-orphan", order_by="ProposalFact.created_at"
+    )
+
+
+class ProposalFact(Base):
+    __tablename__ = "ProposalFact"
+    __table_args__ = (Index("ProposalFact_proposalId_idx", "proposalId"),)
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid4()))
+    proposal_id: Mapped[str] = mapped_column("proposalId", String(36), ForeignKey("Proposal.id"), nullable=False)
+    category: Mapped[str] = mapped_column(String, nullable=False)
+    fact_key: Mapped[str] = mapped_column("key", String, nullable=False)
+    value_json: Mapped[str | None] = mapped_column("valueJson", Text)
+    confidence: Mapped[Decimal | None] = mapped_column(Numeric(5, 2))
+    source_message_ids_json: Mapped[str | None] = mapped_column("sourceMessageIdsJson", Text)
+    is_active: Mapped[bool] = mapped_column("isActive", Boolean, nullable=False, default=True, server_default="true")
+    created_at: Mapped[datetime] = mapped_column("createdAt", DateTime(timezone=True), server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(
+        "updatedAt", DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
+    )
+
+    proposal: Mapped[Proposal] = relationship(back_populates="facts")
 
 
 class ProposalMessage(Base):

@@ -13,6 +13,7 @@ from sqlalchemy.orm import Session
 
 from .models import (
     Customer,
+    CustomerWorkshop,
     Employee,
     EmployeeAvailabilityBlock,
     EmployeeAssignment,
@@ -21,7 +22,9 @@ from .models import (
     InvoiceLine,
     InvoiceSequence,
     Order,
+    PaymentRecord,
     Proposal,
+    ProposalFact,
     ProposalMessage,
     Site,
     WorkEntry,
@@ -214,6 +217,25 @@ def customer_payload(customer: Customer) -> dict[str, Any]:
     )
 
 
+def customer_workshop_payload(workshop: CustomerWorkshop) -> dict[str, Any]:
+    return jsonable_encoder(
+        {
+            "id": workshop.id,
+            "customerId": workshop.customer_id,
+            "name": workshop.name,
+            "contactName": workshop.contact_name,
+            "phone": workshop.phone,
+            "email": workshop.email,
+            "specialties": json_loads(workshop.specialties_json, []),
+            "notes": workshop.notes,
+            "relationshipStatus": workshop.relationship_status,
+            "isActive": workshop.is_active,
+            "createdAt": workshop.created_at,
+            "updatedAt": workshop.updated_at,
+        }
+    )
+
+
 def employee_skill_payload(skill: EmployeeSkill) -> dict[str, Any]:
     return jsonable_encoder(
         {
@@ -377,6 +399,29 @@ def invoice_payload(invoice: Invoice, include_customer: bool = False, include_li
     return jsonable_encoder(data)
 
 
+def payment_record_payload(payment: PaymentRecord) -> dict[str, Any]:
+    return jsonable_encoder(
+        {
+            "id": payment.id,
+            "proposalId": payment.proposal_id,
+            "customerId": payment.customer_id,
+            "orderId": payment.order_id,
+            "invoiceId": payment.invoice_id,
+            "type": payment.payment_type,
+            "status": payment.status,
+            "amount": payment.amount,
+            "currency": payment.currency,
+            "dueDate": payment.due_date,
+            "paidDate": payment.paid_date,
+            "method": payment.method,
+            "reference": payment.reference,
+            "notes": payment.notes,
+            "createdAt": payment.created_at,
+            "updatedAt": payment.updated_at,
+        }
+    )
+
+
 def work_entry_payload(work_entry: WorkEntry, include_invoice_lines: bool = True) -> dict[str, Any]:
     data: dict[str, Any] = {
         "id": work_entry.id,
@@ -400,6 +445,23 @@ def work_entry_payload(work_entry: WorkEntry, include_invoice_lines: bool = True
     if include_invoice_lines:
         data["invoiceLines"] = [invoice_line_payload(line, include_invoice=True) for line in work_entry.invoice_lines]
     return jsonable_encoder(data)
+
+
+def proposal_fact_payload(fact: ProposalFact) -> dict[str, Any]:
+    return jsonable_encoder(
+        {
+            "id": fact.id,
+            "proposalId": fact.proposal_id,
+            "category": fact.category,
+            "key": fact.fact_key,
+            "value": json_loads(fact.value_json, None),
+            "confidence": fact.confidence,
+            "sourceMessageIds": json_loads(fact.source_message_ids_json, []),
+            "isActive": fact.is_active,
+            "createdAt": fact.created_at,
+            "updatedAt": fact.updated_at,
+        }
+    )
 
 
 def proposal_message_payload(message: ProposalMessage) -> dict[str, Any]:
@@ -438,6 +500,11 @@ def proposal_payload(proposal: Proposal, include_messages: bool = False) -> dict
         "estimatedPrice": proposal.estimated_price,
         "currency": proposal.currency,
         "recommendedTeam": json_loads(proposal.recommended_team_json, None),
+        "memorySummary": json_loads(proposal.memory_summary_json, None),
+        "paymentDrafts": json_loads(proposal.payment_drafts_json, []),
+        "externalWorkshops": json_loads(proposal.external_workshops_json, []),
+        "knownCustomerWorkshops": [],
+        "staffingPlan": json_loads(proposal.staffing_plan_json, None),
         "convertedCustomerId": proposal.converted_customer_id,
         "convertedOrderId": proposal.converted_order_id,
         "createdAt": proposal.created_at,
@@ -445,6 +512,7 @@ def proposal_payload(proposal: Proposal, include_messages: bool = False) -> dict
     }
     if include_messages:
         data["messages"] = [proposal_message_payload(item) for item in proposal.messages]
+        data["facts"] = [proposal_fact_payload(item) for item in getattr(proposal, "facts", []) if item.is_active]
     return jsonable_encoder(data)
 
 

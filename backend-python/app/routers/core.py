@@ -10,6 +10,7 @@ from sqlalchemy.orm import Session, joinedload, selectinload
 from ..database import get_db
 from ..models import (
     Customer,
+    CustomerWorkshop,
     Employee,
     EmployeeAssignment,
     EmployeeAvailabilityBlock,
@@ -18,6 +19,7 @@ from ..models import (
     InvoiceLine,
     InvoiceSequence,
     Order,
+    PaymentRecord,
     Site,
     WorkEntry,
 )
@@ -25,9 +27,11 @@ from ..schemas import (
     AssignmentPayload,
     AssignmentUpdatePayload,
     CustomerPayload,
+    CustomerWorkshopPayload,
     EmployeePayload,
     InvoiceSequenceUpdatePayload,
     OrderPayload,
+    PaymentRecordPayload,
     SitePayload,
     WorkEntryPayload,
 )
@@ -38,6 +42,7 @@ from ..utils import (
     as_datetime,
     assignment_payload,
     customer_payload,
+    customer_workshop_payload,
     decimal_or_none,
     employee_payload,
     end_of_utc_day,
@@ -50,14 +55,46 @@ from ..utils import (
     order_payload,
     parse_seq,
     parse_year,
+    payment_record_payload,
     parse_ymd_to_utc_start,
     raise_delete_error,
     raise_unique_error,
     site_payload,
     work_entry_payload,
+    json_dumps,
 )
 
 router = APIRouter()
+
+
+
+def _apply_workshop_payload(item: CustomerWorkshop, payload: CustomerWorkshopPayload) -> CustomerWorkshop:
+    item.name = payload.name.strip()
+    item.contact_name = payload.contactName
+    item.phone = payload.phone
+    item.email = payload.email
+    item.specialties_json = json_dumps(sorted({value.strip() for value in payload.specialties if value and value.strip()}))
+    item.notes = payload.notes
+    item.relationship_status = payload.relationshipStatus or "known"
+    item.is_active = payload.isActive
+    return item
+
+
+def _apply_payment_payload(item: PaymentRecord, payload: PaymentRecordPayload) -> PaymentRecord:
+    item.proposal_id = payload.proposalId
+    item.customer_id = payload.customerId
+    item.order_id = payload.orderId
+    item.invoice_id = payload.invoiceId
+    item.payment_type = payload.type or "deposit"
+    item.status = payload.status or "planned"
+    item.amount = decimal_or_none(payload.amount)
+    item.currency = payload.currency or "EUR"
+    item.due_date = as_datetime(payload.dueDate)
+    item.paid_date = as_datetime(payload.paidDate)
+    item.method = payload.method
+    item.reference = payload.reference
+    item.notes = payload.notes
+    return item
 
 
 def _create_draft_invoice(db: Session, customer_id: str) -> Invoice:
@@ -191,6 +228,55 @@ def delete_customer(customer_id: str, db: Session = Depends(get_db)) -> dict:
     except IntegrityError as exc:
         db.rollback()
         raise_delete_error(exc, "Kunde", "Bitte zuerst verknuepfte Auftraege/Rechnungen loeschen.")
+
+
+@router.get("/customers/{customer_id}/workshops")
+def list_customer_workshops(customer_id: str, db: Session = Depends(get_db)) -> list[dict]:
+    customer = db.get(Customer, customer_id)
+    if not customer:
+        raise not_found()
+    items = db.scalars(
+        select(CustomerWorkshop)
+        .where(CustomerWorkshop.customer_id == customer_id)
+        .order_by(CustomerWorkshop.name.asc())
+    ).all()
+    return [customer_workshop_payload(item) for item in items]
+
+
+@router.post("/customers/{customer_id}/workshops", status_code=201)
+def create_customer_workshop(customer_id: str, payload: CustomerWorkshopPayload, db: Session = Depends(get_db)) -> dict:
+    customer = db.get(Customer, customer_id)
+    if not customer:
+        raise not_found()
+    ensure(bool(payload.name and payload.name.strip()), "Workshop-Name fehlt.")
+    item = CustomerWorkshop(customer_id=customer_id, name=payload.name.strip())
+    _apply_workshop_payload(item, payload)
+    db.add(item)
+    db.commit()
+    db.refresh(item)
+    return customer_workshop_payload(item)
+
+
+@router.put("/customers/{customer_id}/workshops/{workshop_id}")
+def update_customer_workshop(customer_id: str, workshop_id: str, payload: CustomerWorkshopPayload, db: Session = Depends(get_db)) -> dict:
+    item = db.get(CustomerWorkshop, workshop_id)
+    if not item or item.customer_id != customer_id:
+        raise not_found()
+    ensure(bool(payload.name and payload.name.strip()), "Workshop-Name fehlt.")
+    _apply_workshop_payload(item, payload)
+    db.commit()
+    db.refresh(item)
+    return customer_workshop_payload(item)
+
+
+@router.delete("/customers/{customer_id}/workshops/{workshop_id}")
+def delete_customer_workshop(customer_id: str, workshop_id: str, db: Session = Depends(get_db)) -> dict:
+    item = db.get(CustomerWorkshop, workshop_id)
+    if not item or item.customer_id != customer_id:
+        raise not_found()
+    db.delete(item)
+    db.commit()
+    return {"ok": True}
 
 
 @router.get("/employees")
@@ -804,3 +890,55 @@ def timesheet_word(employeeId: str, month: int, year: int, db: Session = Depends
         media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
         headers={"Content-Disposition": f"attachment; filename={filename}"},
     )
+
+
+@router.get("/payments")
+def list_payments(
+    customer_id: str | None = Query(default=None, alias="customerId"),
+    order_id: str | None = Query(default=None, alias="orderId"),
+    invoice_id: str | None = Query(default=None, alias="invoiceId"),
+    proposal_id: str | None = Query(default=None, alias="proposalId"),
+    db: Session = Depends(get_db),
+) -> list[dict]:
+    stmt = select(PaymentRecord).order_by(PaymentRecord.created_at.desc())
+    if customer_id:
+        stmt = stmt.where(PaymentRecord.customer_id == customer_id)
+    if order_id:
+        stmt = stmt.where(PaymentRecord.order_id == order_id)
+    if invoice_id:
+        stmt = stmt.where(PaymentRecord.invoice_id == invoice_id)
+    if proposal_id:
+        stmt = stmt.where(PaymentRecord.proposal_id == proposal_id)
+    return [payment_record_payload(item) for item in db.scalars(stmt).all()]
+
+
+@router.post("/payments", status_code=201)
+def create_payment(payload: PaymentRecordPayload, db: Session = Depends(get_db)) -> dict:
+    item = PaymentRecord()
+    _apply_payment_payload(item, payload)
+    db.add(item)
+    db.commit()
+    db.refresh(item)
+    return payment_record_payload(item)
+
+
+@router.put("/payments/{payment_id}")
+def update_payment(payment_id: str, payload: PaymentRecordPayload, db: Session = Depends(get_db)) -> dict:
+    item = db.get(PaymentRecord, payment_id)
+    if not item:
+        raise not_found()
+    _apply_payment_payload(item, payload)
+    db.commit()
+    db.refresh(item)
+    return payment_record_payload(item)
+
+
+@router.delete("/payments/{payment_id}")
+def delete_payment(payment_id: str, db: Session = Depends(get_db)) -> dict:
+    item = db.get(PaymentRecord, payment_id)
+    if not item:
+        raise not_found()
+    db.delete(item)
+    db.commit()
+    return {"ok": True}
+
