@@ -29,6 +29,51 @@ type ProposalSite = {
   requiredSkills: string[];
   requiredCertifications: string[];
   estimatedHours?: number | null;
+  recommendedHeadcount?: number | null;
+  resourceStrategy?: string | null;
+};
+
+type ProposalFact = {
+  id: string;
+  category: string;
+  key: string;
+  value: unknown;
+  confidence?: number | string | null;
+};
+
+type PaymentDraft = {
+  type: string;
+  status: string;
+  amount?: number | string | null;
+  currency?: string | null;
+  dueDate?: string | null;
+  paidDate?: string | null;
+  method?: string | null;
+  reference?: string | null;
+  notes?: string | null;
+};
+
+type ExternalWorkshopDraft = {
+  name: string;
+  contactName?: string | null;
+  phone?: string | null;
+  email?: string | null;
+  specialties: string[];
+  suggestedFor: string[];
+  relationshipStatus?: string | null;
+  notes?: string | null;
+};
+
+type WorkshopRecommendation = {
+  kind: string;
+  workshopId?: string | null;
+  draftIndex?: number | null;
+  name: string;
+  score: number;
+  matchedSkills: string[];
+  relationshipStatus?: string | null;
+  reason?: string | null;
+  notes?: string | null;
 };
 
 type RecommendationEmployee = {
@@ -60,6 +105,7 @@ type RecommendationSite = {
   requiredCertifications: string[];
   estimatedHours: number;
   recommendations: RecommendationEmployee[];
+  workshopRecommendations?: WorkshopRecommendation[];
   excludedEmployees: Array<{
     employeeId: string;
     employeeName: string;
@@ -116,6 +162,12 @@ type ProposalDraft = {
   estimatedPrice?: string | number | null;
   currency?: string | null;
   recommendedTeam?: RecommendationPayload | null;
+  facts?: ProposalFact[];
+  memorySummary?: Record<string, unknown> | null;
+  paymentDrafts?: PaymentDraft[];
+  externalWorkshops?: ExternalWorkshopDraft[];
+  knownCustomerWorkshops?: unknown[];
+  staffingPlan?: Record<string, unknown> | null;
   convertedCustomerId?: string | null;
   convertedOrderId?: string | null;
   createdAt?: string;
@@ -145,9 +197,105 @@ const emptyDraft: Partial<ProposalDraft> = {
   estimatedPrice: '',
   currency: 'EUR',
   recommendedTeam: null,
+  facts: [],
+  memorySummary: null,
+  paymentDrafts: [],
+  externalWorkshops: [],
+  knownCustomerWorkshops: [],
+  staffingPlan: null,
 };
 
 const MAX_RECORDING_MS = 90_000;
+const SHOW_AI_FACTS = process.env.NEXT_PUBLIC_SHOW_AI_FACTS === 'true';
+
+
+function extraLabels(locale: string) {
+  if (locale === 'ar') {
+    return {
+      memoryTitle: "\u0630\u0627\u0643\u0631\u0629 \u0627\u0644\u0645\u062d\u0627\u062f\u062b\u0629 \u0648\u0627\u0644\u062d\u0642\u0627\u0626\u0642",
+      memoryDesc: "\u0647\u0630\u0647 \u0627\u0644\u062d\u0642\u0627\u0626\u0642 \u0645\u062d\u0641\u0648\u0638\u0629 \u0644\u0647\u0630\u0647 \u0627\u0644\u0645\u062d\u0627\u062f\u062b\u0629 \u0641\u0642\u0637 \u0648\u0644\u0627 \u062a\u0646\u062a\u0642\u0644 \u0625\u0644\u0649 \u0645\u062d\u0627\u062f\u062b\u0629 \u0623\u062e\u0631\u0649.",
+      noFacts: "\u0644\u0627 \u062a\u0648\u062c\u062f \u062d\u0642\u0627\u0626\u0642 \u0645\u062d\u0641\u0648\u0638\u0629 \u0628\u0639\u062f.",
+      paymentDrafts: "\u0645\u0633\u0648\u062f\u0627\u062a \u0627\u0644\u062f\u0641\u0639\u0627\u062a / \u0627\u0644\u0639\u0631\u0628\u0648\u0646",
+      externalWorkshops: "\u0648\u0631\u0634\u0627\u062a / \u0641\u0631\u0642 \u062e\u0627\u0631\u062c\u064a\u0629",
+      noPayments: "\u0644\u0627 \u062a\u0648\u062c\u062f \u062f\u0641\u0639\u0627\u062a \u0623\u0648 \u0639\u0631\u0628\u0648\u0646 \u0645\u0630\u0643\u0648\u0631.",
+      noWorkshops: "\u0644\u0627 \u062a\u0648\u062c\u062f \u0648\u0631\u0634\u0627\u062a \u062e\u0627\u0631\u062c\u064a\u0629 \u0645\u0630\u0643\u0648\u0631\u0629.",
+      addPayment: "\u0625\u0636\u0627\u0641\u0629 \u062f\u0641\u0639\u0629",
+      addWorkshop: "\u0625\u0636\u0627\u0641\u0629 \u0648\u0631\u0634\u0629",
+      paymentType: "\u0627\u0644\u0646\u0648\u0639",
+      paymentStatus: "\u0627\u0644\u062d\u0627\u0644\u0629",
+      amount: "\u0627\u0644\u0645\u0628\u0644\u063a",
+      dueDate: "\u062a\u0627\u0631\u064a\u062e \u0627\u0644\u0627\u0633\u062a\u062d\u0642\u0627\u0642",
+      paidDate: "\u062a\u0627\u0631\u064a\u062e \u0627\u0644\u062f\u0641\u0639",
+      method: "\u0637\u0631\u064a\u0642\u0629 \u0627\u0644\u062f\u0641\u0639",
+      reference: "\u0627\u0644\u0645\u0631\u062c\u0639",
+      specialties: "\u0627\u0644\u062a\u062e\u0635\u0635\u0627\u062a",
+      suggestedFor: "\u0645\u0642\u062a\u0631\u062d\u0629 \u0644\u0640",
+      relation: "\u0627\u0644\u0639\u0644\u0627\u0642\u0629",
+      workshopOptions: "\u0627\u0642\u062a\u0631\u0627\u062d\u0627\u062a \u0627\u0644\u0648\u0631\u0634\u0627\u062a / \u0627\u0644\u0641\u0631\u0642 \u0627\u0644\u062e\u0627\u0631\u062c\u064a\u0629",
+      proposalGeneratingButton: "\u062c\u0627\u0631\u064a \u0625\u0646\u0634\u0627\u0621 \u0627\u0644\u0639\u0631\u0636...",
+      proposalGenerating: "\u062c\u0627\u0631\u064a \u062a\u062d\u0644\u064a\u0644 \u0627\u0644\u0645\u062d\u0627\u062f\u062b\u0629 \u0648\u0625\u0646\u0634\u0627\u0621 \u0627\u0644\u0639\u0631\u0636. \u0642\u062f \u064a\u0633\u062a\u063a\u0631\u0642 \u0647\u0630\u0627 \u0628\u0636\u0639 \u062b\u0648\u0627\u0646\u064d.",
+      proposalGenerated: "\u062a\u0645 \u0625\u0646\u0634\u0627\u0621 \u0627\u0644\u0639\u0631\u0636. \u064a\u0645\u0643\u0646\u0643 \u0645\u0631\u0627\u062c\u0639\u062a\u0647 \u0648\u062a\u0639\u062f\u064a\u0644\u0647 \u0627\u0644\u0622\u0646.",
+      proposalGenerationFailed: "\u0641\u0634\u0644 \u0625\u0646\u0634\u0627\u0621 \u0627\u0644\u0639\u0631\u0636. \u062a\u062d\u0642\u0642 \u0645\u0646 \u0627\u0644\u0631\u0633\u0627\u0644\u0629 \u0648\u062d\u0627\u0648\u0644 \u0645\u0631\u0629 \u0623\u062e\u0631\u0649.",
+      hiddenMemoryClear: "\u062d\u0630\u0641 \u0627\u0644\u0645\u062d\u0627\u062f\u062b\u0629 \u064a\u0645\u0633\u062d \u0647\u0630\u0647 \u0627\u0644\u0645\u062d\u0627\u062f\u062b\u0629 \u0641\u0642\u0637.",
+    };
+  }
+  if (locale === 'en') {
+    return {
+      memoryTitle: 'Chat Memory / Facts',
+      memoryDesc: 'These facts belong only to this intake and are never shared with another chat.',
+      noFacts: 'No stored facts yet.',
+      paymentDrafts: 'Payment / deposit drafts',
+      externalWorkshops: 'Workshops / external teams',
+      noPayments: 'No deposits or payments mentioned.',
+      noWorkshops: 'No external workshops mentioned.',
+      addPayment: 'Add payment',
+      addWorkshop: 'Add workshop',
+      paymentType: 'Type',
+      paymentStatus: 'Status',
+      amount: 'Amount',
+      dueDate: 'Due date',
+      paidDate: 'Paid date',
+      method: 'Method',
+      reference: 'Reference',
+      specialties: 'Specialties',
+      suggestedFor: 'Suggested for',
+      relation: 'Relationship',
+      workshopOptions: 'Workshop / external team suggestions',
+      proposalGeneratingButton: 'Generating proposal...',
+      proposalGenerating: 'Analyzing the conversation and generating the proposal. This can take a few seconds.',
+      proposalGenerated: 'Proposal generated. You can review and edit it now.',
+      proposalGenerationFailed: 'Proposal generation failed. Check the error and try again.',
+      hiddenMemoryClear: 'Clearing removes only the current conversation.',
+    };
+  }
+  return {
+    memoryTitle: 'Chat-Speicher / Fakten',
+    memoryDesc: 'Diese Fakten gehoeren nur zu diesem Intake und werden nie in einen anderen Chat uebernommen.',
+    noFacts: 'Noch keine gespeicherten Fakten.',
+    paymentDrafts: 'Zahlungs-/Anzahlungsentwuerfe',
+    externalWorkshops: 'Workshops / externe Teams',
+    noPayments: 'Keine Anzahlung oder Zahlung erfasst.',
+    noWorkshops: 'Keine externen Workshops erfasst.',
+    addPayment: 'Zahlung hinzufuegen',
+    addWorkshop: 'Workshop hinzufuegen',
+    paymentType: 'Typ',
+    paymentStatus: 'Status',
+    amount: 'Betrag',
+    dueDate: 'Faellig am',
+    paidDate: 'Bezahlt am',
+    method: 'Methode',
+    reference: 'Referenz',
+    specialties: 'Spezialisierungen',
+    suggestedFor: 'Vorgeschlagen fuer',
+    relation: 'Beziehung',
+    workshopOptions: 'Workshop-/Teamvorschlaege',
+    proposalGeneratingButton: 'Vorschlag wird erzeugt...',
+    proposalGenerating: 'Konversation wird analysiert und der Vorschlag wird erzeugt. Das kann einige Sekunden dauern.',
+    proposalGenerated: 'Vorschlag wurde erzeugt. Du kannst ihn jetzt pruefen und bearbeiten.',
+    proposalGenerationFailed: 'Vorschlag konnte nicht erzeugt werden. Fehler pruefen und erneut versuchen.',
+    hiddenMemoryClear: 'Loeschen entfernt nur die aktuelle Konversation.',
+  };
+}
 
 function parseList(value: string): string[] {
   return value
@@ -192,6 +340,7 @@ function formatDuration(durationMs: number): string {
 
 export default function AIIntakePage() {
   const { locale, messages: m } = useI18n();
+  const x = extraLabels(locale);
   const [intakes, setIntakes] = useState<ProposalDraft[]>([]);
   const [customers, setCustomers] = useState<Customer[]>([]);
   const [selectedId, setSelectedId] = useState<string>('');
@@ -201,6 +350,7 @@ export default function AIIntakePage() {
   const [chatInput, setChatInput] = useState('');
   const [busy, setBusy] = useState(false);
   const [streaming, setStreaming] = useState(false);
+  const [proposalGenerationStatus, setProposalGenerationStatus] = useState<'idle' | 'running' | 'done' | 'error'>('idle');
   const [chatError, setChatError] = useState('');
   const [siteSelections, setSiteSelections] = useState<Record<number, string[]>>({});
   const [existingCustomerId, setExistingCustomerId] = useState('');
@@ -236,6 +386,7 @@ export default function AIIntakePage() {
     if (nextId) {
       await loadIntake(nextId);
     } else {
+      setProposalGenerationStatus('idle');
       setSelectedId('');
       setDraft({ ...emptyDraft });
       setMessages([]);
@@ -246,6 +397,9 @@ export default function AIIntakePage() {
 
   async function loadIntake(id: string) {
     const intake = await apiGet<ProposalDraft>(`/ai/intakes/${id}`);
+    if (id !== selectedId) {
+      setProposalGenerationStatus('idle');
+    }
     setSelectedId(id);
     setDraft({
       ...emptyDraft,
@@ -254,6 +408,12 @@ export default function AIIntakePage() {
       requiredSkills: intake.requiredSkills || [],
       requiredCertifications: intake.requiredCertifications || [],
       currency: intake.currency || 'EUR',
+      facts: intake.facts || [],
+      memorySummary: intake.memorySummary || null,
+      paymentDrafts: intake.paymentDrafts || [],
+      externalWorkshops: intake.externalWorkshops || [],
+      knownCustomerWorkshops: intake.knownCustomerWorkshops || [],
+      staffingPlan: intake.staffingPlan || null,
     });
     setMessages(intake.messages || []);
     const nextRecommendations = normalizeRecommendations(intake.recommendedTeam);
@@ -660,6 +820,12 @@ export default function AIIntakePage() {
         ...draft,
         estimatedHours: draft.estimatedHours === '' ? null : Number(draft.estimatedHours),
         estimatedPrice: draft.estimatedPrice === '' ? null : Number(draft.estimatedPrice),
+        paymentDrafts: (draft.paymentDrafts || []).map((payment) => ({
+          ...payment,
+          amount: payment.amount === '' || payment.amount == null ? null : Number(payment.amount),
+          currency: payment.currency || draft.currency || 'EUR',
+        })),
+        externalWorkshops: draft.externalWorkshops || [],
       };
       const updated = await apiJson<ProposalDraft>(`/ai/intakes/${selectedId}`, 'PUT', payload);
       setDraft({ ...emptyDraft, ...updated, proposedSites: updated.proposedSites || [] });
@@ -739,14 +905,17 @@ export default function AIIntakePage() {
 
   async function generateProposal() {
     if (!selectedId) return alert(m.aiIntakePage.createIntakeFirst);
+    setProposalGenerationStatus('running');
     setBusy(true);
     try {
       const updated = await apiJson<ProposalDraft>(`/ai/intakes/${selectedId}/proposal`, 'POST');
       setDraft({ ...emptyDraft, ...updated, proposedSites: updated.proposedSites || [] });
       setMessages(updated.messages || []);
       setRecommendations(normalizeRecommendations(updated.recommendedTeam));
+      setProposalGenerationStatus('done');
       await loadLists(selectedId);
     } catch (error: any) {
+      setProposalGenerationStatus('error');
       alert(error.message);
     } finally {
       setBusy(false);
@@ -790,6 +959,11 @@ export default function AIIntakePage() {
           siteAssignments: Object.entries(siteSelections).map(([siteIndex, employeeIds]) => ({
             siteIndex: Number(siteIndex),
             employeeIds,
+          })),
+          paymentDrafts: (draft.paymentDrafts || []).map((payment) => ({
+            ...payment,
+            amount: payment.amount === '' || payment.amount == null ? null : Number(payment.amount),
+            currency: payment.currency || draft.currency || 'EUR',
           })),
         }
       );
@@ -851,6 +1025,86 @@ export default function AIIntakePage() {
     });
   }
 
+
+  function updatePaymentDraft(index: number, patch: Partial<PaymentDraft>) {
+    setDraft((current) => {
+      const next = [...(current.paymentDrafts || [])];
+      next[index] = { ...next[index], ...patch };
+      return { ...current, paymentDrafts: next };
+    });
+  }
+
+  function addPaymentDraft() {
+    setDraft((current) => ({
+      ...current,
+      paymentDrafts: [
+        ...(current.paymentDrafts || []),
+        {
+          type: 'deposit',
+          status: 'planned',
+          amount: '',
+          currency: current.currency || 'EUR',
+          dueDate: '',
+          paidDate: '',
+          method: '',
+          reference: '',
+          notes: '',
+        },
+      ],
+    }));
+  }
+
+  function removePaymentDraft(index: number) {
+    setDraft((current) => ({
+      ...current,
+      paymentDrafts: (current.paymentDrafts || []).filter((_, itemIndex) => itemIndex !== index),
+    }));
+  }
+
+  function updateExternalWorkshop(index: number, patch: Partial<ExternalWorkshopDraft>) {
+    setDraft((current) => {
+      const next = [...(current.externalWorkshops || [])];
+      next[index] = { ...next[index], ...patch };
+      return { ...current, externalWorkshops: next };
+    });
+  }
+
+  function addExternalWorkshop() {
+    setDraft((current) => ({
+      ...current,
+      externalWorkshops: [
+        ...(current.externalWorkshops || []),
+        {
+          name: '',
+          contactName: '',
+          phone: '',
+          email: '',
+          specialties: [],
+          suggestedFor: [],
+          relationshipStatus: 'known',
+          notes: '',
+        },
+      ],
+    }));
+  }
+
+  function removeExternalWorkshop(index: number) {
+    setDraft((current) => ({
+      ...current,
+      externalWorkshops: (current.externalWorkshops || []).filter((_, itemIndex) => itemIndex !== index),
+    }));
+  }
+
+  function formatFactValue(value: unknown): string {
+    if (value == null) return '-';
+    if (typeof value === 'string') return value;
+    try {
+      return JSON.stringify(value);
+    } catch {
+      return String(value);
+    }
+  }
+
   function toggleEmployee(siteIndex: number, employeeId: string) {
     setSiteSelections((current) => {
       const currentSelection = current[siteIndex] || [];
@@ -908,7 +1162,7 @@ export default function AIIntakePage() {
             </div>
             <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
               <button className="btn" onClick={generateProposal} disabled={!selectedId || interactionLocked}>
-                {m.aiIntakePage.generateProposal}
+                {proposalGenerationStatus === 'running' ? x.proposalGeneratingButton : m.aiIntakePage.generateProposal}
               </button>
               <button className="btn" onClick={saveDraft} disabled={!selectedId || interactionLocked}>
                 {m.aiIntakePage.saveDraft}
@@ -918,6 +1172,28 @@ export default function AIIntakePage() {
               </button>
             </div>
           </div>
+
+          {proposalGenerationStatus !== 'idle' && (
+            <>
+              <div className="spacer" />
+              <div
+                className="card"
+                aria-live="polite"
+                style={{
+                  borderColor:
+                    proposalGenerationStatus === 'error'
+                      ? 'rgba(255,80,80,0.5)'
+                      : proposalGenerationStatus === 'done'
+                        ? 'rgba(34,197,94,0.45)'
+                        : 'rgba(96,165,250,0.45)',
+                }}
+              >
+                {proposalGenerationStatus === 'running' && x.proposalGenerating}
+                {proposalGenerationStatus === 'done' && x.proposalGenerated}
+                {proposalGenerationStatus === 'error' && x.proposalGenerationFailed}
+              </div>
+            </>
+          )}
 
           <div className="spacer" />
           <div style={{ display: 'grid', gap: 8, maxHeight: 320, overflowY: 'auto' }}>
@@ -1004,7 +1280,32 @@ export default function AIIntakePage() {
           <button className="btn primary" onClick={sendMessage} disabled={interactionLocked || !chatInput.trim()}>
             {streaming ? m.aiIntakePage.streaming : m.aiIntakePage.sendMessage}
           </button>
+          <div className="spacer" />
+          <div className="muted">{x.hiddenMemoryClear}</div>
         </div>
+
+        {SHOW_AI_FACTS && (
+          <div className="card">
+            <h2>{x.memoryTitle}</h2>
+            <div className="muted">{x.memoryDesc}</div>
+            <div className="spacer" />
+            {(draft.facts || []).length > 0 ? (
+              <div style={{ display: 'grid', gap: 8 }}>
+                {(draft.facts || []).map((fact) => (
+                  <div key={fact.id} className="card">
+                    <div style={{ fontWeight: 700 }}>
+                      {fact.category}: {fact.key}
+                    </div>
+                    <div style={{ whiteSpace: 'pre-wrap' }}>{formatFactValue(fact.value)}</div>
+                    {fact.confidence != null && <div className="muted">Confidence: {String(fact.confidence)}</div>}
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <div className="muted">{x.noFacts}</div>
+            )}
+          </div>
+        )}
 
         <div className="card">
           <div style={{ display: 'flex', justifyContent: 'space-between', gap: 8, flexWrap: 'wrap' }}>
@@ -1216,6 +1517,136 @@ export default function AIIntakePage() {
             ))}
             {siteCount === 0 && <div className="muted">{m.aiIntakePage.noSites}</div>}
           </div>
+
+          <div className="spacer" />
+          <div style={{ display: 'flex', justifyContent: 'space-between', gap: 8, flexWrap: 'wrap' }}>
+            <h2>{x.externalWorkshops}</h2>
+            <button className="btn" onClick={addExternalWorkshop}>{x.addWorkshop}</button>
+          </div>
+          <div className="spacer" />
+          <div style={{ display: 'grid', gap: 12 }}>
+            {(draft.externalWorkshops || []).map((workshop, index) => (
+              <div key={`${workshop.name}-${index}`} className="card">
+                <div style={{ display: 'flex', justifyContent: 'space-between', gap: 8, flexWrap: 'wrap' }}>
+                  <strong>{workshop.name || `${x.externalWorkshops} ${index + 1}`}</strong>
+                  <button className="btn danger" onClick={() => removeExternalWorkshop(index)}>{m.common.remove}</button>
+                </div>
+                <div className="spacer" />
+                <div className="row">
+                  <div>
+                    <label>{m.common.name}</label>
+                    <input value={workshop.name || ''} onChange={(event) => updateExternalWorkshop(index, { name: event.target.value })} />
+                  </div>
+                  <div>
+                    <label>{m.aiIntakePage.contactName}</label>
+                    <input value={workshop.contactName || ''} onChange={(event) => updateExternalWorkshop(index, { contactName: event.target.value })} />
+                  </div>
+                  <div>
+                    <label>{m.aiIntakePage.contactPhone}</label>
+                    <input value={workshop.phone || ''} onChange={(event) => updateExternalWorkshop(index, { phone: event.target.value })} />
+                  </div>
+                  <div>
+                    <label>{m.aiIntakePage.contactEmail}</label>
+                    <input value={workshop.email || ''} onChange={(event) => updateExternalWorkshop(index, { email: event.target.value })} />
+                  </div>
+                </div>
+                <div className="spacer" />
+                <div className="row">
+                  <div>
+                    <label>{x.specialties}</label>
+                    <textarea value={listText(workshop.specialties)} onChange={(event) => updateExternalWorkshop(index, { specialties: parseList(event.target.value) })} />
+                  </div>
+                  <div>
+                    <label>{x.suggestedFor}</label>
+                    <textarea value={listText(workshop.suggestedFor)} onChange={(event) => updateExternalWorkshop(index, { suggestedFor: parseList(event.target.value) })} />
+                  </div>
+                  <div>
+                    <label>{x.relation}</label>
+                    <select value={workshop.relationshipStatus || 'known'} onChange={(event) => updateExternalWorkshop(index, { relationshipStatus: event.target.value })}>
+                      <option value="known">known</option>
+                      <option value="preferred">preferred</option>
+                      <option value="one_time">one_time</option>
+                      <option value="blocked">blocked</option>
+                    </select>
+                  </div>
+                </div>
+                <div className="spacer" />
+                <label>{m.common.notes}</label>
+                <textarea value={workshop.notes || ''} onChange={(event) => updateExternalWorkshop(index, { notes: event.target.value })} />
+              </div>
+            ))}
+            {(draft.externalWorkshops || []).length === 0 && <div className="muted">{x.noWorkshops}</div>}
+          </div>
+
+          <div className="spacer" />
+          <div style={{ display: 'flex', justifyContent: 'space-between', gap: 8, flexWrap: 'wrap' }}>
+            <h2>{x.paymentDrafts}</h2>
+            <button className="btn" onClick={addPaymentDraft}>{x.addPayment}</button>
+          </div>
+          <div className="spacer" />
+          <div style={{ display: 'grid', gap: 12 }}>
+            {(draft.paymentDrafts || []).map((payment, index) => (
+              <div key={`${payment.type}-${index}`} className="card">
+                <div style={{ display: 'flex', justifyContent: 'space-between', gap: 8, flexWrap: 'wrap' }}>
+                  <strong>{x.paymentDrafts} {index + 1}</strong>
+                  <button className="btn danger" onClick={() => removePaymentDraft(index)}>{m.common.remove}</button>
+                </div>
+                <div className="spacer" />
+                <div className="row">
+                  <div>
+                    <label>{x.paymentType}</label>
+                    <select value={payment.type || 'deposit'} onChange={(event) => updatePaymentDraft(index, { type: event.target.value })}>
+                      <option value="deposit">deposit</option>
+                      <option value="advance">advance</option>
+                      <option value="installment">installment</option>
+                      <option value="final">final</option>
+                      <option value="other">other</option>
+                    </select>
+                  </div>
+                  <div>
+                    <label>{x.paymentStatus}</label>
+                    <select value={payment.status || 'planned'} onChange={(event) => updatePaymentDraft(index, { status: event.target.value })}>
+                      <option value="planned">planned</option>
+                      <option value="received">received</option>
+                      <option value="refunded">refunded</option>
+                      <option value="canceled">canceled</option>
+                    </select>
+                  </div>
+                  <div>
+                    <label>{x.amount}</label>
+                    <input value={payment.amount ?? ''} onChange={(event) => updatePaymentDraft(index, { amount: event.target.value })} />
+                  </div>
+                  <div>
+                    <label>{m.aiIntakePage.currency}</label>
+                    <input value={payment.currency || draft.currency || 'EUR'} onChange={(event) => updatePaymentDraft(index, { currency: event.target.value })} />
+                  </div>
+                </div>
+                <div className="spacer" />
+                <div className="row">
+                  <div>
+                    <label>{x.dueDate}</label>
+                    <input type="date" value={payment.dueDate ? String(payment.dueDate).substring(0, 10) : ''} onChange={(event) => updatePaymentDraft(index, { dueDate: event.target.value || null })} />
+                  </div>
+                  <div>
+                    <label>{x.paidDate}</label>
+                    <input type="date" value={payment.paidDate ? String(payment.paidDate).substring(0, 10) : ''} onChange={(event) => updatePaymentDraft(index, { paidDate: event.target.value || null })} />
+                  </div>
+                  <div>
+                    <label>{x.method}</label>
+                    <input value={payment.method || ''} onChange={(event) => updatePaymentDraft(index, { method: event.target.value })} />
+                  </div>
+                  <div>
+                    <label>{x.reference}</label>
+                    <input value={payment.reference || ''} onChange={(event) => updatePaymentDraft(index, { reference: event.target.value })} />
+                  </div>
+                </div>
+                <div className="spacer" />
+                <label>{m.common.notes}</label>
+                <textarea value={payment.notes || ''} onChange={(event) => updatePaymentDraft(index, { notes: event.target.value })} />
+              </div>
+            ))}
+            {(draft.paymentDrafts || []).length === 0 && <div className="muted">{x.noPayments}</div>}
+          </div>
         </div>
 
         <div className="card">
@@ -1297,6 +1728,36 @@ export default function AIIntakePage() {
                         )}
                       </tbody>
                     </table>
+                    {(site.workshopRecommendations || []).length > 0 && (
+                      <>
+                        <div className="spacer" />
+                        <div style={{ fontWeight: 700 }}>{x.workshopOptions}</div>
+                        <table className="table">
+                          <thead>
+                            <tr>
+                              <th>{m.common.name}</th>
+                              <th>{m.aiIntakePage.score}</th>
+                              <th>{m.common.skills}</th>
+                              <th>{m.aiIntakePage.reason}</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {(site.workshopRecommendations || []).map((workshop, index) => (
+                              <tr key={`${workshop.kind}-${workshop.workshopId || workshop.draftIndex || index}`}>
+                                <td>{workshop.name}</td>
+                                <td>{workshop.score}</td>
+                                <td>{listText(workshop.matchedSkills)}</td>
+                                <td>
+                                  {workshop.reason}
+                                  {workshop.relationshipStatus ? ` (${workshop.relationshipStatus})` : ''}
+                                  {workshop.notes ? ` - ${workshop.notes}` : ''}
+                                </td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </>
+                    )}
                     {site.excludedEmployees.length > 0 && (
                       <>
                         <div className="spacer" />
