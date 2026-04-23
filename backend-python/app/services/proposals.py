@@ -82,6 +82,25 @@ def sanitize_intake_assistant_reply(text: str) -> str:
     return candidate.strip()
 
 
+def construction_scope_guidance() -> str:
+    """Hidden renovation checklist used only to guide AI scope questions and proposals."""
+    return "\n".join(
+        [
+            "Construction scope checklist / \u0642\u0627\u0626\u0645\u0629 \u062a\u062f\u0642\u064a\u0642 \u0623\u0639\u0645\u0627\u0644 \u0627\u0644\u062a\u0631\u0645\u064a\u0645 (hidden guidance, not UI text):",
+            "- Flooring/tile / \u0627\u0644\u0628\u0644\u0627\u0637 \u0648\u0627\u0644\u0623\u0631\u0636\u064a\u0627\u062a: material granite/ceramic/marble/porcelain/parquet; tile size; stairs/edges/corners; remove old flooring vs install over old; normal/leveled/decorative installation.",
+            "- Painting / \u0627\u0644\u062f\u0647\u0627\u0646: simple paint without putty; partial/full putty; decorative texture/glitter/antique/epoxy; number of coats; interior vs exterior/facade.",
+            "- Electrical / \u0627\u0644\u0643\u0647\u0631\u0628\u0627\u0621: full rewiring vs added points; standard/smart panel; LED decorative/standard lighting; internet/cameras/fire alarm; smart controls.",
+            "- Plumbing/sanitary / \u0627\u0644\u0635\u062d\u064a\u0629: fixture replacement only; full/partial water and drainage pipes; standard/mid/luxury quality; central/separate heaters; filtration/desalination.",
+            "- Aluminum/carpentry / \u0627\u0644\u0623\u0644\u0645\u0646\u064a\u0648\u0645 \u0648\u0627\u0644\u0646\u062c\u0627\u0631\u0629: aluminum windows with/without shutters; single/double glazing; glass/iron/MDF/PVC; built-in cabinets; railings/fences/gates.",
+            "- Insulation / \u0627\u0644\u0639\u0632\u0644: waterproofing for roofs/bathrooms/kitchens/balconies; thermal foam/XPS/walls/roofs/panels; sound insulation; bitumen/foam/compressed boards.",
+            "- Gypsum/decor / \u0623\u0639\u0645\u0627\u0644 \u0627\u0644\u062c\u0628\u0633 \u0648\u0627\u0644\u062f\u064a\u0643\u0648\u0631: flat/decorative gypsum ceilings; cornices; gypsum board partitions; fireplace/facade decor.",
+            "- Civil/structural renovation / \u0623\u0639\u0645\u0627\u0644 \u0645\u062f\u0646\u064a\u0629 \u0648\u0647\u064a\u0643\u0644\u064a\u0629: cracks in walls/ceilings; column/beam reinforcement with engineering review; demolition/openings/arches; facade renovation and external insulation.",
+            "Use this checklist selectively: do not ask every checklist question at once; ask only relevant missing items; ask maximum 2-4 practical follow-up questions per reply; never invent materials, quantities, grades, or installation methods.",
+            "For proposals, include known checklist details in site notes/orderDescription and mark important missing details as to be confirmed.",
+        ]
+    )
+
+
 def _strip_json_code_fence(text: str) -> str:
     candidate = text.strip()
     if not candidate.startswith("```"):
@@ -700,6 +719,15 @@ def build_intake_chat_prompt(proposal: Proposal, messages: list[ProposalMessage]
             "- If a workshop means a physical work area or work package, ask/record it as a site or work package, not as an employee.",
             "Payment rules:",
             "- Ask about deposits, advance payments, installments, paid amounts, due dates, methods, and references when payment info is missing or mentioned.",
+            "Construction scope guidance rules:",
+            "- Use the hidden construction checklist below silently to decide which scope details are relevant.",
+            "- Do not show the full checklist to the manager unless explicitly asked.",
+            "- Ask only relevant missing checklist details and never more than 2-4 practical questions per reply.",
+            "- For kitchen renovation, prioritize flooring, plumbing/sanitary, carpentry/shelves, and insulation/waterproofing only when missing.",
+            "- For painting, prioritize putty, coat count, decorative/normal type, and interior/exterior only when missing.",
+            "- For flooring, prioritize material, size, old-floor removal vs over-installation, stairs/edges, and installation type only when missing.",
+            "Hidden construction checklist:",
+            construction_scope_guidance(),
             "Chat rules:",
             "- You are writing only the next assistant reply, not a transcript.",
             "- Never write role labels such as Manager:, User:, Assistant:, Human:, System:, ??????:, ????????:, or ???????:.",
@@ -826,7 +854,13 @@ def build_proposal_prompt(messages: list[ProposalMessage], proposal: Proposal | 
             "Classify contractor-provided workshops carefully: physical work areas become proposedSites/work packages; external teams or subcontractors become externalWorkshops.",
             "If deposits, advance payments, installments, paid amounts, or due payments are mentioned, include them in paymentDrafts.",
             "Suggest recommendedHeadcount and resourceStrategy per site when enough scope is known.",
+            "Use the hidden construction checklist below to enrich orderDescription, proposedSites[].notes, and requiredSkills.",
+            "Never invent checklist details. If a critical construction detail is unknown, write it as to be confirmed in notes/orderDescription.",
+            "Map mentioned checklist categories to practical requiredSkills such as flooring, painting, electrical, plumbing, waterproofing, gypsum board, carpentry, insulation, or structural renovation.",
             *language_rules,
+            "",
+            "Hidden construction checklist:",
+            construction_scope_guidance(),
             "",
             f"Required JSON schema: {json.dumps(schema, ensure_ascii=True)}",
             "",

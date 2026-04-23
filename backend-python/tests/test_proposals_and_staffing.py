@@ -22,6 +22,7 @@ from app.services.proposals import (
     build_intake_chat_prompt,
     build_proposal_prompt,
     confirm_proposal,
+    construction_scope_guidance,
     extract_proposal_from_messages,
     refresh_proposal_memory,
     sanitize_intake_assistant_reply,
@@ -93,6 +94,62 @@ class ProposalAndStaffingTests(unittest.TestCase):
         self.assertIn("Never write role labels", prompt)
         self.assertIn("Never continue the conversation", prompt)
         self.assertIn("Never create fake future turns", prompt)
+
+    def test_construction_guidance_is_hidden_and_bilingual(self) -> None:
+        guidance = construction_scope_guidance()
+
+        self.assertIn("Construction scope checklist", guidance)
+        self.assertIn("Flooring/tile", guidance)
+        self.assertIn("Painting", guidance)
+        self.assertIn("Plumbing/sanitary", guidance)
+        self.assertIn("\u0627\u0644\u0628\u0644\u0627\u0637", guidance)
+        self.assertIn("maximum 2-4", guidance)
+        self.assertIn("to be confirmed", guidance)
+
+    def test_intake_chat_prompt_includes_selective_construction_guidance(self) -> None:
+        prompt = build_intake_chat_prompt(Proposal(status="intake"), [ProposalMessage(role="user", content="Kitchen renovation with flooring and plumbing.")])
+
+        self.assertIn("Hidden construction checklist", prompt)
+        self.assertIn("kitchen renovation", prompt)
+        self.assertIn("flooring", prompt)
+        self.assertIn("plumbing", prompt)
+        self.assertIn("never more than 2-4", prompt)
+        self.assertIn("Do not show the full checklist", prompt)
+
+    def test_proposal_prompt_includes_construction_guidance_for_notes_and_skills(self) -> None:
+        prompt = build_proposal_prompt([ProposalMessage(role="user", content="We need painting and flooring.")])
+
+        self.assertIn("Hidden construction checklist", prompt)
+        self.assertIn("proposedSites[].notes", prompt)
+        self.assertIn("requiredSkills", prompt)
+        self.assertIn("to be confirmed", prompt)
+        self.assertIn("flooring", prompt)
+        self.assertIn("painting", prompt)
+
+    def test_extract_proposal_accepts_construction_scope_details_from_ai(self) -> None:
+        proposal = Proposal(status="intake")
+        message = ProposalMessage(role="user", content="Kitchen renovation: flooring, sanitary repairs, shelves. Budget impact 1000 USD.")
+        provider_payload = """{
+          "summary": "Kitchen renovation addition",
+          "orderTitle": "Kitchen renovation",
+          "orderDescription": "Kitchen work includes flooring, sanitary repairs, and shelf renovation. Tile material and plumbing scope to be confirmed.",
+          "proposedSites": [{
+            "siteName": "Kitchen",
+            "notes": "Flooring, sanitary repairs, and shelf/carpentry renovation. Tile material, old-floor removal, and exact pipe scope to be confirmed.",
+            "requiredSkills": ["flooring", "plumbing", "carpentry"],
+            "estimatedHours": 12
+          }],
+          "requiredSkills": ["flooring", "plumbing", "carpentry"],
+          "currency": "USD"
+        }"""
+
+        with patch("app.services.proposals.generate_text", return_value=provider_payload):
+            extracted = extract_proposal_from_messages(proposal, [message])
+
+        self.assertEqual(extracted.proposedSites[0].siteName, "Kitchen")
+        self.assertIn("flooring", extracted.requiredSkills)
+        self.assertIn("plumbing", extracted.requiredSkills)
+        self.assertIn("to be confirmed", extracted.proposedSites[0].notes or "")
 
     def test_sanitize_intake_assistant_reply_removes_hallucinated_turns(self) -> None:
         raw = "?? ????? ???? ??????.\nManager: ????? ?????.\nAssistant: ???? ??? ?????."
