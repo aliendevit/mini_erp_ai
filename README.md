@@ -290,7 +290,7 @@ Recently verified areas include:
 
 ## Repository Notes
 
-- Do not commit `.env`, `.env.local`, API keys, or real customer secrets.
+-  `.env`, `.env.local`, API keys, or real customer secrets NOT commited.
 - The current active backend is `backend-python/`.
 - The most active prototype screen is `frontend/src/app/ai-intake/page.tsx`.
 - AI services live mainly under `backend-python/app/services/`.
