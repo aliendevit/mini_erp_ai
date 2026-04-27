@@ -47,7 +47,7 @@ export async function startNativeAudioRecording(): Promise<NativeAudioRecordingS
   if (!mimeType) throw new Error("UNSUPPORTED");
 
   const stream = await navigator.mediaDevices.getUserMedia({
-    audio: { channelCount: 1, echoCancellation: true, noiseSuppression: true },
+    audio: { channelCount: 1, echoCancellation: true, noiseSuppression: true, autoGainControl: true },
   });
 
   let audioContext: AudioContext | null = null;

@@ -55,13 +55,156 @@ def _latest_manager_message(messages: list[ProposalMessage]) -> str:
     return ""
 
 
+_GERMAN_HINT_RE = re.compile(
+    r"\b(?:und|mit|fuer|f?r|auftrag|angebot|kunde|firma|baustelle|renovierung|sanierung|bitte|treppenhaus|keller|rechnung|stunden|tage|arbeiter|mitarbeiter|maler|trockenbau)\b",
+    flags=re.IGNORECASE,
+)
+
+
 def _conversation_language_mode(messages: list[ProposalMessage]) -> str:
     latest_manager_message = _latest_manager_message(messages)
     manager_text = "\n".join(_manager_messages(messages))
-    if _contains_arabic(latest_manager_message) or _contains_arabic(manager_text):
+    combined_text = f"{latest_manager_message}\n{manager_text}"
+    if _contains_arabic(combined_text):
         return "arabic"
-    return "default"
+    if re.search(r"[\u00e4\u00f6\u00fc\u00c4\u00d6\u00dc\u00df]", combined_text) or _GERMAN_HINT_RE.search(combined_text):
+        return "german"
+    return "english"
 
+
+def _localized_default_site_name(language_mode: str) -> str:
+    if language_mode == "arabic":
+        return "\u0627\u0644\u0645\u0648\u0642\u0639 1"
+    if language_mode == "german":
+        return "Baustelle 1"
+    return "Site 1"
+
+
+def _localized_default_order_title(language_mode: str) -> str:
+    if language_mode == "arabic":
+        return "\u0639\u0631\u0636 \u0645\u0634\u0631\u0648\u0639"
+    if language_mode == "german":
+        return "Projektangebot"
+    return "Project proposal"
+
+
+def _localized_default_summary(language_mode: str) -> str:
+    if language_mode == "arabic":
+        return "\u0639\u0631\u0636 \u0645\u0634\u0631\u0648\u0639 \u0645\u0633\u062a\u062e\u0631\u062c \u0645\u0646 \u0627\u0644\u0645\u062d\u0627\u062f\u062b\u0629."
+    if language_mode == "german":
+        return "Projektangebot aus der Konversation."
+    return "Project proposal generated from the conversation."
+
+
+_SITE_SKILL_HINTS: dict[str, tuple[str, ...]] = {
+    "maler": (
+        "maler",
+        "painting",
+        "painter",
+        "paint",
+        "spachteln",
+        "spachtel",
+        "schleifen",
+        "sanding",
+        "putty",
+        "plaster",
+        "دهان",
+        "طلاء",
+        "معجون",
+        "صنفرة",
+    ),
+    "trockenbau": (
+        "trockenbau",
+        "drywall",
+        "gypsum",
+        "gypsum board",
+        "جبس",
+        "جبس بورد",
+    ),
+    "feuchtigkeitsschutz": (
+        "feuchtigkeitsschutz",
+        "abdichtung",
+        "waterproof",
+        "waterproofing",
+        "moisture",
+        "moisture protection",
+        "عزل",
+        "عزل مائي",
+        "رطوبة",
+        "حماية من الرطوبة",
+    ),
+    "flooring": (
+        "bodenbelag",
+        "flooring",
+        "tile",
+        "tiles",
+        "ceramic",
+        "marble",
+        "porcelain",
+        "parquet",
+        "بلاط",
+        "أرضيات",
+        "سيراميك",
+        "رخام",
+        "بورسلان",
+    ),
+    "plumbing": (
+        "sanitar",
+        "sanitaer",
+        "sanitary",
+        "plumbing",
+        "pipes",
+        "drain",
+        "صحية",
+        "سباكة",
+        "مواسير",
+        "صرف",
+        "حوض",
+        "مغسلة",
+        "دش",
+    ),
+    "carpentry": (
+        "carpentry",
+        "schreinerei",
+        "wood",
+        "cabinet",
+        "cabinets",
+        "shelves",
+        "mdf",
+        "نجارة",
+        "خزائن",
+        "رفوف",
+        "أبواب",
+        "مفصلات",
+    ),
+    "supervision": (
+        "supervision",
+        "coordination",
+        "monitoring",
+        "oversight",
+        "supervisor",
+        "إشراف",
+        "متابعة",
+        "تنسيق",
+    ),
+    "electrical": (
+        "electrical",
+        "electric",
+        "elektrik",
+        "lighting",
+        "led",
+        "كهرباء",
+        "إنارة",
+    ),
+    "plastering": (
+        "plaster",
+        "plastering",
+        "putty",
+        "plasterer",
+        "لياسة",
+        "معجون",
+    ),
+}
 
 _ROLE_CONTINUATION_RE = re.compile(
     r"(?:^|\n)\s*(?:Manager|User|Assistant|Human|System|\u0627\u0644\u0645\u062f\u064a\u0631|\u0627\u0644\u0645\u0633\u062a\u062e\u062f\u0645|\u0627\u0644\u0645\u0633\u0627\u0639\u062f)\s*[:\uff1a]",
@@ -71,15 +214,155 @@ _LEADING_ASSISTANT_LABEL_RE = re.compile(
     r"^\s*(?:Assistant|\u0627\u0644\u0645\u0633\u0627\u0639\u062f)\s*[:\uff1a]\s*",
     flags=re.IGNORECASE,
 )
+_LEADING_LANGUAGE_META_RE = re.compile(
+    r"^\s*(?:(?:\u0644?\u0644?\u0631\u062f|\u0627\u0644\u0631\u062f)\s+\u0628\u0627\u0644\u0644\u063a\u0629\s+\u0627\u0644\u0639\u0631\u0628\u064a\u0629|\u0628\u0627\u0644\u0644\u063a\u0629\s+\u0627\u0644\u0639\u0631\u0628\u064a\u0629|In\s+Arabic|Arabic\s+reply|Auf\s+Deutsch|German\s+reply)\s*[:\uff1a]\s*",
+    flags=re.IGNORECASE,
+)
+_PHONE_CANDIDATE_RE = re.compile(
+    r"(?<![\w@])(?:\+|[0-9\u0660-\u0669\u06f0-\u06f9])(?:[0-9\u0660-\u0669\u06f0-\u06f9\s()./\-]{5,}[0-9\u0660-\u0669\u06f0-\u06f9])"
+)
+_DIGIT_TRANSLATION = str.maketrans(
+    "\u0660\u0661\u0662\u0663\u0664\u0665\u0666\u0667\u0668\u0669\u06f0\u06f1\u06f2\u06f3\u06f4\u06f5\u06f6\u06f7\u06f8\u06f9",
+    "01234567890123456789",
+)
 
 
-def sanitize_intake_assistant_reply(text: str) -> str:
+def _normalized_phone_digits(value: str) -> str:
+    return re.sub(r"\D", "", value.translate(_DIGIT_TRANSLATION))
+
+
+def _looks_like_phone_number(raw_value: str) -> bool:
+    digits = _normalized_phone_digits(raw_value)
+    if len(digits) < 7:
+        return False
+    if re.fullmatch(r"[0-9\u0660-\u0669\u06f0-\u06f9]{1,2}[-/][0-9\u0660-\u0669\u06f0-\u06f9]{1,2}[-/][0-9\u0660-\u0669\u06f0-\u06f9]{2,4}", raw_value.strip()):
+        return False
+    return raw_value.strip().startswith("+") or digits.startswith(("0", "00", "49", "963"))
+
+
+def _phone_is_allowed(digits: str, allowed_numbers: set[str]) -> bool:
+    if digits in allowed_numbers:
+        return True
+    if len(digits) >= 7:
+        return any(digits.endswith(allowed[-7:]) or allowed.endswith(digits[-7:]) for allowed in allowed_numbers if len(allowed) >= 7)
+    return False
+
+
+def _clean_phone_artifacts(text: str) -> str:
+    cleaned_lines: list[str] = []
+    for line in text.splitlines():
+        line = re.sub(r"([:?])\s*[,?;?]+\s*", r"\1 ", line)
+        line = re.sub(r"\s+([,?;?])", r"\1", line)
+        line = re.sub(r"([,?;?])\s*([,?;?])+", r"\1", line)
+        line = re.sub(r"[,?;?]\s*$", "", line).rstrip()
+        cleaned_lines.append(line)
+    return "\n".join(cleaned_lines)
+
+
+def _strip_unsupported_phone_numbers(text: str, source_text: str | None) -> str:
+    if not source_text:
+        return text
+    allowed_numbers = {
+        digits
+        for match in _PHONE_CANDIDATE_RE.finditer(source_text)
+        if _looks_like_phone_number(match.group(0))
+        for digits in [_normalized_phone_digits(match.group(0))]
+        if digits
+    }
+    if not allowed_numbers:
+        return text
+
+    def replace(match: re.Match[str]) -> str:
+        raw_value = match.group(0)
+        if not _looks_like_phone_number(raw_value):
+            return raw_value
+        digits = _normalized_phone_digits(raw_value)
+        return raw_value if _phone_is_allowed(digits, allowed_numbers) else ""
+
+    return _clean_phone_artifacts(_PHONE_CANDIDATE_RE.sub(replace, text))
+
+
+def intake_assistant_source_text(proposal: Proposal) -> str:
+    """Facts that the assistant is allowed to repeat verbatim in the next chat reply."""
+    parts: list[str] = []
+    for value in (
+        proposal.customer_company_name,
+        proposal.customer_street,
+        proposal.customer_zip_code,
+        proposal.customer_city,
+        proposal.contact_name,
+        proposal.contact_phone,
+        proposal.contact_email,
+        proposal.order_title,
+        proposal.summary,
+    ):
+        if value:
+            parts.append(str(value))
+    for message in proposal.messages:
+        if message.role != "assistant" and message.content:
+            parts.append(message.content)
+    for fact in proposal.facts:
+        if fact.is_active and fact.value_json:
+            parts.append(fact.value_json)
+    return "\n".join(parts)
+
+
+def sanitize_intake_assistant_reply(text: str, source_text: str | None = None) -> str:
     """Keep only the next assistant reply, not hallucinated transcript turns."""
-    candidate = _LEADING_ASSISTANT_LABEL_RE.sub("", text.strip())
+    candidate = text.strip()
+    for _ in range(2):
+        candidate = _LEADING_ASSISTANT_LABEL_RE.sub("", candidate)
+        candidate = _LEADING_LANGUAGE_META_RE.sub("", candidate)
     match = _ROLE_CONTINUATION_RE.search(candidate)
     if match:
         candidate = candidate[: match.start()]
+    candidate = _strip_unsupported_phone_numbers(candidate, source_text)
     return candidate.strip()
+
+
+_PROJECT_CONTEXT_HINTS = (
+    "project",
+    "renovation",
+    "renovate",
+    "projekt",
+    "sanierung",
+    "renovierung",
+    "\u0645\u0634\u0631\u0648\u0639",
+    "\u062a\u0631\u0645\u064a\u0645",
+)
+
+
+def maybe_build_scope_first_reply(proposal: Proposal, messages: list[ProposalMessage]) -> str | None:
+    """Return a deterministic first follow-up when project basics exist but scope is still unknown."""
+    manager_text = "\n".join(_manager_messages(messages)).strip()
+    if not manager_text:
+        return None
+
+    normalized = _normalize_match_text(manager_text)
+    has_project_context = any(_normalize_match_text(hint) in normalized for hint in _PROJECT_CONTEXT_HINTS)
+    if not has_project_context:
+        return None
+    if _infer_skills_from_text(manager_text):
+        return None
+
+    language_mode = _conversation_language_mode(messages)
+    if language_mode == "arabic":
+        return (
+            "\u062a\u0645 \u062a\u0633\u062c\u064a\u0644 \u0645\u0639\u0644\u0648\u0645\u0627\u062a \u0627\u0644\u0645\u0634\u0631\u0648\u0639 \u0627\u0644\u0623\u0633\u0627\u0633\u064a\u0629 \u0627\u0644\u062a\u064a \u0630\u0643\u0631\u062a\u0647\u0627.\n\n"
+            "\u0644\u0625\u0643\u0645\u0627\u0644 \u0627\u0644\u062a\u0633\u062c\u064a\u0644\u060c \u0645\u0627 \u0647\u064a \u0645\u0646\u0627\u0637\u0642 \u0627\u0644\u0639\u0645\u0644 \u0648\u0646\u0648\u0639 \u0627\u0644\u0623\u0639\u0645\u0627\u0644 \u0627\u0644\u0645\u0637\u0644\u0648\u0628\u0629 \u0641\u064a \u0643\u0644 \u0645\u0646\u0637\u0642\u0629\u061f\n"
+            "\u0645\u062b\u0644\u0627\u064b: \u0627\u0644\u0645\u0637\u0628\u062e\u060c \u0627\u0644\u062d\u0645\u0627\u0645\u060c \u063a\u0631\u0641\u0629 \u0627\u0644\u0645\u0639\u064a\u0634\u0629\u060c \u0645\u0639 \u0646\u0648\u0639 \u0627\u0644\u0639\u0645\u0644 \u0645\u062b\u0644 \u0623\u0631\u0636\u064a\u0627\u062a\u060c \u062f\u0647\u0627\u0646\u060c \u0623\u0639\u0645\u0627\u0644 \u0635\u062d\u064a\u0629 \u0623\u0648 \u0639\u0632\u0644."
+        )
+    if language_mode == "german":
+        return (
+            "Die grundlegenden Projektdaten wurden erfasst.\n\n"
+            "Welche Arbeitsbereiche und Arbeiten sollen pro Bereich erfasst werden?\n"
+            "Zum Beispiel: Kueche, Bad, Wohnzimmer, mit Arbeiten wie Boden, Malerarbeiten, Sanitaer oder Abdichtung."
+        )
+    return (
+        "The basic project information has been recorded.\n\n"
+        "To continue, which work areas and work types are required for each area?\n"
+        "For example: kitchen, bathroom, living room, with work such as flooring, painting, plumbing, or waterproofing."
+    )
 
 
 def construction_scope_guidance() -> str:
@@ -160,14 +443,36 @@ class ExtractedProposalSite(BaseModel):
     requiredCertifications: list[str] = Field(default_factory=list)
     estimatedHours: float | None = None
     recommendedHeadcount: int | None = None
+    selectedInternalHeadcount: int | None = None
+    assignedWorkshopName: str | None = None
+    workshopCoveredSkills: list[str] = Field(default_factory=list)
+    coverageType: str | None = None
     resourceStrategy: str | None = None
 
-    @field_validator("requiredSkills", "requiredCertifications", mode="before")
+    @field_validator("requiredSkills", "requiredCertifications", "workshopCoveredSkills", mode="before")
     @classmethod
     def _coerce_list_fields(cls, value: Any) -> list[str]:
         if value is None:
             return []
         return list(value)
+
+    @field_validator("recommendedHeadcount", "selectedInternalHeadcount", mode="before")
+    @classmethod
+    def _coerce_optional_headcount(cls, value: Any) -> int | None:
+        if value in (None, ""):
+            return None
+        try:
+            return max(0, int(value))
+        except (TypeError, ValueError):
+            return None
+
+    @field_validator("coverageType", mode="before")
+    @classmethod
+    def _normalize_coverage_type(cls, value: Any) -> str | None:
+        normalized = str(value or "").strip().lower()
+        if normalized in {"internal_only", "mixed_with_workshop", "workshop_only"}:
+            return normalized
+        return None
 
 
 class ExtractedPaymentDraft(BaseModel):
@@ -699,6 +1004,10 @@ def build_intake_chat_prompt(proposal: Proposal, messages: list[ProposalMessage]
     if language_mode == "arabic":
         language_rules.append("- The current manager language is Arabic, so your full reply must be Arabic.")
         language_rules.append("- Do not mix in Chinese, German, or English text except exact names, addresses, emails, and technical company names from the transcript.")
+    elif language_mode == "german":
+        language_rules.append("- The current manager language is German, so your full reply must be German.")
+    else:
+        language_rules.append("- The current manager language is English, so your full reply must be English.")
 
     current_facts = _facts_for_prompt(proposal)
     memory_summary = _safe_json(proposal.memory_summary_json, {})
@@ -719,10 +1028,16 @@ def build_intake_chat_prompt(proposal: Proposal, messages: list[ProposalMessage]
             "- If a workshop means a physical work area or work package, ask/record it as a site or work package, not as an employee.",
             "Payment rules:",
             "- Ask about deposits, advance payments, installments, paid amounts, due dates, methods, and references when payment info is missing or mentioned.",
+            "- If the manager already states a payment amount, currency, or method, repeat it exactly and ask only for the missing payment fields.",
+            "- Never replace a stated cash payment with bank transfer, check, receipt, or other advice unless the manager says so.",
             "Construction scope guidance rules:",
             "- Use the hidden construction checklist below silently to decide which scope details are relevant.",
             "- Do not show the full checklist to the manager unless explicitly asked.",
             "- Ask only relevant missing checklist details and never more than 2-4 practical questions per reply.",
+            "- Before asking any follow-up question, compare it against the current transcript, facts, and memory summary.",
+            "- Do not ask for any detail the manager already stated.",
+            "- If a detail is partially known, acknowledge the known part and ask only for the missing part.",
+            "- When old-floor removal, waterproofing type, putty scope, paint coat count, dates, phone, or payment details are already stated, do not ask for those same details again.",
             "- For kitchen renovation, prioritize flooring, plumbing/sanitary, carpentry/shelves, and insulation/waterproofing only when missing.",
             "- For painting, prioritize putty, coat count, decorative/normal type, and interior/exterior only when missing.",
             "- For flooring, prioritize material, size, old-floor removal vs over-installation, stairs/edges, and installation type only when missing.",
@@ -734,9 +1049,21 @@ def build_intake_chat_prompt(proposal: Proposal, messages: list[ProposalMessage]
             "- Never continue the conversation by inventing what the manager/user might say next.",
             "- Never create fake future turns, approvals, confirmations, or self-dialogue.",
             "- Ask concise follow-up questions when scope, dates, site details, payment details, workshops, or staffing needs are missing.",
+            "- When the project scope is still unknown, ask only about work areas and required work types first.",
+            "- Do not ask about payment, staffing, workshops, or structural details in the same reply while the basic scope is still unknown, unless the manager already mentioned those topics.",
+            "- After work areas and work types are known, continue with the next missing group such as payments, workshops, staffing, or access constraints.",
             "- If the manager corrects a site or work package, acknowledge the correction and update that item directly.",
             "- Use plain business language.",
+            "- Do not answer with vague generic summaries such as 'details are necessary', 'quality will be ensured', or 'provide more details if needed'.",
+            "- Every reply must either record concrete facts from the manager, ask specific missing questions, or both.",
+            "- When facts are provided, summarize them with the actual values instead of generic wording.",
+            "- If there are no important missing fields, say that the intake is ready for proposal generation instead of asking for unspecified more details.",
             "- Do not invent facts that are not present in this intake.",
+            "- Never change numbers, amounts, currencies, dates, names, addresses, phone numbers, emails, payment methods, or workshop names from the manager's wording.",
+            "- When listing contact information, include only the exact phone numbers, emails, and contact names provided in this intake; never add placeholder or example phone numbers.",
+            "- Do not provide generic best-practice advice or recommended materials unless the manager explicitly asks for advice.",
+            "- If a material, finish, grade, due date, workshop contact, or remaining payment schedule is unknown, say it is not mentioned or needs confirmation instead of inventing it.",
+            "- Do not prefix the answer with meta text such as 'reply in Arabic', 'Arabic reply', or their Arabic equivalents.",
             "- Keep replies short and practical.",
             *language_rules,
             f"Known customer: {known_customer}",
@@ -786,6 +1113,10 @@ def build_proposal_prompt(messages: list[ProposalMessage], proposal: Proposal | 
                 "requiredCertifications": ["string"],
                 "estimatedHours": "number|null",
                 "recommendedHeadcount": "number|null",
+                "selectedInternalHeadcount": "number|null",
+                "assignedWorkshopName": "string|null",
+                "workshopCoveredSkills": ["string"],
+                "coverageType": "internal_only|mixed_with_workshop|workshop_only|null",
                 "resourceStrategy": "internal|external|mixed|null",
             }
         ],
@@ -824,6 +1155,7 @@ def build_proposal_prompt(messages: list[ProposalMessage], proposal: Proposal | 
     }
     language_mode = _conversation_language_mode(messages)
     language_rules = [
+        "Write all human-readable proposal values in the same language as the manager's conversation.",
         "Keep phone numbers, email addresses, street addresses, and company names exactly as provided.",
     ]
     if language_mode == "arabic":
@@ -834,8 +1166,10 @@ def build_proposal_prompt(messages: list[ProposalMessage], proposal: Proposal | 
                 "Do not switch proposal wording to German or English when the manager's conversation is Arabic.",
             ]
         )
+    elif language_mode == "german":
+        language_rules.append("The current manager language is German, so summary, orderTitle, orderDescription, proposed site names, site notes, requiredSkills, and requiredCertifications must be German.")
     else:
-        language_rules.append("Prefer German business wording inside summary and orderDescription.")
+        language_rules.append("The current manager language is English, so summary, orderTitle, orderDescription, proposed site names, site notes, requiredSkills, and requiredCertifications must be English.")
     memory_summary = _safe_json(proposal.memory_summary_json, {}) if proposal else {}
     current_facts = _facts_for_prompt(proposal) if proposal else []
     payment_drafts = _safe_json(proposal.payment_drafts_json, []) if proposal else []
@@ -853,7 +1187,14 @@ def build_proposal_prompt(messages: list[ProposalMessage], proposal: Proposal | 
             "The sum of proposedSites[].estimatedHours should match the top-level estimatedHours whenever possible.",
             "Classify contractor-provided workshops carefully: physical work areas become proposedSites/work packages; external teams or subcontractors become externalWorkshops.",
             "If deposits, advance payments, installments, paid amounts, or due payments are mentioned, include them in paymentDrafts.",
-            "Suggest recommendedHeadcount and resourceStrategy per site when enough scope is known.",
+            "Leave proposedSites[].recommendedHeadcount null unless the transcript explicitly contains an estimator recommendation rather than a manager requirement.",
+            "Do not copy manager-stated employee counts into proposedSites[].recommendedHeadcount; the recommendation service calculates that number later from scope, hours, schedule, skills, and workshop coverage.",
+            "If the manager explicitly states or confirms how many internal employees/workers are wanted for a site, store that number only in proposedSites[].selectedInternalHeadcount.",
+            "Suggest resourceStrategy per site when enough scope is known.",
+            "Each proposed site must have its own requiredSkills subset. Do not copy the full project skill list into every site unless the transcript explicitly says the same scope applies to all sites.",
+            "When a site is handled by a known external workshop or subcontractor, set proposedSites[].assignedWorkshopName, proposedSites[].workshopCoveredSkills, and proposedSites[].coverageType accordingly.",
+            "Use coverageType=internal_only when only internal employees are needed, mixed_with_workshop when a workshop covers part of the trade scope, and workshop_only when no internal employees are currently needed.",
+            "Do not place workshop coverage only at the top level. Store workshop/site relationships inside the matching proposedSites[] item whenever the transcript makes the relationship clear.",
             "Use the hidden construction checklist below to enrich orderDescription, proposedSites[].notes, and requiredSkills.",
             "Never invent checklist details. If a critical construction detail is unknown, write it as to be confirmed in notes/orderDescription.",
             "Map mentioned checklist categories to practical requiredSkills such as flooring, painting, electrical, plumbing, waterproofing, gypsum board, carpentry, insulation, or structural renovation.",
@@ -889,12 +1230,28 @@ def append_message(db: Session, proposal: Proposal, role: str, content: str) -> 
     return message
 
 
+def _normalize_optional_nonnegative_int(value: Any) -> int | None:
+    try:
+        normalized = int(value)
+    except (TypeError, ValueError):
+        return None
+    return max(0, normalized)
+
+
+def _normalize_site_coverage_type(value: Any, assigned_workshop_name: str | None) -> str:
+    normalized = str(value or "").strip().lower()
+    if normalized in {"internal_only", "mixed_with_workshop", "workshop_only"}:
+        return normalized
+    return "mixed_with_workshop" if assigned_workshop_name else "internal_only"
+
+
 def _normalize_sites(raw_sites: list[dict[str, Any]]) -> list[dict[str, Any]]:
     sites: list[dict[str, Any]] = []
     for raw_site in raw_sites:
         site_name = str(raw_site.get("siteName", "")).strip()
         if not site_name:
             continue
+        assigned_workshop_name = str(raw_site.get("assignedWorkshopName") or "").strip() or None
         sites.append(
             {
                 "siteName": site_name,
@@ -905,7 +1262,11 @@ def _normalize_sites(raw_sites: list[dict[str, Any]]) -> list[dict[str, Any]]:
                 "requiredSkills": _dedupe_strings(list(raw_site.get("requiredSkills") or [])),
                 "requiredCertifications": _dedupe_strings(list(raw_site.get("requiredCertifications") or [])),
                 "estimatedHours": raw_site.get("estimatedHours"),
-                "recommendedHeadcount": raw_site.get("recommendedHeadcount"),
+                "recommendedHeadcount": _normalize_optional_nonnegative_int(raw_site.get("recommendedHeadcount")),
+                "selectedInternalHeadcount": _normalize_optional_nonnegative_int(raw_site.get("selectedInternalHeadcount")),
+                "assignedWorkshopName": assigned_workshop_name,
+                "workshopCoveredSkills": _dedupe_strings(list(raw_site.get("workshopCoveredSkills") or [])),
+                "coverageType": _normalize_site_coverage_type(raw_site.get("coverageType"), assigned_workshop_name),
                 "resourceStrategy": raw_site.get("resourceStrategy") or None,
             }
         )
@@ -957,6 +1318,219 @@ def apply_proposal_update(proposal: Proposal, payload: ProposalDraftPayload | Ex
     return proposal
 
 
+def _normalize_match_text(value: str) -> str:
+    lowered = (value or "").casefold()
+    replacements = {
+        "\u0623": "\u0627",
+        "\u0625": "\u0627",
+        "\u0622": "\u0627",
+        "\u0649": "\u064a",
+        "\u0629": "\u0647",
+        "\u0624": "\u0648",
+        "\u0626": "\u064a",
+    }
+    for source, target in replacements.items():
+        lowered = lowered.replace(source, target)
+    lowered = re.sub(r"[^\w\u0600-\u06ff]+", " ", lowered)
+    return re.sub(r"\s+", " ", lowered).strip()
+
+
+def _normalized_tokens(value: str) -> list[str]:
+    tokens: list[str] = []
+    for token in _normalize_match_text(value).split():
+        if not token:
+            continue
+        tokens.append(token)
+        if token.startswith("\u0627\u0644") and len(token) > 3:
+            tokens.append(token[2:])
+    return tokens
+
+
+def _contains_any_phrase(text: str, phrases: list[str]) -> bool:
+    normalized = _normalize_match_text(text)
+    return any(_normalize_match_text(phrase) in normalized for phrase in phrases if phrase)
+
+
+def _normalized_text_match(haystack: str, needle: str) -> bool:
+    haystack_normalized = _normalize_match_text(haystack)
+    needle_normalized = _normalize_match_text(needle)
+    if not haystack_normalized or not needle_normalized:
+        return False
+    if needle_normalized in haystack_normalized or haystack_normalized in needle_normalized:
+        return True
+    haystack_tokens = set(_normalized_tokens(haystack))
+    needle_tokens = [token for token in _normalized_tokens(needle) if token]
+    if not needle_tokens:
+        return False
+    overlap_count = sum(1 for token in needle_tokens if token in haystack_tokens)
+    return overlap_count * 2 >= len(needle_tokens)
+
+
+def _infer_skills_from_text(text: str) -> list[str]:
+    lowered = _normalize_match_text(text)
+    inferred: list[str] = []
+    for canonical, hints in _SITE_SKILL_HINTS.items():
+        if any(_normalize_match_text(hint) in lowered for hint in hints if hint):
+            inferred.append(canonical)
+    return _dedupe_strings(inferred)
+
+
+def _infer_internal_count_from_text(text: str) -> int | None:
+    normalized = _normalize_match_text(text)
+    staff_term = r"(?:internal employees?|employees?|workers?|mitarbeiter|arbeiter|\u0645\u0648\u0638\u0641(?:\u064a\u0646)?|\u0639\u0645\u0627\u0644?)"
+    qualifier = r"(?:internal|interne|internen|\u062f\u0627\u062e\u0644\u064a(?:\u064a\u0646)?|\u062f\u0627\u062e\u0644\u064a\u0648\u0646)?"
+    for pattern in (
+        rf"(?:^|\b)(\d+)\s*{qualifier}\s*{staff_term}",
+        rf"(?:^|\b){staff_term}\s*{qualifier}\s*(\d+)",
+    ):
+        match = re.search(pattern, normalized, flags=re.IGNORECASE)
+        if match:
+            return max(0, int(match.group(1)))
+
+    word_numbers = {
+        "one": 1,
+        "two": 2,
+        "three": 3,
+        "eins": 1,
+        "ein": 1,
+        "zwei": 2,
+        "drei": 3,
+        "\u0648\u0627\u062d\u062f": 1,
+        "\u0627\u062b\u0646\u064a\u0646": 2,
+        "\u0627\u062a\u0646\u064a\u0646": 2,
+        "\u062b\u0644\u0627\u062b\u0647": 3,
+    }
+    for word, value in word_numbers.items():
+        if re.search(
+            rf"(?:internal employees?|employees?|workers?|mitarbeiter|arbeiter|\u0645\u0648\u0638\u0641(?:\u064a\u0646)?|\u0639\u0645\u0627\u0644?)\s*(?:only|just)?\s*{re.escape(word)}\b",
+            normalized,
+            flags=re.IGNORECASE,
+        ) or re.search(
+            rf"\b{re.escape(word)}\s*(?:internal employees?|employees?|workers?|mitarbeiter|arbeiter|\u0645\u0648\u0638\u0641(?:\u064a\u0646)?|\u0639\u0645\u0627\u0644?)",
+            normalized,
+            flags=re.IGNORECASE,
+        ):
+            return value
+    return None
+
+
+def _extract_internal_needed_skills(context: str) -> list[str]:
+    patterns = [
+        r"still\s+need\s+internal\s+employees?\s+(?:for|with|to\s+cover)\s+([^\n\.,]+)",
+        r"still\s+need\s+internal\s+([^\n\.,]+)",
+        r"wir\s+brauchen\s+noch\s+interne\s+mitarbeiter\s+(?:fuer|f?r)\s+([^\n\.,]+)",
+        r"wir\s+brauchen\s+noch\s+interne\s+([^\n\.,]+)",
+        r"\u0645\u0627\s+\u0632\u0644\u0646\u0627\s+\u0646\u062d\u062a\u0627\u062c\s+\u0645\u0648\u0638\u0641(?:\u064a\u0646)?\s+\u062f\u0627\u062e\u0644\u064a(?:\u064a\u0646)?\s+\u0644(?:\u0640|-)?\s*([^\n\.,]+)",
+        r"\u0646\u062d\u062a\u0627\u062c\s+\u0645\u0648\u0638\u0641(?:\u064a\u0646)?\s+\u062f\u0627\u062e\u0644\u064a(?:\u064a\u0646)?\s+\u0644(?:\u0640|-)?\s*([^\n\.,]+)",
+    ]
+    extracted: list[str] = []
+    for pattern in patterns:
+        for match in re.finditer(pattern, context, flags=re.IGNORECASE):
+            extracted.extend(_infer_skills_from_text(match.group(1)))
+    return _dedupe_strings(extracted)
+
+
+def _enrich_extracted_sites_from_transcript(
+    extracted: ExtractedProposal,
+    proposal: Proposal,
+    messages: list[ProposalMessage],
+) -> ExtractedProposal:
+    manager_lines = [line.strip() for line in "\n".join(_manager_messages(messages)).splitlines() if line.strip()]
+    global_required_skills = _dedupe_strings(extracted.requiredSkills or proposal_required_skills(proposal))
+    external_workshops = extracted.externalWorkshops or [ExtractedExternalWorkshop.model_validate(item) for item in _normalize_external_workshops(_safe_json(proposal.external_workshops_json, []))]
+    workshop_by_name = {workshop.name.strip().lower(): workshop for workshop in external_workshops if workshop.name.strip()}
+
+    for site in extracted.proposedSites:
+        site_name = site.siteName.strip()
+        if not site_name:
+            continue
+        matching_lines = [line for line in manager_lines if _normalized_text_match(line, site_name)]
+        if not matching_lines and len(extracted.proposedSites) == 1:
+            matching_lines = manager_lines
+        if not matching_lines:
+            continue
+        context = "\n".join(matching_lines)
+        inferred_skills = _infer_skills_from_text(context)
+
+        assigned_workshop = site.assignedWorkshopName.strip() if site.assignedWorkshopName else ""
+        if not assigned_workshop:
+            for workshop in external_workshops:
+                if workshop.name and workshop.name.strip() and _normalized_text_match(context, workshop.name.strip()):
+                    assigned_workshop = workshop.name.strip()
+                    site.assignedWorkshopName = assigned_workshop
+                    break
+
+        no_internal = _contains_any_phrase(
+            context,
+            [
+                "\u0644\u0627 \u0646\u0631\u064a\u062f \u0645\u0648\u0638\u0641\u064a\u0646 \u062f\u0627\u062e\u0644\u064a\u064a\u0646",
+                "\u0644\u0627 \u064a\u0644\u0632\u0645 \u0645\u0648\u0638\u0641\u0648\u0646 \u062f\u0627\u062e\u0644\u064a\u0648\u0646",
+                "no internal employees",
+                "without internal employees",
+                "ohne interne mitarbeiter",
+            ],
+        )
+        internal_only = _contains_any_phrase(
+            context,
+            [
+                "\u0645\u0648\u0638\u0641\u064a\u0646 \u062f\u0627\u062e\u0644\u064a\u064a\u0646 \u0641\u0642\u0637",
+                "\u0627\u0644\u0645\u0648\u0642\u0639 \u064a\u062d\u062a\u0627\u062c \u0645\u0648\u0638\u0641\u064a\u0646 \u062f\u0627\u062e\u0644\u064a\u064a\u0646 \u0641\u0642\u0637",
+                "internal employees only",
+                "nur interne mitarbeiter",
+            ],
+        )
+        still_need_internal = _contains_any_phrase(
+            context,
+            [
+                "\u0645\u0627 \u0632\u0644\u0646\u0627 \u0646\u062d\u062a\u0627\u062c \u0645\u0648\u0638\u0641\u064a\u0646 \u062f\u0627\u062e\u0644\u064a\u064a\u0646",
+                "\u0646\u062d\u062a\u0627\u062c \u0645\u0648\u0638\u0641\u064a\u0646 \u062f\u0627\u062e\u0644\u064a\u064a\u0646",
+                "still need internal employees",
+                "still need internal staff",
+                "still need internal",
+                "wir brauchen noch interne mitarbeiter",
+                "wir brauchen noch interne",
+            ],
+        )
+        internal_needed_skills = _extract_internal_needed_skills(context)
+
+        workshop_model = workshop_by_name.get(assigned_workshop.lower()) if assigned_workshop else None
+        workshop_specialties = _dedupe_strings(list(workshop_model.specialties or [])) if workshop_model is not None else []
+        workshop_confirmed_skills = _dedupe_strings(list(site.workshopCoveredSkills or []))
+        site_specific_skills = _dedupe_strings(inferred_skills + internal_needed_skills + workshop_specialties + workshop_confirmed_skills)
+
+        if (not site.requiredSkills or (len(extracted.proposedSites) > 1 and site.requiredSkills == global_required_skills)) and site_specific_skills:
+            site.requiredSkills = site_specific_skills
+
+        if internal_only:
+            site.coverageType = "internal_only"
+        elif assigned_workshop and no_internal:
+            site.coverageType = "workshop_only"
+            site.selectedInternalHeadcount = 0
+        elif assigned_workshop and (still_need_internal or internal_needed_skills):
+            site.coverageType = "mixed_with_workshop"
+        elif assigned_workshop and not site.coverageType:
+            site.coverageType = "mixed_with_workshop"
+
+        inferred_count = _infer_internal_count_from_text(context)
+        # Manager-mentioned numbers are treated as the manager's selected target, not as the AI recommendation.
+        if site.selectedInternalHeadcount is None and inferred_count is not None and site.coverageType != "workshop_only":
+            site.selectedInternalHeadcount = inferred_count
+
+        if assigned_workshop:
+            workshop_skills = _dedupe_strings(workshop_confirmed_skills + workshop_specialties)
+            if site.coverageType == "mixed_with_workshop":
+                workshop_skills = _dedupe_strings(skill for skill in workshop_skills + inferred_skills if skill not in internal_needed_skills)
+            elif not workshop_skills:
+                workshop_skills = _dedupe_strings(inferred_skills)
+            if site.coverageType == "workshop_only" and not workshop_skills:
+                workshop_skills = _dedupe_strings(site.requiredSkills or inferred_skills or global_required_skills)
+            site.workshopCoveredSkills = workshop_skills
+
+        if site.coverageType == "workshop_only":
+            site.selectedInternalHeadcount = 0
+
+    return extracted
+
 def _proposal_from_local_memory(proposal: Proposal, messages: list[ProposalMessage]) -> ExtractedProposal:
     manager_text = "\n".join(_manager_messages(messages))
     memory = _safe_json(proposal.memory_summary_json, {})
@@ -977,11 +1551,23 @@ def _proposal_from_local_memory(proposal: Proposal, messages: list[ProposalMessa
         "stair",
         "basement",
         "entrance",
+        "kitchen",
+        "bathroom",
+        "living room",
+        "corridor",
         "treppen",
         "keller",
+        "kuche",
+        "bad",
+        "wohnzimmer",
+        "flur",
         "\u0628\u064a\u062a \u0627\u0644\u062f\u0631\u062c",
         "\u0645\u0645\u0631 \u0627\u0644\u0642\u0628\u0648",
         "\u0645\u062f\u062e\u0644",
+        "\u0645\u0637\u0628\u062e",
+        "\u062d\u0645\u0627\u0645",
+        "\u063a\u0631\u0641\u0629 \u0627\u0644\u0645\u0639\u064a\u0634\u0629",
+        "\u0645\u0645\u0631",
     ]
     for line in manager_text.splitlines():
         cleaned = line.strip().strip("-?")
@@ -991,8 +1577,10 @@ def _proposal_from_local_memory(proposal: Proposal, messages: list[ProposalMessa
             cleaned = re.sub(r"^\d+[.)]\s*", "", cleaned).strip()
             if len(cleaned) <= 80:
                 site_names.append(cleaned)
+    language_mode = _conversation_language_mode(messages)
+
     if not site_names:
-        site_names = ["Baustelle 1"]
+        site_names = [_localized_default_site_name(language_mode)]
 
     total_hours = None
     hours_match = re.search("(\\d+(?:[.,]\\d+)?)\\s*(?:hours|stunden|\u0633\u0627\u0639\u0629|\u0633\u0627\u0639\u0627\u062a)", manager_text, flags=re.IGNORECASE)
@@ -1016,7 +1604,7 @@ def _proposal_from_local_memory(proposal: Proposal, messages: list[ProposalMessa
     company_match = re.search("(?:company|firma|\u0634\u0631\u0643\u0629|\u0627\u0644\u0634\u0631\u0643\u0629)\\s+([^\\n,.]+)", manager_text, flags=re.IGNORECASE)
     contact_match = re.search("(?:contact|ansprechpartner|\u0645\u0633\u0624\u0648\u0644|\u0627\u0644\u0634\u062e\u0635 \u0627\u0644\u0645\u0633\u0624\u0648\u0644|\u062c\u0647\u0629 \u0627\u0644\u0627\u062a\u0635\u0627\u0644)\\s+(?:is\\s+|\u0647\u0648\\s+)?([^\u060c,\\n]+)", manager_text, flags=re.IGNORECASE)
 
-    return ExtractedProposal(
+    extracted = ExtractedProposal(
         customerCompanyName=(company_match.group(1).strip() if company_match else proposal.customer_company_name),
         contactName=(contact_match.group(1).strip() if contact_match else proposal.contact_name),
         contactPhone=contact_phone or proposal.contact_phone,
@@ -1038,6 +1626,7 @@ def _proposal_from_local_memory(proposal: Proposal, messages: list[ProposalMessa
         externalWorkshops=[ExtractedExternalWorkshop.model_validate(item) for item in external_workshops],
         staffingPlan=memory.get("staffingPlan") if isinstance(memory, dict) else None,
     )
+    return _enrich_extracted_sites_from_transcript(extracted, proposal, messages)
 
 
 def extract_proposal_from_messages(proposal: Proposal, messages: list[ProposalMessage]) -> ExtractedProposal:
@@ -1045,6 +1634,7 @@ def extract_proposal_from_messages(proposal: Proposal, messages: list[ProposalMe
     try:
         raw_text = generate_text(prompt, response_mime_type="application/json")
         extracted = ExtractedProposal.model_validate(_extract_json_object(raw_text))
+        extracted = _enrich_extracted_sites_from_transcript(extracted, proposal, messages)
     except (HTTPException, ValidationError) as exc:
         logger.warning("AI proposal extraction failed; using local transcript fallback: %s", exc)
         extracted = _proposal_from_local_memory(proposal, messages)
@@ -1052,7 +1642,7 @@ def extract_proposal_from_messages(proposal: Proposal, messages: list[ProposalMe
     if not extracted.proposedSites:
         extracted.proposedSites = [
             ExtractedProposalSite(
-                siteName=extracted.customerCity or extracted.customerCompanyName or "Baustelle 1",
+                siteName=extracted.customerCity or extracted.customerCompanyName or _localized_default_site_name(_conversation_language_mode(messages)),
                 city=extracted.customerCity,
                 requiredSkills=extracted.requiredSkills,
                 requiredCertifications=extracted.requiredCertifications,
@@ -1207,7 +1797,9 @@ def calculate_price_from_assignments(
         total_price += average_rate * Decimal(str(_site_hours(site, fallback_hours)))
 
     if total_price == Decimal("0"):
-        raise HTTPException(status_code=400, detail="Keine gueltigen Mitarbeiterauswahlen fuer die Preisberechnung.")
+        if proposal.estimated_price is not None:
+            return Decimal(str(proposal.estimated_price)).quantize(Decimal("0.01"))
+        return Decimal("0.00")
     return total_price.quantize(Decimal("0.01"))
 
 
@@ -1262,21 +1854,38 @@ def confirm_proposal(
 
     created_site_ids: list[str] = []
     for index, site_data in enumerate(sites):
-        ensure(bool(site_assignments.get(index)), f"Bitte mindestens einen Mitarbeiter fuer Baustelle {index + 1} auswaehlen.")
+        selected_employee_ids = list(dict.fromkeys(site_assignments.get(index, [])))
+        coverage_type = str(site_data.get("coverageType") or "internal_only").strip().lower()
+        try:
+            selected_internal_headcount = int(site_data.get("selectedInternalHeadcount"))
+        except (TypeError, ValueError):
+            selected_internal_headcount = None
+        allow_empty_staffing = coverage_type == "workshop_only" or selected_internal_headcount == 0
+        ensure(bool(selected_employee_ids) or allow_empty_staffing, f"Bitte mindestens einen Mitarbeiter fuer Baustelle {index + 1} auswaehlen.")
+
+        workshop_name = str(site_data.get("assignedWorkshopName") or "").strip()
+        workshop_covered_skills = [str(value).strip() for value in site_data.get("workshopCoveredSkills") or [] if str(value).strip()]
+        site_notes = site_data.get("notes")
+        if workshop_name:
+            staffing_note = f"Workshop: {workshop_name} | Coverage: {coverage_type}"
+            if workshop_covered_skills:
+                staffing_note += f" | Covered skills: {', '.join(workshop_covered_skills)}"
+            site_notes = f"{site_notes}\n\n{staffing_note}" if site_notes else staffing_note
+
         site = Site(
             order_id=order.id,
             site_name=site_data["siteName"],
             street=site_data.get("street"),
             zip_code=site_data.get("zipCode"),
             city=site_data.get("city"),
-            notes=site_data.get("notes"),
+            notes=site_notes,
             is_active=True,
         )
         db.add(site)
         db.flush()
         created_site_ids.append(site.id)
 
-        for employee_id in dict.fromkeys(site_assignments.get(index, [])):
+        for employee_id in selected_employee_ids:
             employee = db.get(Employee, employee_id)
             if not employee:
                 raise HTTPException(status_code=404, detail="Ausgewaehlter Mitarbeiter nicht gefunden.")

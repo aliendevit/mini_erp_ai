@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import io
 import logging
+import unicodedata
 import wave
 from datetime import datetime, timezone
 from collections.abc import Iterable
@@ -24,6 +25,7 @@ from ..schemas import (
 from ..services.ai_summary import build_work_summary
 from ..services.assemblyai_client import transcribe_audio
 from ..services.gemini_client import ensure_gemini_ready, stream_text
+from ..services.proposal_documents import build_proposal_pdf
 from ..services.proposals import (
     append_message,
     apply_proposal_update,
@@ -33,9 +35,11 @@ from ..services.proposals import (
     extract_proposal_from_messages,
     refresh_proposal_memory,
     refresh_proposal_memory_locally,
+    intake_assistant_source_text,
+    maybe_build_scope_first_reply,
     sanitize_intake_assistant_reply,
 )
-from ..services.staffing import recommend_staff_for_proposal
+from ..services.staffing import build_staffing_explanation_context, format_staffing_explanation, recommend_staff_for_proposal
 from ..utils import as_datetime, decimal_or_none, end_of_utc_day, ensure, json_dumps, not_found, proposal_payload
 
 router = APIRouter()
@@ -83,6 +87,44 @@ def _wav_duration_ms(audio_bytes: bytes) -> int | None:
     return int((frame_count / float(frame_rate)) * 1000)
 
 
+def _staffing_explanation_prompt(context: dict, locale: str) -> str:
+    language_map = {"ar": "Arabic", "de": "German", "en": "English"}
+    language_name = language_map.get(locale, "English")
+    return "\n".join(
+        [
+            "You explain ERP staffing recommendations to a manager.",
+            "Do not reveal chain-of-thought or hidden reasoning.",
+            "Provide a short decision explanation only, based strictly on the provided facts.",
+            "Mention the workshop impact, the remaining internal skills, the hours/window, and why the recommended count is appropriate.",
+            "If a value is missing, say it was not mentioned.",
+            f"Respond in {language_name}.",
+            "Keep the answer concise, practical, and professional.",
+            "Explanation data:",
+            json_dumps(context),
+        ]
+    )
+
+
+def _fallback_stream_chunks(text: str):
+    for line in text.splitlines(True):
+        if line:
+            yield line
+
+
+def _contains_arabic_text(value: str) -> bool:
+    return any("؀" <= char <= "ۿ" for char in value)
+
+
+def _proposal_pdf_filename(proposal: Proposal) -> str:
+    base = (proposal.order_title or proposal.customer_company_name or proposal.id or "proposal").strip()
+    normalized = unicodedata.normalize("NFKD", base).encode("ascii", "ignore").decode("ascii")
+    safe = "".join(char if char.isalnum() or char in ("-", "_") else "-" for char in normalized).strip("-_")
+    if not safe:
+        suffix = (proposal.id or "draft").replace("-", "")[:8]
+        safe = f"proposal-{suffix}" if suffix else "proposal"
+    return f"{safe[:64]}.pdf"
+
+
 @router.post("/ai/work-summary")
 def work_summary(payload: AIWorkSummaryPayload, db: Session = Depends(get_db)) -> dict:
     return build_work_summary(
@@ -122,6 +164,18 @@ def get_intake(proposal_id: str, db: Session = Depends(get_db)) -> dict:
     return proposal_payload(proposal, include_messages=True)
 
 
+@router.get("/ai/intakes/{proposal_id}/pdf")
+def get_intake_pdf(
+    proposal_id: str,
+    locale: Literal["de", "en", "ar"] | None = None,
+    db: Session = Depends(get_db),
+) -> StreamingResponse:
+    proposal = _get_proposal(db, proposal_id)
+    pdf_bytes = build_proposal_pdf(proposal_payload(proposal, include_messages=True), locale=locale or "en")
+    headers = {"Content-Disposition": f"inline; filename=\"{_proposal_pdf_filename(proposal)}\""}
+    return StreamingResponse(io.BytesIO(pdf_bytes), media_type="application/pdf", headers=headers)
+
+
 @router.put("/ai/intakes/{proposal_id}")
 def update_intake(proposal_id: str, payload: ProposalDraftPayload, db: Session = Depends(get_db)) -> dict:
     proposal = _get_proposal(db, proposal_id)
@@ -156,6 +210,12 @@ def intake_message_stream(proposal_id: str, payload: AIIntakeMessagePayload, db:
         db.rollback()
         logger.warning("AI intake memory refresh failed: proposal_id=%s error=%s", proposal_id, exc)
     proposal = _get_proposal(db, proposal_id)
+    deterministic_reply = maybe_build_scope_first_reply(proposal, proposal.messages)
+    if deterministic_reply:
+        append_message(db, proposal, "assistant", deterministic_reply)
+        db.commit()
+        return StreamingResponse(iter([deterministic_reply]), media_type="text/plain; charset=utf-8", headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})
+
     ensure_gemini_ready()
 
     def generate() -> Iterable[str]:
@@ -165,7 +225,7 @@ def intake_message_stream(proposal_id: str, payload: AIIntakeMessagePayload, db:
             for chunk in stream_text(prompt):
                 assistant_parts.append(chunk)
 
-            assistant_text = sanitize_intake_assistant_reply("".join(assistant_parts))
+            assistant_text = sanitize_intake_assistant_reply("".join(assistant_parts), intake_assistant_source_text(proposal))
             if assistant_text:
                 yield assistant_text
                 append_message(db, proposal, "assistant", assistant_text)
@@ -331,6 +391,49 @@ def recommend_assignments(proposal_id: str, db: Session = Depends(get_db)) -> di
         "proposal": proposal_payload(proposal),
         "recommendations": recommendations,
     }
+
+
+@router.post("/ai/intakes/{proposal_id}/recommend-assignments/{site_index}/explain/stream")
+def explain_recommendation_stream(
+    proposal_id: str,
+    site_index: int,
+    locale: Literal["de", "en", "ar"] | None = None,
+    db: Session = Depends(get_db),
+) -> StreamingResponse:
+    proposal = _get_proposal(db, proposal_id)
+    recommendations = recommend_staff_for_proposal(db, proposal)
+    try:
+        context = build_staffing_explanation_context(proposal, recommendations, site_index)
+    except IndexError as exc:
+        raise not_found() from exc
+
+    response_locale = locale or ("ar" if any("؀" <= char <= "ۿ" for message in proposal.messages for char in (message.content or "")) else "de")
+    fallback_text = format_staffing_explanation(context, response_locale)
+
+    def generate() -> Iterable[str]:
+        emitted = False
+        try:
+            prompt = _staffing_explanation_prompt(context, response_locale)
+            for chunk in stream_text(prompt):
+                if chunk:
+                    emitted = True
+                    yield chunk
+        except Exception as exc:
+            logger.warning(
+                "Staffing explanation AI stream failed; using deterministic fallback: proposal_id=%s site_index=%s error=%s",
+                proposal_id,
+                site_index,
+                exc,
+            )
+        if not emitted:
+            for chunk in _fallback_stream_chunks(fallback_text):
+                yield chunk
+
+    headers = {
+        "Cache-Control": "no-cache",
+        "X-Accel-Buffering": "no",
+    }
+    return StreamingResponse(generate(), media_type="text/plain; charset=utf-8", headers=headers)
 
 
 @router.post("/ai/intakes/{proposal_id}/confirm")

@@ -189,6 +189,10 @@ class ProposalSiteDraftPayload(BaseModel):
     requiredCertifications: list[str] = Field(default_factory=list)
     estimatedHours: float | None = None
     recommendedHeadcount: int | None = None
+    selectedInternalHeadcount: int | None = None
+    assignedWorkshopName: str | None = None
+    workshopCoveredSkills: list[str] = Field(default_factory=list)
+    coverageType: Literal["internal_only", "mixed_with_workshop", "workshop_only"] | None = None
     resourceStrategy: str | None = None
 
 

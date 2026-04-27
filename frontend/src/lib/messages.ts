@@ -1,4 +1,4 @@
-import type { Locale } from './i18n-config';
+﻿import type { Locale } from './i18n-config';
 
 export type Messages = {
   app: {
@@ -290,9 +290,12 @@ export type Messages = {
     conversation: string;
     conversationDesc: string;
     generateProposal: string;
+    exportProposalPdf: string;
     saveDraft: string;
     clearConversation: string;
     clearConversationConfirm: string;
+    clearAllFields: string;
+    clearAllFieldsConfirm: string;
     noConversation: string;
     messagePlaceholder: string;
     sendMessage: string;
@@ -319,6 +322,7 @@ export type Messages = {
     recommendationsDesc: string;
     calculateRecommendations: string;
     noRecommendations: string;
+    notMentioned: string;
     timeframe: string;
     pricePreview: string;
     select: string;
@@ -693,9 +697,12 @@ export const messages: Record<Locale, Messages> = {
       conversation: 'Konversation',
       conversationDesc: 'Erfasste Anforderungen mit Gemini-Unterstuetzung',
       generateProposal: 'Vorschlag erzeugen',
+      exportProposalPdf: 'PDF erzeugen',
       saveDraft: 'Entwurf speichern',
       clearConversation: 'Nachrichten leeren',
       clearConversationConfirm: 'Konversation wirklich leeren? Die gespeicherten Nachrichten dieses Intakes werden entfernt.',
+      clearAllFields: 'Alle Felder leeren',
+      clearAllFieldsConfirm: 'Alle Felder dieses Intakes leeren? Nachrichten und der Intake-Eintrag bleiben erhalten.',
       noConversation: 'Noch keine Unterhaltung.',
       messagePlaceholder: 'Neue Nachricht an den Intake-Assistenten...',
       sendMessage: 'Nachricht senden',
@@ -722,6 +729,7 @@ export const messages: Record<Locale, Messages> = {
       recommendationsDesc: 'Deterministische Auswahl nach Skills, Kapazitaet und Historie.',
       calculateRecommendations: 'Empfehlungen berechnen',
       noRecommendations: 'Noch keine Empfehlungen berechnet.',
+      notMentioned: 'Nicht erwaehnt',
       timeframe: 'Zeitraum',
       pricePreview: 'Preisvorschau',
       select: 'Auswahl',
@@ -1089,9 +1097,12 @@ export const messages: Record<Locale, Messages> = {
       conversation: 'Conversation',
       conversationDesc: 'Captured requirements with Gemini support',
       generateProposal: 'Generate proposal',
+      exportProposalPdf: 'Generate PDF',
       saveDraft: 'Save draft',
       clearConversation: 'Clear messages',
       clearConversationConfirm: 'Clear this conversation? The saved messages for this intake will be removed.',
+      clearAllFields: 'Clear all fields',
+      clearAllFieldsConfirm: 'Clear all fields for this intake? Messages and the intake record will be kept.',
       noConversation: 'No conversation yet.',
       messagePlaceholder: 'New message for the intake assistant...',
       sendMessage: 'Send message',
@@ -1118,6 +1129,7 @@ export const messages: Record<Locale, Messages> = {
       recommendationsDesc: 'Deterministic selection based on skills, capacity, and history.',
       calculateRecommendations: 'Calculate suggestions',
       noRecommendations: 'No suggestions calculated yet.',
+      notMentioned: 'Not mentioned',
       timeframe: 'Timeframe',
       pricePreview: 'Price preview',
       select: 'Select',
@@ -1484,9 +1496,12 @@ export const messages: Record<Locale, Messages> = {
       conversation: 'المحادثة',
       conversationDesc: 'المتطلبات المسجلة بدعم Gemini',
       generateProposal: 'إنشاء العرض',
+      exportProposalPdf: '\u0625\u0646\u0634\u0627\u0621 PDF',
       saveDraft: 'حفظ المسودة',
       clearConversation: 'مسح الرسائل',
       clearConversationConfirm: 'هل تريد مسح هذه المحادثة؟ سيتم حذف الرسائل المحفوظة لهذا الإدخال.',
+      clearAllFields: '\u0645\u0633\u062d \u0643\u0644 \u0627\u0644\u062d\u0642\u0648\u0644',
+      clearAllFieldsConfirm: '\u0647\u0644 \u062a\u0631\u064a\u062f \u0645\u0633\u062d \u0643\u0644 \u0627\u0644\u062d\u0642\u0648\u0644 \u0644\u0647\u0630\u0627 \u0627\u0644\u0625\u062f\u062e\u0627\u0644\u061f \u0633\u062a\u0628\u0642\u0649 \u0627\u0644\u0631\u0633\u0627\u0626\u0644 \u0648\u0633\u062c\u0644 \u0627\u0644\u0625\u062f\u062e\u0627\u0644 \u0645\u062d\u0641\u0648\u0638\u064a\u0646.',
       noConversation: 'لا توجد محادثة بعد.',
       messagePlaceholder: 'رسالة جديدة إلى مساعد الاستقبال...',
       sendMessage: 'إرسال الرسالة',
@@ -1513,6 +1528,7 @@ export const messages: Record<Locale, Messages> = {
       recommendationsDesc: 'اختيار حتمي يعتمد على المهارات والسعة والسجل.',
       calculateRecommendations: 'حساب الاقتراحات',
       noRecommendations: 'لم يتم حساب اقتراحات بعد.',
+      notMentioned: 'غير مذكور',
       timeframe: 'الفترة',
       pricePreview: 'معاينة السعر',
       select: 'اختيار',
@@ -1561,3 +1577,5 @@ export const messages: Record<Locale, Messages> = {
     },
   },
 };
+
+

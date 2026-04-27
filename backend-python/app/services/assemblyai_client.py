@@ -101,16 +101,21 @@ def _response_debug_text(payload: dict[str, Any]) -> str:
     return "; ".join(parts)
 
 
-def transcribe_audio(audio_bytes: bytes, mime_type: str, locale_hint: str | None = None) -> dict[str, Any]:
-    api_key, api_base = ensure_assemblyai_ready()
-    upload_url = _upload_audio(audio_bytes, api_key=api_key, api_base=api_base)
 
+def _transcribe_once(
+    upload_url: str,
+    *,
+    api_key: str,
+    api_base: str,
+    locale_hint: str | None = None,
+    force_language_detection: bool = False,
+) -> dict[str, Any]:
     transcript_request: dict[str, Any] = {
         "audio_url": upload_url,
-        "speech_models": ["universal-3-pro", "universal-2"],
+        "speech_models": _DEFAULT_SPEECH_MODELS,
         "format_text": True,
     }
-    language_code = _LOCALE_HINTS.get((locale_hint or "").lower())
+    language_code = None if force_language_detection else _LOCALE_HINTS.get((locale_hint or "").lower())
     if language_code:
         transcript_request["language_code"] = language_code
     else:
@@ -132,7 +137,7 @@ def transcribe_audio(audio_bytes: bytes, mime_type: str, locale_hint: str | None
         latest = _request_json("GET", f"{api_base}/v2/transcript/{transcript_id}", api_key=api_key)
         status = str(latest.get("status") or "").lower()
         if status == "completed":
-            break
+            return latest
         if status == "error":
             debug_text = _response_debug_text(latest)
             logger.warning("AssemblyAI transcription error: %s", debug_text)
@@ -141,8 +146,38 @@ def transcribe_audio(audio_bytes: bytes, mime_type: str, locale_hint: str | None
             raise HTTPException(status_code=504, detail="Timed out while waiting for AssemblyAI transcription.")
         sleep(1.0)
 
+
+def transcribe_audio(audio_bytes: bytes, mime_type: str, locale_hint: str | None = None) -> dict[str, Any]:
+    api_key, api_base = ensure_assemblyai_ready()
+    upload_url = _upload_audio(audio_bytes, api_key=api_key, api_base=api_base)
+
+    latest = _transcribe_once(upload_url, api_key=api_key, api_base=api_base, locale_hint=locale_hint)
     transcript = str(latest.get("text") or "").strip()
-    debug_text = _response_debug_text(latest)
+    debug_parts = [f"hinted={_response_debug_text(latest)}"]
+
+    if not transcript and locale_hint:
+        try:
+            retry_payload = _transcribe_once(
+                upload_url,
+                api_key=api_key,
+                api_base=api_base,
+                locale_hint=None,
+                force_language_detection=True,
+            )
+            debug_parts.append(f"autodetect={_response_debug_text(retry_payload)}")
+            retry_transcript = str(retry_payload.get("text") or "").strip()
+            if retry_transcript:
+                latest = retry_payload
+                transcript = retry_transcript
+            else:
+                latest = retry_payload
+        except HTTPException as exc:
+            detail = str(exc.detail or "")
+            if "no spoken audio" not in detail.lower():
+                raise
+            debug_parts.append(f"autodetect_error={detail}")
+
+    debug_text = " | ".join(debug_parts)
     if not transcript:
         logger.warning("AssemblyAI transcription returned no transcript. %s", debug_text)
 

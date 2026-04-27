@@ -16,6 +16,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from app.database import Base
 from app.models import Customer, CustomerWorkshop, Employee, EmployeeAvailabilityBlock, EmployeeSkill, PaymentRecord, Proposal, ProposalFact, ProposalMessage
 from app.schemas import ProposalDraftPayload
+from app.services.proposal_documents import _arabic_visual_text, build_proposal_pdf
 from app.services.proposals import (
     ExtractedProposal,
     apply_proposal_update,
@@ -25,9 +26,10 @@ from app.services.proposals import (
     construction_scope_guidance,
     extract_proposal_from_messages,
     refresh_proposal_memory,
+    maybe_build_scope_first_reply,
     sanitize_intake_assistant_reply,
 )
-from app.services.staffing import recommend_staff_for_proposal
+from app.services.staffing import build_staffing_explanation_context, format_staffing_explanation, recommend_staff_for_proposal
 
 
 def build_employee(name: str, skill: str, rate: str = "50", capacity: str = "40") -> Employee:
@@ -52,6 +54,74 @@ class ProposalAndStaffingTests(unittest.TestCase):
 
     def tearDown(self) -> None:
         self.db.close()
+
+    def test_build_proposal_pdf_returns_pdf_bytes(self) -> None:
+        payload = {
+            "id": "proposal-1",
+            "status": "draft",
+            "customerCompanyName": "ACME Bau",
+            "contactName": "Ahmad Mansour",
+            "contactPhone": "+49 176 44556677",
+            "contactEmail": "ahmad@example.com",
+            "orderTitle": "Renovation Proposal",
+            "summary": "Kitchen renovation and guest bathroom work.",
+            "preferredStartDate": "2026-05-06",
+            "preferredEndDate": "2026-05-20",
+            "estimatedHours": 140,
+            "estimatedPrice": 7200,
+            "currency": "EUR",
+            "proposedSites": [
+                {
+                    "siteName": "Kitchen",
+                    "requiredSkills": ["flooring", "plumbing"],
+                    "requiredCertifications": [],
+                    "estimatedHours": 55,
+                    "coverageType": "mixed_with_workshop",
+                    "assignedWorkshopName": "Hamburg Renovation Team",
+                    "workshopCoveredSkills": ["flooring"],
+                    "notes": "Manager wants internal plumbing support.",
+                }
+            ],
+            "paymentDrafts": [{"type": "deposit", "amount": 1000, "currency": "EUR", "paidDate": "2026-05-10", "method": "cash"}],
+            "externalWorkshops": [{"name": "Hamburg Renovation Team", "specialties": ["flooring"], "notes": "Optional external support"}],
+            "recommendedTeam": {"sites": [{"siteIndex": 0, "siteName": "Kitchen", "recommendedHeadcount": 2, "recommendedTeam": [{"employeeName": "Ali Hassan"}, {"employeeName": "Omar Khaled"}]}]},
+        }
+
+        pdf_bytes = build_proposal_pdf(payload, locale="en")
+
+        self.assertTrue(pdf_bytes.startswith(b"%PDF"))
+        self.assertGreater(len(pdf_bytes), 1500)
+
+    def test_build_proposal_pdf_supports_arabic_locale(self) -> None:
+        payload = {
+            "id": "proposal-ar-1",
+            "status": "draft",
+            "customerCompanyName": "شركة النور",
+            "contactName": "أحمد منصور",
+            "summary": "ترميم مطبخ وحمام ضيوف",
+            "orderTitle": "عرض مشروع",
+            "proposedSites": [
+                {
+                    "siteName": "المطبخ",
+                    "requiredSkills": ["بلاط", "صحية"],
+                    "requiredCertifications": [],
+                    "estimatedHours": 40,
+                }
+            ],
+            "paymentDrafts": [],
+            "externalWorkshops": [],
+        }
+
+        pdf_bytes = build_proposal_pdf(payload, locale="ar")
+
+        self.assertTrue(pdf_bytes.startswith(b"%PDF"))
+        self.assertGreater(len(pdf_bytes), 1500)
+
+    def test_arabic_pdf_text_is_shaped_for_reportlab(self) -> None:
+        visual = _arabic_visual_text("\u0634\u0631\u0643\u0629 \u0627\u0644\u0646\u0648\u0631")
+
+        self.assertNotEqual(visual, "\u0634\u0631\u0643\u0629 \u0627\u0644\u0646\u0648\u0631")
+        self.assertTrue(any("\ufe80" <= char <= "\ufefc" for char in visual))
 
     def test_apply_proposal_update_normalizes_lists(self) -> None:
         proposal = Proposal(status="intake")
@@ -106,6 +176,27 @@ class ProposalAndStaffingTests(unittest.TestCase):
         self.assertIn("maximum 2-4", guidance)
         self.assertIn("to be confirmed", guidance)
 
+    def test_scope_first_reply_for_arabic_project_basics_does_not_ask_payment(self) -> None:
+        proposal = Proposal(status="intake")
+        messages = [
+            ProposalMessage(
+                role="user",
+                content=(
+                    "\u0639\u0646\u062f\u064a \u0645\u0634\u0631\u0648\u0639 \u062a\u0631\u0645\u064a\u0645 \u0644\u0634\u0631\u0643\u0629 \u0627\u0644\u0639\u0645\u0631\u0627\u0646 \u0627\u0644\u062d\u062f\u064a\u062b. "
+                    "\u0627\u0644\u0645\u0648\u0642\u0639 \u0641\u064a \u0645\u062f\u064a\u0646\u0629 \u062d\u0644\u0628. "
+                    "\u0628\u062f\u0646\u0627 \u0646\u0628\u062f\u0623 \u0645\u0646 \u0661\u0660-\u0660\u0665-\u0662\u0660\u0662\u0666."
+                ),
+            )
+        ]
+
+        reply = maybe_build_scope_first_reply(proposal, messages)
+
+        self.assertIsNotNone(reply)
+        self.assertIn("\u0645\u0646\u0627\u0637\u0642 \u0627\u0644\u0639\u0645\u0644", reply or "")
+        self.assertIn("\u0646\u0648\u0639 \u0627\u0644\u0623\u0639\u0645\u0627\u0644", reply or "")
+        self.assertNotIn("\u0627\u0644\u062f\u0641\u0639", reply or "")
+        self.assertNotIn("\u0639\u0631\u0628\u0648\u0646", reply or "")
+
     def test_intake_chat_prompt_includes_selective_construction_guidance(self) -> None:
         prompt = build_intake_chat_prompt(Proposal(status="intake"), [ProposalMessage(role="user", content="Kitchen renovation with flooring and plumbing.")])
 
@@ -115,6 +206,18 @@ class ProposalAndStaffingTests(unittest.TestCase):
         self.assertIn("plumbing", prompt)
         self.assertIn("never more than 2-4", prompt)
         self.assertIn("Do not show the full checklist", prompt)
+        self.assertIn("Do not ask for any detail the manager already stated", prompt)
+        self.assertIn("ask only for the missing part", prompt)
+        self.assertIn("When the project scope is still unknown", prompt)
+        self.assertIn("Do not ask about payment, staffing, workshops, or structural details", prompt)
+        self.assertIn("repeat it exactly and ask only for the missing payment fields", prompt)
+        self.assertIn("Never change numbers, amounts, currencies", prompt)
+        self.assertIn("never add placeholder or example phone numbers", prompt)
+        self.assertIn("Do not provide generic best-practice advice", prompt)
+        self.assertIn("not mentioned or needs confirmation", prompt)
+        self.assertIn("Do not answer with vague generic summaries", prompt)
+        self.assertIn("record concrete facts", prompt)
+        self.assertIn("ready for proposal generation", prompt)
 
     def test_proposal_prompt_includes_construction_guidance_for_notes_and_skills(self) -> None:
         prompt = build_proposal_prompt([ProposalMessage(role="user", content="We need painting and flooring.")])
@@ -162,6 +265,23 @@ class ProposalAndStaffingTests(unittest.TestCase):
         cleaned = sanitize_intake_assistant_reply("Assistant: ?? ????? ?????.")
 
         self.assertEqual(cleaned, "?? ????? ?????.")
+
+    def test_sanitize_intake_assistant_reply_removes_language_meta_prefix(self) -> None:
+        cleaned = sanitize_intake_assistant_reply(
+            "\u0644\u0631\u062f \u0628\u0627\u0644\u0644\u063a\u0629 \u0627\u0644\u0639\u0631\u0628\u064a\u0629: \u062a\u0645 \u062a\u0633\u062c\u064a\u0644 \u0627\u0644\u062f\u0641\u0639 \u0643\u0627\u0634."
+        )
+
+        self.assertEqual(cleaned, "\u062a\u0645 \u062a\u0633\u062c\u064a\u0644 \u0627\u0644\u062f\u0641\u0639 \u0643\u0627\u0634.")
+
+    def test_sanitize_intake_assistant_reply_removes_unsupported_phone_numbers(self) -> None:
+        source = "\u0631\u0642\u0645 \u0627\u0644\u0647\u0627\u062a\u0641: \u0660\u0669\u0664\u0664\u0661\u0662\u0663\u0664\u0665\u0666"
+        raw = "\u0631\u0642\u0645 \u0627\u0644\u0647\u0627\u062a\u0641: \u0660\u0669\u0664\u0664\u0661\u0662\u0663\u0664\u0665\u0666\u060c \u0660\u0669\u0664-\u0660\u0660\u0660\u0660\u0660\u0660\u0660\u060c \u0660\u0669\u0665-\u0660\u0660\u0660\u0660\u0660\u0660\u0660"
+
+        cleaned = sanitize_intake_assistant_reply(raw, source)
+
+        self.assertIn("\u0660\u0669\u0664\u0664\u0661\u0662\u0663\u0664\u0665\u0666", cleaned)
+        self.assertNotIn("\u0660\u0669\u0664-\u0660\u0660\u0660\u0660\u0660\u0660\u0660", cleaned)
+        self.assertNotIn("\u0660\u0669\u0665-\u0660\u0660\u0660\u0660\u0660\u0660\u0660", cleaned)
 
     def test_extract_proposal_falls_back_for_invalid_provider_json(self) -> None:
         proposal = Proposal(status="intake", order_title="Fallback Angebot")
@@ -299,6 +419,107 @@ class ProposalAndStaffingTests(unittest.TestCase):
         self.assertIn("2026-05-10", proposal.payment_drafts_json or "")
         self.assertIn("USD", proposal.payment_drafts_json or "")
 
+    def test_apply_proposal_update_keeps_site_staffing_fields(self) -> None:
+        proposal = Proposal(status="draft")
+        payload = ProposalDraftPayload(
+            customerCompanyName="ACME",
+            orderTitle="Hybrid Staffing",
+            summary="Kurzfassung",
+            proposedSites=[
+                {
+                    "siteName": "Kellerflur",
+                    "requiredSkills": ["Trockenbau", "Maler"],
+                    "recommendedHeadcount": 2,
+                    "selectedInternalHeadcount": 1,
+                    "assignedWorkshopName": "Bremen Drywall Team",
+                    "workshopCoveredSkills": ["Trockenbau"],
+                    "coverageType": "mixed_with_workshop",
+                }
+            ],
+        )
+
+        apply_proposal_update(proposal, payload)
+
+        self.assertIn("selectedInternalHeadcount", proposal.proposed_sites_json or "")
+        self.assertIn("Bremen Drywall Team", proposal.proposed_sites_json or "")
+        self.assertIn("mixed_with_workshop", proposal.proposed_sites_json or "")
+
+    def test_proposal_prompt_includes_site_level_workshop_and_staffing_fields(self) -> None:
+        prompt = build_proposal_prompt([ProposalMessage(role="user", content="Basement uses a workshop, internal painters still needed.")])
+
+        self.assertIn("assignedWorkshopName", prompt)
+        self.assertIn("workshopCoveredSkills", prompt)
+        self.assertIn("coverageType", prompt)
+        self.assertIn("selectedInternalHeadcount", prompt)
+        self.assertIn("Do not place workshop coverage only at the top level", prompt)
+
+    def test_extract_proposal_keeps_ai_site_workshop_and_staffing_fields(self) -> None:
+        proposal = Proposal(status="intake")
+        provider_payload = """{
+          "summary": "Hybrid staffing project",
+          "orderTitle": "Renovation",
+          "proposedSites": [{
+            "siteName": "Kellerflur",
+            "requiredSkills": ["Trockenbau", "Feuchtigkeitsschutz", "Maler"],
+            "recommendedHeadcount": 2,
+            "selectedInternalHeadcount": 1,
+            "assignedWorkshopName": "Hamburg Renovation Team",
+            "workshopCoveredSkills": ["Trockenbau", "Feuchtigkeitsschutz"],
+            "coverageType": "mixed_with_workshop"
+          }],
+          "requiredSkills": ["Trockenbau", "Feuchtigkeitsschutz", "Maler"],
+          "currency": "EUR"
+        }"""
+
+        with patch("app.services.proposals.generate_text", return_value=provider_payload):
+            extracted = extract_proposal_from_messages(
+                proposal,
+                [ProposalMessage(role="user", content="Kellerflur: Hamburg Renovation Team covers Trockenbau and Feuchtigkeitsschutz, but we still need internal Maler.")],
+            )
+
+        site = extracted.proposedSites[0]
+        self.assertEqual(site.assignedWorkshopName, "Hamburg Renovation Team")
+        self.assertEqual(site.coverageType, "mixed_with_workshop")
+        self.assertEqual(site.selectedInternalHeadcount, 1)
+        self.assertIn("Trockenbau", site.workshopCoveredSkills)
+
+    def test_extract_proposal_enriches_partial_site_data_from_transcript(self) -> None:
+        proposal = Proposal(status="intake")
+        provider_payload = """{
+          "summary": "Hybrid staffing project",
+          "orderTitle": "Renovation",
+          "proposedSites": [{
+            "siteName": "??? ?????",
+            "requiredSkills": [],
+            "recommendedHeadcount": null,
+            "selectedInternalHeadcount": null,
+            "assignedWorkshopName": null,
+            "workshopCoveredSkills": [],
+            "coverageType": null
+          }],
+          "requiredSkills": ["Trockenbau", "Feuchtigkeitsschutz", "Maler"],
+          "externalWorkshops": [{
+            "name": "Hamburg Renovation Team",
+            "specialties": ["Trockenbau", "Feuchtigkeitsschutz"],
+            "relationshipStatus": "known"
+          }],
+          "currency": "EUR"
+        }"""
+        message = ProposalMessage(
+            role="user",
+            content="??? ????? ????? ???? ?????? ????? Hamburg Renovation Team ????? Trockenbau ? Feuchtigkeitsschutz? ????? ?? ???? ????? ?????? ??????? ??? Maler ?????????.",
+        )
+
+        with patch("app.services.proposals.generate_text", return_value=provider_payload):
+            extracted = extract_proposal_from_messages(proposal, [message])
+
+        site = extracted.proposedSites[0]
+        self.assertEqual(site.assignedWorkshopName, "Hamburg Renovation Team")
+        self.assertEqual(site.coverageType, "mixed_with_workshop")
+        self.assertIn("Trockenbau", site.workshopCoveredSkills)
+        self.assertIn("Feuchtigkeitsschutz", site.workshopCoveredSkills)
+        self.assertTrue(site.requiredSkills)
+
     def test_extracted_proposal_fills_remaining_site_hours(self) -> None:
         extracted = ExtractedProposal.model_validate(
             {
@@ -419,6 +640,232 @@ class ProposalAndStaffingTests(unittest.TestCase):
         site = recommendations["sites"][0]
         self.assertTrue(site["recommendations"])
         self.assertEqual(site["workshopRecommendations"][0]["name"], "Preferred Maler Team")
+
+    def test_recommend_staff_uses_full_auto_selected_team_for_price_preview(self) -> None:
+        alice = build_employee("Alice Maler", "Maler", rate="40")
+        bruno = build_employee("Bruno Maler", "Maler", rate="80")
+        self.db.add_all([alice, bruno])
+
+        proposal = Proposal(status="draft", order_title="Team Einsatz", estimated_hours=Decimal("10.0"))
+        apply_proposal_update(
+            proposal,
+            ProposalDraftPayload(
+                customerCompanyName="ACME",
+                orderTitle="Team Einsatz",
+                summary="Mehrere Maler",
+                preferredStartDate=datetime(2026, 4, 21, tzinfo=timezone.utc),
+                preferredEndDate=datetime(2026, 4, 22, tzinfo=timezone.utc),
+                proposedSites=[
+                    {
+                        "siteName": "Treppenhaus",
+                        "requiredSkills": ["Maler"],
+                        "estimatedHours": 10,
+                        "recommendedHeadcount": 2,
+                        "selectedInternalHeadcount": 2,
+                    }
+                ],
+                requiredSkills=["Maler"],
+            ),
+        )
+        self.db.add(proposal)
+        self.db.commit()
+
+        recommendations = recommend_staff_for_proposal(self.db, proposal)
+
+        site = recommendations["sites"][0]
+        self.assertEqual(len(site["autoSelectedEmployeeIds"]), 2)
+        self.assertEqual(recommendations["pricePreview"], 600.0)
+
+    def test_recommend_staff_calculates_recommended_count_independently_from_manager_count(self) -> None:
+        alice = build_employee("Alice Maler", "Maler")
+        bruno = build_employee("Bruno Maler", "Maler")
+        self.db.add_all([alice, bruno])
+
+        proposal = Proposal(status="draft", order_title="Manager Count", estimated_hours=Decimal("10.0"))
+        apply_proposal_update(
+            proposal,
+            ProposalDraftPayload(
+                customerCompanyName="ACME",
+                orderTitle="Manager Count",
+                summary="Manager asked for two internal painters",
+                preferredStartDate=datetime(2026, 4, 21, tzinfo=timezone.utc),
+                preferredEndDate=datetime(2026, 4, 22, tzinfo=timezone.utc),
+                proposedSites=[
+                    {
+                        "siteName": "Bedroom",
+                        "requiredSkills": ["Maler"],
+                        "estimatedHours": 10,
+                        "recommendedHeadcount": 2,
+                        "selectedInternalHeadcount": 2,
+                        "coverageType": "internal_only",
+                    }
+                ],
+                requiredSkills=["Maler"],
+            ),
+        )
+        self.db.add(proposal)
+        self.db.commit()
+
+        recommendations = recommend_staff_for_proposal(self.db, proposal)
+
+        site = recommendations["sites"][0]
+        self.assertEqual(site["recommendedHeadcount"], 1)
+        self.assertEqual(site["selectedInternalHeadcount"], 2)
+        self.assertEqual(len(site["autoSelectedEmployeeIds"]), 2)
+
+    def test_recommend_staff_derives_nonzero_headcount_when_saved_value_is_zero(self) -> None:
+        employee = build_employee("Anna Maler", "Maler")
+        self.db.add(employee)
+
+        proposal = Proposal(status="draft", order_title="Zero Headcount", estimated_hours=Decimal("18.0"))
+        apply_proposal_update(
+            proposal,
+            ProposalDraftPayload(
+                customerCompanyName="ACME",
+                orderTitle="Zero Headcount",
+                summary="Saved zero should be recalculated",
+                preferredStartDate=datetime(2026, 4, 21, tzinfo=timezone.utc),
+                preferredEndDate=datetime(2026, 5, 10, tzinfo=timezone.utc),
+                proposedSites=[
+                    {
+                        "siteName": "Schlafzimmer",
+                        "requiredSkills": ["Maler"],
+                        "estimatedHours": 18,
+                        "recommendedHeadcount": 0,
+                        "selectedInternalHeadcount": 0,
+                        "coverageType": "internal_only",
+                    }
+                ],
+                requiredSkills=["Maler"],
+            ),
+        )
+        self.db.add(proposal)
+        self.db.commit()
+
+        recommendations = recommend_staff_for_proposal(self.db, proposal)
+
+        site = recommendations["sites"][0]
+        self.assertGreaterEqual(site["recommendedHeadcount"], 1)
+        self.assertGreaterEqual(site["selectedInternalHeadcount"], 1)
+        self.assertTrue(site["autoSelectedEmployeeIds"])
+
+    def test_recommend_staff_handles_workshop_only_sites_without_internal_team(self) -> None:
+        employee = build_employee("Clara Maler", "Maler")
+        self.db.add(employee)
+
+        proposal = Proposal(status="draft", order_title="Workshop Only", estimated_hours=Decimal("12.0"))
+        apply_proposal_update(
+            proposal,
+            ProposalDraftPayload(
+                customerCompanyName="ACME",
+                orderTitle="Workshop Only",
+                summary="Workshop uebernimmt alles",
+                preferredStartDate=datetime(2026, 4, 21, tzinfo=timezone.utc),
+                preferredEndDate=datetime(2026, 4, 24, tzinfo=timezone.utc),
+                proposedSites=[
+                    {
+                        "siteName": "Kueche",
+                        "requiredSkills": ["Trockenbau"],
+                        "estimatedHours": 12,
+                        "assignedWorkshopName": "Kuechen Profi Team",
+                        "workshopCoveredSkills": ["Trockenbau"],
+                        "coverageType": "workshop_only",
+                        "selectedInternalHeadcount": 0,
+                    }
+                ],
+                requiredSkills=["Trockenbau"],
+            ),
+        )
+        self.db.add(proposal)
+        self.db.commit()
+
+        recommendations = recommend_staff_for_proposal(self.db, proposal)
+
+        site = recommendations["sites"][0]
+        self.assertEqual(site["coverageType"], "workshop_only")
+        self.assertEqual(site["internalRequiredSkills"], [])
+        self.assertEqual(site["autoSelectedEmployeeIds"], [])
+        self.assertEqual(site["selectedInternalHeadcount"], 0)
+
+    def test_build_staffing_explanation_context_and_fallback_text(self) -> None:
+        alice = build_employee("Alice Maler", "Maler")
+        bruno = build_employee("Bruno Maler", "Maler")
+        self.db.add_all([alice, bruno])
+
+        proposal = Proposal(status="draft", order_title="Kellerflur")
+        apply_proposal_update(
+            proposal,
+            ProposalDraftPayload(
+                customerCompanyName="ACME",
+                orderTitle="Kellerflur",
+                summary="Mixed workshop coverage",
+                preferredStartDate=datetime(2026, 4, 21, tzinfo=timezone.utc),
+                preferredEndDate=datetime(2026, 4, 28, tzinfo=timezone.utc),
+                proposedSites=[
+                    {
+                        "siteName": "Kellerflur",
+                        "requiredSkills": ["Trockenbau", "Maler"],
+                        "estimatedHours": 50,
+                        "assignedWorkshopName": "Hamburg Renovation Team",
+                        "workshopCoveredSkills": ["Trockenbau"],
+                        "coverageType": "mixed_with_workshop",
+                    }
+                ],
+                requiredSkills=["Trockenbau", "Maler"],
+            ),
+        )
+        self.db.add(proposal)
+        self.db.commit()
+
+        recommendations = recommend_staff_for_proposal(self.db, proposal)
+        context = build_staffing_explanation_context(proposal, recommendations, 0)
+
+        self.assertEqual(context["siteName"], "Kellerflur")
+        self.assertEqual(context["assignedWorkshopName"], "Hamburg Renovation Team")
+        self.assertEqual(context["internalRequiredSkills"], ["maler"])
+        self.assertGreaterEqual(context["recommendedHeadcount"], 1)
+        self.assertTrue(context["topCandidates"])
+
+        explanation_en = format_staffing_explanation(context, "en")
+        explanation_ar = format_staffing_explanation(context, "ar")
+
+        self.assertIn("Assigned workshop: Hamburg Renovation Team", explanation_en)
+        self.assertIn("Kellerflur", explanation_en)
+        self.assertIn("\u0627\u0644\u0645\u0648\u0642\u0639:", explanation_ar)
+
+    def test_confirm_proposal_allows_workshop_only_site_without_employees(self) -> None:
+        proposal = Proposal(status="draft")
+        apply_proposal_update(
+            proposal,
+            ProposalDraftPayload(
+                customerCompanyName="Workshop Kunde",
+                orderTitle="Werkstattprojekt",
+                summary="Workshop only site",
+                proposedSites=[
+                    {
+                        "siteName": "Kueche",
+                        "requiredSkills": ["Trockenbau"],
+                        "estimatedHours": 12,
+                        "assignedWorkshopName": "Kuechen Profi Team",
+                        "workshopCoveredSkills": ["Trockenbau"],
+                        "coverageType": "workshop_only",
+                        "selectedInternalHeadcount": 0,
+                    }
+                ],
+                estimatedHours=12,
+                preferredStartDate=datetime(2026, 5, 1, tzinfo=timezone.utc),
+                preferredEndDate=datetime(2026, 5, 7, tzinfo=timezone.utc),
+            ),
+        )
+        self.db.add(proposal)
+        self.db.commit()
+
+        result = confirm_proposal(self.db, proposal, existing_customer_id=None, site_assignments={})
+        self.db.commit()
+
+        self.assertTrue(result["orderId"])
+        self.assertEqual(proposal.status, "converted")
+        self.assertEqual(float(proposal.estimated_price or 0), 0.0)
 
     def test_confirm_proposal_creates_customer_order_site_and_assignments(self) -> None:
         employee = build_employee("Clara Team", "Maler", rate="50")

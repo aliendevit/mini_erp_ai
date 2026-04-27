@@ -20,6 +20,7 @@ from app.database import Base
 from app.models import Proposal, ProposalMessage
 from app.routers.ai import clear_intake_messages, create_intake, generate_proposal, intake_message_stream, transcribe_intake_audio
 from app.services.assemblyai_client import transcribe_audio
+from app.services.proposals import build_proposal_prompt
 from app.schemas import AIIntakeCreatePayload, AIIntakeMessagePayload
 
 
@@ -239,15 +240,88 @@ class AIAssistantTests(unittest.TestCase):
             "audio_duration": 7500,
             "confidence": None,
         }
+        submitted_retry = {"id": "tx-124", "status": "queued"}
+        completed_retry = {
+            "id": "tx-124",
+            "status": "completed",
+            "text": "",
+            "language_code": "de",
+            "speech_model_used": "universal-2",
+            "speech_models": ["universal-3-pro", "universal-2"],
+            "audio_duration": 7500,
+            "confidence": 0.0,
+        }
 
-        with patch('app.services.assemblyai_client.ensure_assemblyai_ready', return_value=('token', 'https://api.assemblyai.com')), \
-             patch('app.services.assemblyai_client._upload_audio', return_value='https://cdn.assemblyai.com/uploaded.wav'), \
-             patch('app.services.assemblyai_client._request_json', side_effect=[submitted, completed]):
+        with patch('app.services.assemblyai_client.ensure_assemblyai_ready', return_value=('token', 'https://api.assemblyai.com')),              patch('app.services.assemblyai_client._upload_audio', return_value='https://cdn.assemblyai.com/uploaded.wav'),              patch('app.services.assemblyai_client._request_json', side_effect=[submitted, completed, submitted_retry, completed_retry]):
             payload = transcribe_audio(_wav_bytes(), mime_type='audio/wav', locale_hint='de')
 
         self.assertEqual(payload['transcript'], '')
         self.assertEqual(payload['provider'], 'assemblyai')
-        self.assertIn('status=completed', payload['debugText'])
+        self.assertIn('autodetect=', payload['debugText'])
+
+
+    def test_assemblyai_helper_retries_with_language_detection_when_hinted_attempt_is_blank(self) -> None:
+        submitted_hinted = {"id": "tx-123", "status": "queued"}
+        completed_hinted = {
+            "id": "tx-123",
+            "status": "completed",
+            "text": "",
+            "language_code": "ar",
+            "speech_model_used": "universal-2",
+            "speech_models": ["universal-3-pro", "universal-2"],
+            "audio_duration": 7500,
+            "confidence": 0.0,
+        }
+        submitted_detected = {"id": "tx-124", "status": "queued"}
+        completed_detected = {
+            "id": "tx-124",
+            "status": "completed",
+            "text": "\u0645\u0631\u062d\u0628\u0627 \u0645\u0646 \u0647\u0627\u0645\u0628\u0648\u0631\u063a",
+            "language_code": "ar",
+            "speech_model_used": "universal-2",
+            "speech_models": ["universal-3-pro", "universal-2"],
+            "audio_duration": 7500,
+            "confidence": 0.84,
+        }
+
+        with patch('app.services.assemblyai_client.ensure_assemblyai_ready', return_value=('token', 'https://api.assemblyai.com')),              patch('app.services.assemblyai_client._upload_audio', return_value='https://cdn.assemblyai.com/uploaded.wav'),              patch('app.services.assemblyai_client._request_json', side_effect=[submitted_hinted, completed_hinted, submitted_detected, completed_detected]):
+            payload = transcribe_audio(_wav_bytes(), mime_type='audio/wav', locale_hint='ar')
+
+        self.assertEqual(payload['transcript'], '\u0645\u0631\u062d\u0628\u0627 \u0645\u0646 \u0647\u0627\u0645\u0628\u0648\u0631\u063a')
+        self.assertEqual(payload['detectedLanguage'], 'ar')
+        self.assertIn('autodetect=', payload['debugText'])
+
+    def test_build_proposal_prompt_uses_manager_language_instead_of_forcing_german(self) -> None:
+        prompt = build_proposal_prompt(
+            [
+                ProposalMessage(role='user', content='Please create the proposal in English for the kitchen and bathroom.'),
+                ProposalMessage(role='assistant', content='Sure, I will keep collecting details.'),
+            ]
+        )
+
+        self.assertIn("same language as the manager's conversation", prompt)
+        self.assertIn('must be English', prompt)
+        self.assertNotIn('Prefer German business wording', prompt)
+
+    def test_generate_proposal_local_fallback_keeps_arabic_defaults(self) -> None:
+        created = create_intake(AIIntakeCreatePayload(), db=self.db)
+        proposal_id = created['id']
+
+        proposal = self.db.get(Proposal, proposal_id)
+        proposal.messages = [
+            ProposalMessage(role='user', content='\u0639\u0646\u062f\u064a \u0645\u0634\u0631\u0648\u0639 \u062c\u062f\u064a\u062f \u064a\u0634\u0645\u0644 \u0627\u0644\u0645\u0637\u0628\u062e \u0648\u0627\u0644\u062d\u0645\u0627\u0645 \u0641\u064a \u0647\u0627\u0645\u0628\u0648\u0631\u063a.'),
+            ProposalMessage(role='assistant', content='\u0645\u0627 \u0646\u0637\u0627\u0642 \u0627\u0644\u0639\u0645\u0644 \u0627\u0644\u0645\u0637\u0644\u0648\u0628\u061f'),
+        ]
+        self.db.add(proposal)
+        self.db.commit()
+
+        with patch('app.services.proposals.generate_text', side_effect=HTTPException(status_code=502, detail='quota')):
+            payload = generate_proposal(proposal_id, db=self.db)
+
+        self.assertEqual(payload['orderTitle'], '\u0639\u0631\u0636 \u0645\u0634\u0631\u0648\u0639')
+        self.assertTrue(payload['summary'].startswith('\u0639\u0646\u062f\u064a \u0645\u0634\u0631\u0648\u0639 \u062c\u062f\u064a\u062f'))
+        self.assertNotEqual(payload['proposedSites'][0]['siteName'], 'Site 1')
+        self.assertIn('\u0639', payload['orderTitle'])
 
 
 if __name__ == "__main__":

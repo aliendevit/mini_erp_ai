@@ -10,6 +10,12 @@ type RecordingResult = {
   fileName: string;
 };
 
+export type TranscodedWavResult = RecordingResult & {
+  appliedGain: number;
+  originalMimeType: string;
+  originalPeak: number | null;
+};
+
 export type WavRecordingSession = {
   stop: () => Promise<RecordingResult>;
   cancel: () => Promise<void>;
@@ -17,7 +23,7 @@ export type WavRecordingSession = {
 
 function getAudioContextCtor(): AudioContextCtor | null {
   if (typeof window === 'undefined') return null;
-  return (window.AudioContext || (window as typeof window & { webkitAudioContext?: typeof AudioContext }).webkitAudioContext || null);
+  return window.AudioContext || (window as typeof window & { webkitAudioContext?: typeof AudioContext }).webkitAudioContext || null;
 }
 
 function mergeChunks(chunks: Float32Array[]): Float32Array {
@@ -44,6 +50,38 @@ function resampleBuffer(source: Float32Array, sourceRate: number, targetRate: nu
     result[i] = source[left] * (1 - weight) + source[right] * weight;
   }
   return result;
+}
+
+function calculatePeak(samples: Float32Array): number {
+  let peak = 0;
+  for (let i = 0; i < samples.length; i += 1) {
+    peak = Math.max(peak, Math.abs(samples[i]));
+  }
+  return peak;
+}
+
+function mixToMono(buffer: AudioBuffer): Float32Array {
+  if (buffer.numberOfChannels <= 1) {
+    return new Float32Array(buffer.getChannelData(0));
+  }
+
+  const mono = new Float32Array(buffer.length);
+  for (let channel = 0; channel < buffer.numberOfChannels; channel += 1) {
+    const channelData = buffer.getChannelData(channel);
+    for (let index = 0; index < channelData.length; index += 1) {
+      mono[index] += channelData[index] / buffer.numberOfChannels;
+    }
+  }
+  return mono;
+}
+
+function applyGain(samples: Float32Array, gain: number): Float32Array {
+  if (gain <= 1.001) return samples;
+  const amplified = new Float32Array(samples.length);
+  for (let i = 0; i < samples.length; i += 1) {
+    amplified[i] = Math.max(-1, Math.min(1, samples[i] * gain));
+  }
+  return amplified;
 }
 
 function encodeWav(samples: Float32Array, sampleRate: number): Blob {
@@ -78,12 +116,41 @@ export function isWavRecordingSupported(): boolean {
   return typeof navigator !== 'undefined' && !!navigator.mediaDevices?.getUserMedia && !!getAudioContextCtor();
 }
 
+export async function transcodeBlobToMonoWav(blob: Blob, targetSampleRate = 16_000): Promise<TranscodedWavResult> {
+  const AudioCtor = getAudioContextCtor();
+  if (!AudioCtor) throw new Error('UNSUPPORTED');
+  const audioContext = new AudioCtor();
+  await audioContext.resume();
+
+  try {
+    const encoded = await blob.arrayBuffer();
+    const decoded = await audioContext.decodeAudioData(encoded.slice(0));
+    const mono = mixToMono(decoded);
+    const originalPeak = calculatePeak(mono);
+    const appliedGain = originalPeak > 0 ? Math.min(16, Math.max(1, 0.72 / originalPeak)) : 1;
+    const normalized = applyGain(mono, appliedGain);
+    const samples = resampleBuffer(normalized, decoded.sampleRate, targetSampleRate);
+    return {
+      blob: encodeWav(samples, targetSampleRate),
+      durationMs: samples.length ? Math.round((samples.length / targetSampleRate) * 1000) : 0,
+      peak: calculatePeak(normalized),
+      mimeType: 'audio/wav',
+      fileName: 'ai-intake.wav',
+      appliedGain,
+      originalMimeType: blob.type || 'application/octet-stream',
+      originalPeak,
+    };
+  } finally {
+    await audioContext.close().catch(() => undefined);
+  }
+}
+
 export async function startMonoWavRecording(targetSampleRate = 16_000): Promise<WavRecordingSession> {
   if (!navigator.mediaDevices?.getUserMedia) throw new Error('UNSUPPORTED');
   const AudioCtor = getAudioContextCtor();
   if (!AudioCtor) throw new Error('UNSUPPORTED');
 
-  const stream = await navigator.mediaDevices.getUserMedia({ audio: { channelCount: 1, echoCancellation: true, noiseSuppression: true } });
+  const stream = await navigator.mediaDevices.getUserMedia({ audio: { channelCount: 1, echoCancellation: true, noiseSuppression: true, autoGainControl: true } });
   const audioContext = new AudioCtor();
   await audioContext.resume();
 
@@ -101,7 +168,7 @@ export async function startMonoWavRecording(targetSampleRate = 16_000): Promise<
     const input = event.inputBuffer.getChannelData(0);
     const copy = new Float32Array(input.length);
     copy.set(input);
-    for (let i = 0; i < copy.length; i += 1) peak = Math.max(peak, Math.abs(copy[i]));
+    peak = Math.max(peak, calculatePeak(copy));
     chunks.push(copy);
   };
 
