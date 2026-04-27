@@ -283,7 +283,6 @@ Recently verified areas include:
 - Prototype is single-tenant.
 - Authentication, authorization, roles, and audit logs are not implemented yet.
 - AI is assistive, not authoritative.
-- Workshop planning is trade-level only; no workshop scheduling, rates, capacity, or availability planning yet.
 - Progress tracking with photos, OCR, OCR + RAG, and Progress Monitoring AI are planned ideas, not fully implemented.
 - SQLite is convenient for local development; PostgreSQL is preferred for multi-user deployment.
 
