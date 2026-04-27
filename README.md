@@ -4,7 +4,7 @@ Mini ERP AI is a prototype ERP for a renovation/construction company. It combine
 
 The active stack is:
 
-- `frontend/` - Next.js + React + TypeScript UI
+- `frontend/` - Next.js + React + TypeScript UI (For Now)
 - `backend-python/` - FastAPI + SQLAlchemy backend
 - SQLite by default for local development, PostgreSQL optional through Docker
 - Gemini / OpenRouter for text AI workflows
