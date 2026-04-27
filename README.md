@@ -58,6 +58,7 @@ The active stack is:
 - Manager decides whether a site is internal-only, workshop-only, or mixed
 - Workshop-covered skills are subtracted from internal employee matching
 - AI-recommended internal headcount is calculated by the backend from scope, hours, schedule, skills, and workshop coverage
+-   AI-explain its decision why this number of suggested employees is recommended
 - Manager-selected internal headcount remains separate from the calculated recommendation
 - UI auto-checks the top ranked employees based on the selected internal headcount
 - Workshop-only sites can be confirmed with zero internal employees
