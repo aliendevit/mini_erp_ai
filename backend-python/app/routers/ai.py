@@ -14,7 +14,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session, selectinload
 
 from ..database import get_db
-from ..models import Proposal
+from ..models import Proposal, Workshop
 from ..schemas import (
     AIIntakeConfirmPayload,
     AIIntakeCreatePayload,
@@ -39,8 +39,7 @@ from ..services.proposals import (
     maybe_build_scope_first_reply,
     sanitize_intake_assistant_reply,
 )
-from ..services.staffing import build_staffing_explanation_context, format_staffing_explanation, recommend_staff_for_proposal
-from ..utils import as_datetime, decimal_or_none, end_of_utc_day, ensure, json_dumps, not_found, proposal_payload
+from ..utils import as_datetime, end_of_utc_day, ensure, json_dumps, json_loads, not_found, proposal_payload
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
@@ -123,6 +122,33 @@ def _proposal_pdf_filename(proposal: Proposal) -> str:
         suffix = (proposal.id or "draft").replace("-", "")[:8]
         safe = f"proposal-{suffix}" if suffix else "proposal"
     return f"{safe[:64]}.pdf"
+
+
+def _workshop_specialties(workshop: Workshop) -> list[str]:
+    return [str(value).strip() for value in json_loads(workshop.specialties_json, []) if str(value).strip()]
+
+
+def _available_workshops_for_prompt(db: Session) -> list[dict]:
+    workshops = db.scalars(
+        select(Workshop)
+        .where(Workshop.is_active.is_(True))
+        .where(Workshop.availability_status == "available")
+        .order_by(Workshop.name.asc())
+    ).all()
+    return [
+        {
+            "id": workshop.id,
+            "name": workshop.name,
+            "specialties": _workshop_specialties(workshop),
+            "contactName": workshop.contact_name,
+            "phone": workshop.phone,
+            "email": workshop.email,
+            "availabilityStatus": workshop.availability_status,
+            "availabilityNote": workshop.availability_note,
+            "notes": workshop.notes,
+        }
+        for workshop in workshops
+    ]
 
 
 @router.post("/ai/work-summary")
@@ -221,7 +247,7 @@ def intake_message_stream(proposal_id: str, payload: AIIntakeMessagePayload, db:
     def generate() -> Iterable[str]:
         assistant_parts: list[str] = []
         try:
-            prompt = build_intake_chat_prompt(proposal, proposal.messages)
+            prompt = build_intake_chat_prompt(proposal, proposal.messages, _available_workshops_for_prompt(db))
             for chunk in stream_text(prompt):
                 assistant_parts.append(chunk)
 
@@ -376,13 +402,168 @@ def generate_proposal(proposal_id: str, db: Session = Depends(get_db)) -> dict:
     return proposal_payload(proposal, include_messages=True)
 
 
+def _skill_matches(candidate: str, required: str) -> bool:
+    candidate_key = candidate.strip().lower()
+    required_key = required.strip().lower()
+    return bool(candidate_key and required_key and (candidate_key == required_key or candidate_key in required_key or required_key in candidate_key))
+
+
+def _workshop_recommendations_for_proposal(db: Session, proposal: Proposal) -> dict:
+    payload = proposal_payload(proposal)
+    sites = payload.get("proposedSites") or []
+    draft_workshops = payload.get("externalWorkshops") or []
+    global_workshops = db.scalars(select(Workshop).order_by(Workshop.name.asc())).all()
+    unavailable_names = {
+        workshop.name.strip().lower()
+        for workshop in global_workshops
+        if workshop.name and (not workshop.is_active or workshop.availability_status != "available")
+    }
+
+    candidates: list[dict] = []
+    seen_names: set[str] = set()
+    for workshop in global_workshops:
+        if not workshop.is_active or workshop.availability_status != "available":
+            continue
+        name = workshop.name.strip()
+        if not name:
+            continue
+        key = name.lower()
+        seen_names.add(key)
+        candidates.append(
+            {
+                "kind": "global_workshop",
+                "workshopId": workshop.id,
+                "draftIndex": None,
+                "name": name,
+                "specialties": _workshop_specialties(workshop),
+                "suggestedFor": [],
+                "relationshipStatus": "available",
+                "availabilityStatus": workshop.availability_status,
+                "availabilityNote": workshop.availability_note,
+                "notes": workshop.notes,
+                "source": "workshops",
+            }
+        )
+
+    for draft_index, workshop in enumerate(draft_workshops):
+        name = str(workshop.get("name") or "").strip()
+        if not name:
+            continue
+        key = name.lower()
+        if key in seen_names or key in unavailable_names:
+            continue
+        candidates.append(
+            {
+                "kind": "proposal_external_workshop",
+                "workshopId": None,
+                "draftIndex": draft_index,
+                "name": name,
+                "specialties": [str(value).strip() for value in workshop.get("specialties") or [] if str(value).strip()],
+                "suggestedFor": [str(value).strip().lower() for value in workshop.get("suggestedFor") or [] if str(value).strip()],
+                "relationshipStatus": workshop.get("relationshipStatus"),
+                "availabilityStatus": "available",
+                "availabilityNote": None,
+                "notes": workshop.get("notes"),
+                "source": "intake",
+            }
+        )
+
+    now = datetime.now(timezone.utc)
+    start_dt = proposal.preferred_start_date or now
+    end_dt = proposal.preferred_end_date or start_dt
+    try:
+        days = max((end_dt.date() - start_dt.date()).days + 1, 1)
+    except Exception:
+        days = 1
+    weeks = max((days + 6) // 7, 1)
+
+    result_sites = []
+    for index, site in enumerate(sites):
+        site_name = str(site.get("siteName") or f"Site {index + 1}")
+        required_skills = [str(value).strip() for value in site.get("requiredSkills") or [] if str(value).strip()]
+        assigned_name = str(site.get("assignedWorkshopName") or "").strip()
+        assigned_key = assigned_name.lower()
+        covered_skills = [str(value).strip() for value in site.get("workshopCoveredSkills") or [] if str(value).strip()]
+
+        suggestions = []
+        for candidate in candidates:
+            specialties = candidate["specialties"]
+            matched = [specialty for specialty in specialties if any(_skill_matches(specialty, skill) for skill in required_skills)]
+            site_match = any(token and token in site_name.lower() for token in candidate["suggestedFor"])
+            assigned_match = bool(assigned_key and candidate["name"].strip().lower() == assigned_key)
+            if matched or site_match or assigned_match:
+                suggestions.append(
+                    {
+                        "kind": candidate["kind"],
+                        "workshopId": candidate["workshopId"],
+                        "draftIndex": candidate["draftIndex"],
+                        "name": candidate["name"],
+                        "score": len(matched) * 10 + (5 if site_match else 0) + (20 if assigned_match else 0),
+                        "matchedSkills": matched,
+                        "specialties": specialties,
+                        "relationshipStatus": candidate["relationshipStatus"],
+                        "availabilityStatus": candidate["availabilityStatus"],
+                        "availabilityNote": candidate["availabilityNote"],
+                        "reason": "Available workshop matches required site trades or was mentioned for this site.",
+                        "notes": candidate["notes"],
+                    }
+                )
+        suggestions.sort(key=lambda item: item["score"], reverse=True)
+
+        assigned_unavailable = bool(assigned_key and assigned_key in unavailable_names)
+        if assigned_name:
+            coverage_type = str(site.get("coverageType") or "workshop_only")
+            workshop_summary = {
+                "name": assigned_name,
+                "coveredSkills": covered_skills or required_skills,
+                "coverageType": coverage_type,
+                "matchedSkills": covered_skills or required_skills,
+                "source": "proposal_site",
+                "availabilityStatus": "not_available" if assigned_unavailable else "available",
+            }
+            coverage_note = "Workshop assigned for this site. Execution planning uses workshop partners only."
+            warning = "Assigned workshop is currently inactive or not available; select an available workshop before execution." if assigned_unavailable else None
+        else:
+            coverage_type = "workshop_only"
+            workshop_summary = None
+            coverage_note = "Workshop needed / to be selected for this site."
+            warning = "No available workshop is assigned yet; select a trusted available workshop before execution."
+
+        result_sites.append(
+            {
+                "siteIndex": index,
+                "siteName": site_name,
+                "coverageType": coverage_type,
+                "requiredSkills": required_skills,
+                "requiredCertifications": [str(value).strip() for value in site.get("requiredCertifications") or [] if str(value).strip()],
+                "internalRequiredSkills": [],
+                "estimatedHours": float(site.get("estimatedHours") or 0),
+                "recommendedHeadcount": 0,
+                "selectedInternalHeadcount": 0,
+                "autoSelectedEmployeeIds": [],
+                "recommendations": [],
+                "workshopRecommendations": suggestions,
+                "workshopSummary": workshop_summary,
+                "coverageNote": coverage_note,
+                "staffingWarning": warning,
+                "excludedEmployees": [],
+            }
+        )
+
+    return {
+        "window": {"startDate": start_dt.isoformat(), "endDate": end_dt.isoformat(), "weeks": weeks},
+        "sites": result_sites,
+        "pricePreview": float(proposal.estimated_price) if proposal.estimated_price is not None else None,
+        "currency": proposal.currency or "EUR",
+        "mode": "workshop_only",
+    }
+
+
 @router.post("/ai/intakes/{proposal_id}/recommend-assignments")
 def recommend_assignments(proposal_id: str, db: Session = Depends(get_db)) -> dict:
     proposal = _get_proposal(db, proposal_id)
-    recommendations = recommend_staff_for_proposal(db, proposal)
+    recommendations = _workshop_recommendations_for_proposal(db, proposal)
     proposal.recommended_team_json = json_dumps(recommendations)
-    if recommendations.get("pricePreview") is not None:
-        proposal.estimated_price = decimal_or_none(recommendations["pricePreview"])
     if proposal.status == "draft":
         proposal.status = "reviewed"
     db.commit()
@@ -401,39 +582,24 @@ def explain_recommendation_stream(
     db: Session = Depends(get_db),
 ) -> StreamingResponse:
     proposal = _get_proposal(db, proposal_id)
-    recommendations = recommend_staff_for_proposal(db, proposal)
-    try:
-        context = build_staffing_explanation_context(proposal, recommendations, site_index)
-    except IndexError as exc:
-        raise not_found() from exc
+    recommendations = _workshop_recommendations_for_proposal(db, proposal)
+    sites = recommendations.get("sites") or []
+    if site_index < 0 or site_index >= len(sites):
+        raise not_found()
+    site = sites[site_index]
+    response_locale = locale or "de"
+    trades = ", ".join(site.get("requiredSkills") or []) or "not specified"
+    workshop_name = (site.get("workshopSummary") or {}).get("name") or "not selected"
+    suggestions = ", ".join(item.get("name", "") for item in site.get("workshopRecommendations") or [] if item.get("name")) or "none"
+    if response_locale == "ar":
+        fallback_text = f"\u062a\u0645 \u062a\u0642\u064a\u064a\u0645 \u0627\u0644\u0645\u0648\u0642\u0639 \u0628\u0646\u0627\u0621\u064b \u0639\u0644\u0649 \u0627\u0644\u0645\u0647\u0646 \u0627\u0644\u0645\u0637\u0644\u0648\u0628\u0629: {trades}. \u0627\u0644\u0648\u0631\u0634\u0629 \u0627\u0644\u0645\u062d\u062f\u062f\u0629 \u062d\u0627\u0644\u064a\u0627\u064b: {workshop_name}. \u0627\u0644\u0648\u0631\u0634 \u0627\u0644\u0645\u0642\u062a\u0631\u062d\u0629 \u0645\u0646 \u0627\u0644\u0628\u064a\u0627\u0646\u0627\u062a \u0627\u0644\u0645\u062a\u0627\u062d\u0629: {suggestions}. \u0647\u0630\u0627 \u0627\u0644\u062a\u062f\u0641\u0642 \u064a\u0639\u062a\u0645\u062f \u0639\u0644\u0649 \u0627\u0644\u0648\u0631\u0634 \u0641\u0642\u0637; \u064a\u062c\u0628 \u0627\u062e\u062a\u064a\u0627\u0631 \u0648\u0631\u0634\u0629 \u0645\u0648\u062b\u0648\u0642\u0629 \u0623\u0648 \u062a\u0631\u0643 \u0627\u0644\u0645\u0648\u0642\u0639 \u0643\u062d\u0627\u062c\u0629 \u0648\u0631\u0634\u0629 \u063a\u064a\u0631 \u0645\u062d\u062f\u062f\u0629."
+    elif response_locale == "en":
+        fallback_text = f"This site was reviewed by required trades: {trades}. Current assigned workshop: {workshop_name}. Available workshop suggestions: {suggestions}. This workflow uses workshop partners only; assign a trusted workshop or keep it marked as workshop needed."
+    else:
+        fallback_text = f"Diese Baustelle wurde nach benoetigten Gewerken bewertet: {trades}. Aktuell zugeordneter Workshop: {workshop_name}. Verfuegbare Workshop-Vorschlaege: {suggestions}. Dieser Ablauf nutzt nur Workshop-Partner; bitte einen vertrauenswuerdigen Workshop zuordnen oder als Workshop offen lassen."
 
-    response_locale = locale or ("ar" if any("؀" <= char <= "ۿ" for message in proposal.messages for char in (message.content or "")) else "de")
-    fallback_text = format_staffing_explanation(context, response_locale)
-
-    def generate() -> Iterable[str]:
-        emitted = False
-        try:
-            prompt = _staffing_explanation_prompt(context, response_locale)
-            for chunk in stream_text(prompt):
-                if chunk:
-                    emitted = True
-                    yield chunk
-        except Exception as exc:
-            logger.warning(
-                "Staffing explanation AI stream failed; using deterministic fallback: proposal_id=%s site_index=%s error=%s",
-                proposal_id,
-                site_index,
-                exc,
-            )
-        if not emitted:
-            for chunk in _fallback_stream_chunks(fallback_text):
-                yield chunk
-
-    headers = {
-        "Cache-Control": "no-cache",
-        "X-Accel-Buffering": "no",
-    }
-    return StreamingResponse(generate(), media_type="text/plain; charset=utf-8", headers=headers)
+    headers = {"Cache-Control": "no-cache", "X-Accel-Buffering": "no"}
+    return StreamingResponse(_fallback_stream_chunks(fallback_text), media_type="text/plain; charset=utf-8", headers=headers)
 
 
 @router.post("/ai/intakes/{proposal_id}/confirm")

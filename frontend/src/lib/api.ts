@@ -25,13 +25,34 @@ export async function apiGet<T>(path: string): Promise<T> {
 
 export async function apiJson<T>(
   path: string,
-  method: 'POST' | 'PUT' | 'DELETE',
+  method: 'POST' | 'PUT' | 'PATCH' | 'DELETE',
   body?: any
 ): Promise<T> {
   const res = await fetch(`${API_BASE}${path}`, {
     method,
     headers: { 'Content-Type': 'application/json' },
     body: body ? JSON.stringify(body) : undefined,
+  });
+  if (!res.ok) {
+    const msg = await safeMessage(res);
+    throw new Error(msg);
+  }
+  try {
+    return (await res.json()) as T;
+  } catch {
+    return {} as T;
+  }
+}
+
+
+export async function apiForm<T>(
+  path: string,
+  method: 'POST' | 'PATCH',
+  body: FormData
+): Promise<T> {
+  const res = await fetch(`${API_BASE}${path}`, {
+    method,
+    body,
   });
   if (!res.ok) {
     const msg = await safeMessage(res);

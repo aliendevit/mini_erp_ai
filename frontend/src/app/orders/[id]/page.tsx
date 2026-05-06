@@ -1,4 +1,4 @@
-'use client';
+﻿'use client';
 
 import Link from 'next/link';
 import { useEffect, useMemo, useState } from 'react';
@@ -6,16 +6,35 @@ import { useParams, useRouter } from 'next/navigation';
 
 import { useI18n } from '../../../lib/i18n';
 import { apiGet, apiJson } from '../../../lib/api';
+import ProjectTrackingSection from './ProjectTrackingSection';
 
 type Customer = { id: string; companyName: string };
-type Employee = { id: string; firstName: string; lastName: string };
 
-type Assignment = {
+type Workshop = {
   id: string;
-  employee: Employee;
+  name: string;
+  contactName?: string | null;
+  phone?: string | null;
+  email?: string | null;
+  specialties: string[];
+  notes?: string | null;
+  availabilityStatus?: 'available' | 'not_available';
+  availabilityNote?: string | null;
+  isActive: boolean;
+};
+
+type WorkshopAssignment = {
+  id: string;
+  orderId: string;
+  siteId: string;
+  workshopId: string;
+  coveredSkills: string[];
   startDate?: string | null;
   endDate?: string | null;
+  status: string;
   notes?: string | null;
+  workshop?: Workshop | null;
+  site?: { id: string; siteName: string } | null;
 };
 
 type Site = {
@@ -27,7 +46,8 @@ type Site = {
   city?: string | null;
   notes?: string | null;
   isActive: boolean;
-  assignments: Assignment[];
+  assignments?: unknown[];
+  workshopAssignments?: WorkshopAssignment[];
 };
 
 type Order = {
@@ -41,6 +61,16 @@ type Order = {
   defaultHourlyRate?: string | null;
   currency: string;
   sites: Site[];
+};
+
+type AssignmentForm = {
+  siteId: string;
+  workshopId: string;
+  coveredSkills: string;
+  startDate: string;
+  endDate: string;
+  status: string;
+  notes: string;
 };
 
 const emptyOrder: Partial<Order> = {
@@ -61,6 +91,31 @@ const emptySite: Partial<Site> = {
   isActive: true,
 };
 
+const emptyAssignment: AssignmentForm = {
+  siteId: '',
+  workshopId: '',
+  coveredSkills: '',
+  startDate: '',
+  endDate: '',
+  status: 'assigned',
+  notes: '',
+};
+
+function parseList(value: string): string[] {
+  return value
+    .split(/[\n,]/)
+    .map((item) => item.trim())
+    .filter(Boolean);
+}
+
+function listText(values?: string[] | null): string {
+  return (values || []).join(', ');
+}
+
+function address(site: Site, fallback: string) {
+  return [site.street, [site.zipCode, site.city].filter(Boolean).join(' ')].filter(Boolean).join(', ') || fallback;
+}
+
 export default function OrderDetailPage() {
   const { messages: m } = useI18n();
   const params = useParams<{ id: string }>();
@@ -68,25 +123,28 @@ export default function OrderDetailPage() {
   const id = params?.id;
 
   const [customers, setCustomers] = useState<Customer[]>([]);
-  const [employees, setEmployees] = useState<Employee[]>([]);
+  const [workshops, setWorkshops] = useState<Workshop[]>([]);
+  const [workshopAssignments, setWorkshopAssignments] = useState<WorkshopAssignment[]>([]);
   const [order, setOrder] = useState<Order | null>(null);
   const [orderForm, setOrderForm] = useState<Partial<Order>>(emptyOrder);
   const [siteForm, setSiteForm] = useState<Partial<Site>>(emptySite);
   const [editingSiteId, setEditingSiteId] = useState<string | null>(null);
-  const [assignSiteId, setAssignSiteId] = useState<string>('');
-  const [assignEmployeeId, setAssignEmployeeId] = useState<string>('');
+  const [assignmentForm, setAssignmentForm] = useState<AssignmentForm>(emptyAssignment);
 
   const siteOptions = useMemo(() => order?.sites || [], [order]);
+  const activeWorkshops = useMemo(() => workshops.filter((workshop) => workshop.isActive && workshop.availabilityStatus !== 'not_available'), [workshops]);
 
   async function load() {
-    const [nextOrder, nextCustomers, nextEmployees] = await Promise.all([
+    const [nextOrder, nextCustomers, nextWorkshops, nextWorkshopAssignments] = await Promise.all([
       apiGet<Order>(`/orders/${id}`),
       apiGet<Customer[]>('/customers'),
-      apiGet<Employee[]>('/employees'),
+      apiGet<Workshop[]>('/workshops?availableOnly=true'),
+      apiGet<WorkshopAssignment[]>(`/orders/${id}/workshop-assignments`),
     ]);
     setOrder(nextOrder);
     setCustomers(nextCustomers);
-    setEmployees(nextEmployees);
+    setWorkshops(nextWorkshops);
+    setWorkshopAssignments(nextWorkshopAssignments);
     setOrderForm({
       id: nextOrder.id,
       customerId: nextOrder.customerId,
@@ -97,10 +155,11 @@ export default function OrderDetailPage() {
       defaultHourlyRate: nextOrder.defaultHourlyRate || '',
     });
 
-    const firstSite = nextOrder.sites[0]?.id || '';
-    const firstEmployee = nextEmployees[0]?.id || '';
-    setAssignSiteId((current) => current || firstSite);
-    setAssignEmployeeId((current) => current || firstEmployee);
+    setAssignmentForm((current) => ({
+      ...current,
+      siteId: current.siteId || nextOrder.sites[0]?.id || '',
+      workshopId: current.workshopId || nextWorkshops.find((workshop) => workshop.isActive && workshop.availabilityStatus !== 'not_available')?.id || '',
+    }));
   }
 
   useEffect(() => {
@@ -193,31 +252,40 @@ export default function OrderDetailPage() {
     }
   }
 
-  async function addAssignment() {
-    if (!assignSiteId) return alert(m.orderDetailPage.assignmentSiteRequired);
-    if (!assignEmployeeId) return alert(m.orderDetailPage.assignmentEmployeeRequired);
+  async function addWorkshopAssignment() {
+    if (!id) return;
+    if (!assignmentForm.siteId) return alert('Please select a site.');
+    if (!assignmentForm.workshopId) return alert('Please select a workshop.');
+    if (!assignmentForm.startDate || !assignmentForm.endDate) return alert('Please select workshop start and end dates.');
     try {
-      await apiJson('/assignments', 'POST', {
-        siteId: assignSiteId,
-        employeeId: assignEmployeeId,
-        startDate: null,
-        endDate: null,
-        notes: null,
+      await apiJson(`/orders/${id}/workshop-assignments`, 'POST', {
+        siteId: assignmentForm.siteId,
+        workshopId: assignmentForm.workshopId,
+        coveredSkills: parseList(assignmentForm.coveredSkills),
+        startDate: assignmentForm.startDate || null,
+        endDate: assignmentForm.endDate || null,
+        status: assignmentForm.status || 'assigned',
+        notes: assignmentForm.notes || null,
       });
+      await load();
+      setAssignmentForm((current) => ({ ...emptyAssignment, siteId: current.siteId, workshopId: current.workshopId }));
+    } catch (error: any) {
+      alert(error.message);
+    }
+  }
+
+  async function removeWorkshopAssignment(assignmentId: string) {
+    if (!confirm(m.common.deleteConfirm)) return;
+    try {
+      await apiJson(`/workshop-assignments/${assignmentId}`, 'DELETE');
       await load();
     } catch (error: any) {
       alert(error.message);
     }
   }
 
-  async function removeAssignment(assignmentId: string) {
-    if (!confirm(m.common.deleteConfirm)) return;
-    try {
-      await apiJson(`/assignments/${assignmentId}`, 'DELETE');
-      await load();
-    } catch (error: any) {
-      alert(error.message);
-    }
+  function assignmentsForSite(siteId: string): WorkshopAssignment[] {
+    return workshopAssignments.filter((assignment) => assignment.siteId === siteId);
   }
 
   if (!order) {
@@ -272,7 +340,7 @@ export default function OrderDetailPage() {
           <input value={orderForm.title || ''} onChange={(event) => setOrderForm({ ...orderForm, title: event.target.value })} />
         </div>
         <div>
-          <label>{m.ordersPage.hourlyRate}</label>
+          <label>Fixed-price note / legacy hourly rate</label>
           <input value={(orderForm.defaultHourlyRate as string) || ''} onChange={(event) => setOrderForm({ ...orderForm, defaultHourlyRate: event.target.value })} />
         </div>
       </div>
@@ -329,33 +397,38 @@ export default function OrderDetailPage() {
           <tr>
             <th>{m.common.site}</th>
             <th>{m.orderDetailPage.address}</th>
-            <th>{m.orderDetailPage.assignedEmployees}</th>
+            <th>Assigned workshops</th>
             <th style={{ width: 260 }}>{m.common.actions}</th>
           </tr>
         </thead>
         <tbody>
-          {order.sites.map((site) => (
-            <tr key={site.id}>
-              <td>{site.siteName}</td>
-              <td>{[site.street, [site.zipCode, site.city].filter(Boolean).join(' ')].filter(Boolean).join(', ') || m.common.none}</td>
-              <td>
-                {site.assignments.length > 0
-                  ? site.assignments.map((assignment) => (
-                      <div key={assignment.id} style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
-                        <span>{assignment.employee.firstName} {assignment.employee.lastName}</span>
-                        <button className="btn danger secondary" onClick={() => removeAssignment(assignment.id)}>{m.common.remove}</button>
-                      </div>
-                    ))
-                  : m.common.none}
-              </td>
-              <td>
-                <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-                  <button className="btn" onClick={() => startEditSite(site)}>{m.common.edit}</button>
-                  <button className="btn danger" onClick={() => deleteSite(site.id)}>{m.common.delete}</button>
-                </div>
-              </td>
-            </tr>
-          ))}
+          {order.sites.map((site) => {
+            const siteAssignments = assignmentsForSite(site.id);
+            return (
+              <tr key={site.id}>
+                <td>{site.siteName}</td>
+                <td>{address(site, m.common.none)}</td>
+                <td>
+                  {siteAssignments.length > 0
+                    ? siteAssignments.map((assignment) => (
+                        <div key={assignment.id} style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+                          <span>{assignment.workshop?.name || 'Workshop'}</span>
+                          <span className="muted">{listText(assignment.coveredSkills) || 'No covered trades set'}</span>
+                          <span className="muted">{assignment.startDate && assignment.endDate ? `${String(assignment.startDate).substring(0, 10)} - ${String(assignment.endDate).substring(0, 10)}` : 'Schedule missing'}</span>
+                          <button className="btn danger secondary" onClick={() => removeWorkshopAssignment(assignment.id)}>{m.common.remove}</button>
+                        </div>
+                      ))
+                    : m.common.none}
+                </td>
+                <td>
+                  <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+                    <button className="btn" onClick={() => startEditSite(site)}>{m.common.edit}</button>
+                    <button className="btn danger" onClick={() => deleteSite(site.id)}>{m.common.delete}</button>
+                  </div>
+                </td>
+              </tr>
+            );
+          })}
           {order.sites.length === 0 && (
             <tr><td colSpan={4} className="muted">{m.orderDetailPage.noSites}</td></tr>
           )}
@@ -368,29 +441,69 @@ export default function OrderDetailPage() {
       <div className="spacer" />
       <hr />
 
-      <h3>{m.orderDetailPage.assignmentHeading}</h3>
-      <div className="row">
-        <div>
-          <label>{m.common.site} *</label>
-          <select value={assignSiteId} onChange={(event) => setAssignSiteId(event.target.value)}>
-            {siteOptions.map((site) => <option key={site.id} value={site.id}>{site.siteName}</option>)}
-            {siteOptions.length === 0 && <option value="">{m.orderDetailPage.noSitesOption}</option>}
-          </select>
+      <div className="card">
+        <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12, flexWrap: 'wrap' }}>
+          <div>
+            <h3>Workshop execution</h3>
+            <div className="muted">Assign trusted workshops to each site or work package. Employee assignment is no longer part of the main workflow.</div>
+          </div>
+          <Link className="btn" href="/workshops">Manage workshops</Link>
         </div>
-        <div>
-          <label>{m.common.employee} *</label>
-          <select value={assignEmployeeId} onChange={(event) => setAssignEmployeeId(event.target.value)}>
-            {employees.map((employee) => <option key={employee.id} value={employee.id}>{employee.firstName} {employee.lastName}</option>)}
-            {employees.length === 0 && <option value="">{m.orderDetailPage.noEmployeesOption}</option>}
-          </select>
+        <div className="spacer" />
+        <div className="row">
+          <div>
+            <label>{m.common.site} *</label>
+            <select value={assignmentForm.siteId} onChange={(event) => setAssignmentForm({ ...assignmentForm, siteId: event.target.value })}>
+              {siteOptions.map((site) => <option key={site.id} value={site.id}>{site.siteName}</option>)}
+              {siteOptions.length === 0 && <option value="">{m.orderDetailPage.noSitesOption}</option>}
+            </select>
+          </div>
+          <div>
+            <label>Workshop *</label>
+            <select value={assignmentForm.workshopId} onChange={(event) => setAssignmentForm({ ...assignmentForm, workshopId: event.target.value })}>
+              {activeWorkshops.map((workshop) => <option key={workshop.id} value={workshop.id}>{workshop.name}{workshop.specialties?.length ? ` (${listText(workshop.specialties)})` : ''}</option>)}
+              {activeWorkshops.length === 0 && <option value="">No available workshops</option>}
+            </select>
+          </div>
+          <div>
+            <label>Status</label>
+            <select value={assignmentForm.status} onChange={(event) => setAssignmentForm({ ...assignmentForm, status: event.target.value })}>
+              <option value="planned">Planned</option>
+              <option value="assigned">Assigned</option>
+              <option value="in_progress">In progress</option>
+              <option value="blocked">Blocked</option>
+              <option value="completed">Completed</option>
+              <option value="canceled">Canceled</option>
+            </select>
+          </div>
+          <div>
+            <label>Start date *</label>
+            <input type="date" value={assignmentForm.startDate} onChange={(event) => setAssignmentForm({ ...assignmentForm, startDate: event.target.value })} />
+          </div>
+          <div>
+            <label>End date *</label>
+            <input type="date" value={assignmentForm.endDate} onChange={(event) => setAssignmentForm({ ...assignmentForm, endDate: event.target.value })} />
+          </div>
         </div>
-        <div style={{ alignSelf: 'end' }}>
-          <button className="btn primary" onClick={addAssignment} disabled={!assignSiteId || !assignEmployeeId}>{m.common.create}</button>
+        <div className="spacer" />
+        <div className="row">
+          <div>
+            <label>Covered trades / scope</label>
+            <textarea value={assignmentForm.coveredSkills} onChange={(event) => setAssignmentForm({ ...assignmentForm, coveredSkills: event.target.value })} placeholder="tiles, waterproofing, painting" />
+          </div>
+          <div>
+            <label>{m.common.notes}</label>
+            <textarea value={assignmentForm.notes} onChange={(event) => setAssignmentForm({ ...assignmentForm, notes: event.target.value })} />
+          </div>
         </div>
+        <div className="spacer" />
+        <button className="btn primary" onClick={addWorkshopAssignment} disabled={!assignmentForm.siteId || !assignmentForm.workshopId || !assignmentForm.startDate || !assignmentForm.endDate}>Assign workshop</button>
       </div>
 
       <div className="spacer" />
-      <div className="muted">{m.orderDetailPage.deleteAssignmentsHint}</div>
+      <hr />
+
+      <ProjectTrackingSection orderId={order.id} />
     </div>
   );
 }

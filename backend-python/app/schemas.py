@@ -30,6 +30,28 @@ class CustomerWorkshopPayload(BaseModel):
     isActive: bool = True
 
 
+class WorkshopPayload(BaseModel):
+    name: str
+    contactName: str | None = None
+    phone: str | None = None
+    email: str | None = None
+    specialties: list[str] = Field(default_factory=list)
+    notes: str | None = None
+    availabilityStatus: Literal["available", "not_available"] = "available"
+    availabilityNote: str | None = None
+    isActive: bool = True
+
+
+class WorkshopSiteAssignmentPayload(BaseModel):
+    siteId: str
+    workshopId: str
+    coveredSkills: list[str] = Field(default_factory=list)
+    startDate: datetime | date | None = None
+    endDate: datetime | date | None = None
+    status: Literal["planned", "assigned", "in_progress", "blocked", "completed", "canceled"] = "assigned"
+    notes: str | None = None
+
+
 class PaymentRecordPayload(BaseModel):
     proposalId: str | None = None
     customerId: str | None = None
@@ -115,6 +137,45 @@ class WorkEntryPayload(BaseModel):
     dayType: Literal["work", "sick", "vacation", "holiday", "arbeit", "krank", "urlaub", "feiertag"] | None = None
     isSick: bool | None = None
     description: str | None = None
+
+
+class ProjectProgressUpdatePayload(BaseModel):
+    siteId: str | None = None
+    title: str | None = None
+    description: str | None = None
+    status: str | None = None
+    progressPercent: int | None = None
+    nextAction: str | None = None
+    updateDate: datetime | date | None = None
+
+
+class ProjectTaskPayload(BaseModel):
+    siteId: str | None = None
+    taskName: str
+    status: str = "not_started"
+    responsibleType: str = "not_assigned"
+    responsibleName: str | None = None
+    dueDate: datetime | date | None = None
+    notes: str | None = None
+
+
+class ProjectIssuePayload(BaseModel):
+    siteId: str | None = None
+    title: str
+    description: str | None = None
+    severity: str = "medium"
+    status: str = "open"
+    responsibleType: str = "not_assigned"
+    responsibleName: str | None = None
+    resolutionNote: str | None = None
+
+
+class ProjectMaterialLogPayload(BaseModel):
+    siteId: str | None = None
+    materialName: str
+    quantity: str | None = None
+    status: str = "needed"
+    notes: str | None = None
 
 
 class InvoiceUpdatePayload(BaseModel):

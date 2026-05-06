@@ -23,10 +23,17 @@ from .models import (
     InvoiceSequence,
     Order,
     PaymentRecord,
+    ProjectIssue,
+    ProjectMaterialLog,
+    ProjectProgressPhoto,
+    ProjectProgressUpdate,
+    ProjectTask,
     Proposal,
     ProposalFact,
     ProposalMessage,
     Site,
+    Workshop,
+    WorkshopSiteAssignment,
     WorkEntry,
 )
 
@@ -236,6 +243,46 @@ def customer_workshop_payload(workshop: CustomerWorkshop) -> dict[str, Any]:
     )
 
 
+def workshop_payload(workshop: Workshop) -> dict[str, Any]:
+    return jsonable_encoder(
+        {
+            "id": workshop.id,
+            "name": workshop.name,
+            "contactName": workshop.contact_name,
+            "phone": workshop.phone,
+            "email": workshop.email,
+            "specialties": json_loads(workshop.specialties_json, []),
+            "notes": workshop.notes,
+            "availabilityStatus": workshop.availability_status,
+            "availabilityNote": workshop.availability_note,
+            "isActive": workshop.is_active,
+            "createdAt": workshop.created_at,
+            "updatedAt": workshop.updated_at,
+        }
+    )
+
+
+def workshop_site_assignment_payload(assignment: WorkshopSiteAssignment) -> dict[str, Any]:
+    data: dict[str, Any] = {
+        "id": assignment.id,
+        "orderId": assignment.order_id,
+        "siteId": assignment.site_id,
+        "workshopId": assignment.workshop_id,
+        "coveredSkills": json_loads(assignment.covered_skills_json, []),
+        "startDate": assignment.start_date,
+        "endDate": assignment.end_date,
+        "status": assignment.status,
+        "notes": assignment.notes,
+        "createdAt": assignment.created_at,
+        "updatedAt": assignment.updated_at,
+    }
+    if assignment.workshop:
+        data["workshop"] = workshop_payload(assignment.workshop)
+    if assignment.site:
+        data["site"] = {"id": assignment.site.id, "siteName": assignment.site.site_name}
+    return jsonable_encoder(data)
+
+
 def employee_skill_payload(skill: EmployeeSkill) -> dict[str, Any]:
     return jsonable_encoder(
         {
@@ -308,7 +355,12 @@ def assignment_payload(assignment: EmployeeAssignment, include_employee: bool = 
     return jsonable_encoder(data)
 
 
-def site_payload(site: Site, include_order: bool = False, include_assignments: bool = False) -> dict[str, Any]:
+def site_payload(
+    site: Site,
+    include_order: bool = False,
+    include_assignments: bool = False,
+    include_workshops: bool = False,
+) -> dict[str, Any]:
     data: dict[str, Any] = {
         "id": site.id,
         "orderId": site.order_id,
@@ -325,6 +377,8 @@ def site_payload(site: Site, include_order: bool = False, include_assignments: b
         data["order"] = order_payload(site.order, include_customer=True)
     if include_assignments:
         data["assignments"] = [assignment_payload(item, include_employee=True) for item in site.assignments]
+    if include_workshops:
+        data["workshopAssignments"] = [workshop_site_assignment_payload(item) for item in site.workshop_assignments]
     return jsonable_encoder(data)
 
 
@@ -346,7 +400,7 @@ def order_payload(order: Order, include_customer: bool = False, include_sites: b
     if include_customer and order.customer:
         data["customer"] = customer_payload(order.customer)
     if include_sites:
-        data["sites"] = [site_payload(site, include_assignments=True) for site in order.sites]
+        data["sites"] = [site_payload(site, include_assignments=True, include_workshops=True) for site in order.sites]
     return jsonable_encoder(data)
 
 
@@ -444,6 +498,99 @@ def work_entry_payload(work_entry: WorkEntry, include_invoice_lines: bool = True
         data["site"] = site_payload(work_entry.site)
     if include_invoice_lines:
         data["invoiceLines"] = [invoice_line_payload(line, include_invoice=True) for line in work_entry.invoice_lines]
+    return jsonable_encoder(data)
+
+
+def progress_photo_payload(photo: ProjectProgressPhoto) -> dict[str, Any]:
+    return jsonable_encoder(
+        {
+            "id": photo.id,
+            "updateId": photo.update_id,
+            "originalFilename": photo.original_filename,
+            "storedFilename": photo.stored_filename,
+            "contentType": photo.content_type,
+            "sizeBytes": photo.size_bytes,
+            "tag": photo.tag,
+            "caption": photo.caption,
+            "photoUrl": f"/api/progress-photos/{photo.id}",
+            "createdAt": photo.created_at,
+        }
+    )
+
+
+def progress_update_payload(update: ProjectProgressUpdate) -> dict[str, Any]:
+    data: dict[str, Any] = {
+        "id": update.id,
+        "orderId": update.order_id,
+        "siteId": update.site_id,
+        "title": update.title,
+        "description": update.description,
+        "status": update.status,
+        "progressPercent": update.progress_percent,
+        "nextAction": update.next_action,
+        "updateDate": update.update_date,
+        "createdAt": update.created_at,
+        "updatedAt": update.updated_at,
+        "photos": [progress_photo_payload(photo) for photo in update.photos],
+    }
+    if update.site:
+        data["site"] = site_payload(update.site)
+    return jsonable_encoder(data)
+
+
+def project_task_payload(task: ProjectTask) -> dict[str, Any]:
+    data: dict[str, Any] = {
+        "id": task.id,
+        "orderId": task.order_id,
+        "siteId": task.site_id,
+        "taskName": task.task_name,
+        "status": task.status,
+        "responsibleType": task.responsible_type,
+        "responsibleName": task.responsible_name,
+        "dueDate": task.due_date,
+        "notes": task.notes,
+        "createdAt": task.created_at,
+        "updatedAt": task.updated_at,
+    }
+    if task.site:
+        data["site"] = site_payload(task.site)
+    return jsonable_encoder(data)
+
+
+def project_issue_payload(issue: ProjectIssue) -> dict[str, Any]:
+    data: dict[str, Any] = {
+        "id": issue.id,
+        "orderId": issue.order_id,
+        "siteId": issue.site_id,
+        "title": issue.title,
+        "description": issue.description,
+        "severity": issue.severity,
+        "status": issue.status,
+        "responsibleType": issue.responsible_type,
+        "responsibleName": issue.responsible_name,
+        "resolutionNote": issue.resolution_note,
+        "createdAt": issue.created_at,
+        "updatedAt": issue.updated_at,
+    }
+    if issue.site:
+        data["site"] = site_payload(issue.site)
+    return jsonable_encoder(data)
+
+
+def project_material_log_payload(material: ProjectMaterialLog) -> dict[str, Any]:
+    data: dict[str, Any] = {
+        "id": material.id,
+        "orderId": material.order_id,
+        "siteId": material.site_id,
+        "materialName": material.material_name,
+        "quantity": material.quantity,
+        "status": material.status,
+        "notes": material.notes,
+        "createdAt": material.created_at,
+        "updatedAt": material.updated_at,
+    }
+    if material.site:
+        data["site"] = site_payload(material.site)
     return jsonable_encoder(data)
 
 

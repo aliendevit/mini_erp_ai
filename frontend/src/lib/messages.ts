@@ -10,6 +10,7 @@ export type Messages = {
     customers: string;
     orders: string;
     sites: string;
+    workshops: string;
     employees: string;
     workEntries: string;
     timesheets: string;
@@ -173,6 +174,21 @@ export type Messages = {
     assignedEmployees: string;
     saveSite: string;
     newSite: string;
+  };
+  trackingPage: {
+    heading: string;
+    description: string;
+    loading: string;
+    refresh: string;
+    none: string;
+    generalProjectUpdate: string;
+    noRecords: string;
+    selectedPhotos: string;
+    deleteConfirm: string;
+    tabs: Record<'overview' | 'timeline' | 'photos' | 'tasks' | 'issues' | 'materials' | 'team', string>;
+    metrics: Record<string, string>;
+    labels: Record<string, string>;
+    actions: Record<string, string>;
   };
   sitesPage: {
     heading: string;
@@ -382,6 +398,7 @@ export const messages: Record<Locale, Messages> = {
       customers: 'Kunden',
       orders: 'Auftraege',
       sites: 'Baustellen',
+      workshops: 'Workshops',
       employees: 'Mitarbeiter',
       workEntries: 'Arbeitszeiten',
       timesheets: 'Stundentabelle',
@@ -490,12 +507,10 @@ export const messages: Record<Locale, Messages> = {
         { href: '/customers', title: 'Kunden', desc: 'Auftraggeber verwalten' },
         { href: '/orders', title: 'Auftraege', desc: 'Auftraege erstellen und anzeigen' },
         { href: '/sites', title: 'Baustellen', desc: 'Baustellen verwalten' },
-        { href: '/employees', title: 'Mitarbeiter', desc: 'Mitarbeiter verwalten' },
-        { href: '/work-entries', title: 'Arbeitszeiten', desc: 'Stunden erfassen (erzeugt Entwurf-Rechnung)' },
+        { href: '/workshops', title: 'Workshops', desc: 'Externe Partner und Gewerke verwalten' },
         { href: '/invoices/drafts', title: 'Entwurf-Rechnungen', desc: 'Gruppieren und zusammenfuehren' },
         { href: '/invoices', title: 'Rechnungen', desc: 'Alle Rechnungen + PDF' },
-        { href: '/reports/hours', title: 'Stundenuebersicht', desc: 'Aggregation nach Mitarbeiter/Baustelle/Auftrag' },
-        { href: '/ai-intake', title: 'AI Intake', desc: 'Chatbasierten Vorschlag erzeugen und Team empfehlen lassen' },
+        { href: '/ai-intake', title: 'AI Intake', desc: 'Chatbasierten Vorschlag mit Workshop-Ausfuehrung erzeugen' },
       ],
     },
     invoiceSequence: {
@@ -577,6 +592,25 @@ export const messages: Record<Locale, Messages> = {
       assignedEmployees: 'Mitarbeiter',
       saveSite: 'Speichern',
       newSite: 'Neu',
+    },
+    trackingPage: {
+      heading: 'Projektverfolgung',
+      description: 'Manuelle Verfolgung fuer Fotos, Fortschritt, Aufgaben, Probleme, Materialien und Werkstattplanung.',
+      loading: 'Trackingdaten werden geladen...',
+      refresh: 'Aktualisieren',
+      none: 'Keine Angabe',
+      generalProjectUpdate: 'Allgemeines Projektupdate',
+      noRecords: 'Noch keine Eintraege.',
+      selectedPhotos: 'Ausgewaehlte Fotos',
+      deleteConfirm: 'Tracking-Eintrag loeschen?',
+      tabs: { overview: 'Uebersicht', timeline: 'Verlauf', photos: 'Fotos', tasks: 'Aufgaben', issues: 'Probleme', materials: 'Materialien', team: 'Werkst?tten' },
+      metrics: {
+        overallStatus: 'Gesamtstatus', overallStatusSub: 'Aktueller Projektstand', overallProgress: 'Gesamtfortschritt', overallProgressSub: 'Nach erledigten Aufgaben', openIssues: 'Offene Probleme', openIssuesSub: 'Blocker mit Handlungsbedarf', tasksCompleted: 'Erledigte Aufgaben', tasksCompletedSub: 'Checklistenfortschritt', upcomingActions: 'Naechste Aktionen', noUpcomingActions: 'Keine naechsten Aktionen erfasst.', warnings: 'Warnungen', noWarnings: 'Keine aktuellen Warnungen.',
+      },
+      labels: {
+        not_started: 'Nicht gestartet', in_progress: 'In Arbeit', waiting_materials: 'Wartet auf Material', blocked: 'Blockiert', needs_review: 'Zur Pruefung', completed: 'Abgeschlossen', resolved: 'Geloest', open: 'Offen', needed: 'Benoetigt', ordered: 'Bestellt', delivered: 'Geliefert', used: 'Verbraucht', low: 'Niedrig', medium: 'Mittel', high: 'Hoch', before: 'Vorher', during: 'Waehrend', after: 'Nachher', issue: 'Problem', material: 'Material', inspection: 'Pruefung', workshop: 'Werkstatt', not_assigned: 'Nicht zugeordnet', missing_schedule: 'Termin fehlt', active: 'Aktiv', upcoming: 'Geplant', past: 'Vergangen', siteArea: 'Baustelle / Bereich', title: 'Titel', status: 'Status', progressPercent: 'Fortschritt %', updateDate: 'Update-Datum', description: 'Beschreibung', nextAction: 'Naechste Aktion', photoTag: 'Foto-Tag', photoCaption: 'Foto-Beschriftung', photos: 'Fotos', caption: 'Beschriftung', task: 'Aufgabe', responsible: 'Verantwortlich', dueDate: 'Faellig am', responsibleName: 'Verantwortlicher Name', notes: 'Notizen', severity: 'Schweregrad', quantity: 'Menge', actions: 'Aktionen', assignedWorkshops: 'Zugeordnete Werkstaetten', coveredTrades: 'Abgedeckte Gewerke', openBlockers: 'Offene Blocker', lastUpdate: 'Letztes Update', complete: 'abgeschlossen', schedule: 'Zeitplan', scheduledWorkshops: 'Geplante Werkstaetten', scheduleWarnings: 'Planungswarnungen', noSites: 'Noch keine Baustellen in diesem Auftrag.', noProgressUpdates: 'Noch keine Fortschrittsupdates.', noPhotos: 'Noch keine Fotos hochgeladen.', noWorkshopAssigned: 'Noch keine Werkstatt fuer diese Baustelle zugeordnet.', projectPhoto: 'Projektfoto', progress: 'Fortschritt', nextActionPrefix: 'Naechste Aktion', addProgressUpdate: 'Fortschrittsupdate hinzufuegen', uploadPhotos: 'Fotos hochladen', addTask: 'Aufgabe hinzufuegen', addIssue: 'Problem oder Blocker hinzufuegen', addMaterial: 'Material erfassen', photoUpdate: 'Foto-Update', materialName: 'Material', noCoveredTrades: 'Keine Gewerke gesetzt', scheduleMissing: 'Termin fehlt', blocked_site: 'Baustelle blockiert', missing_workshop_schedule: 'Werkstatt-Termin fehlt', workshop_unavailable: 'Werkstatt nicht verfuegbar', high_issue: 'Wichtiges offenes Problem', overdue_task: 'Ueberfaellige Aufgabe',
+      },
+      actions: { saving: 'Speichern...', addUpdate: 'Update hinzufuegen', uploading: 'Hochladen...', uploadPhotos: 'Fotos hochladen', complete: 'Erledigt', delete: 'Loeschen', resolve: 'Loesen', delivered: 'Geliefert', addTask: 'Aufgabe hinzufuegen', addIssue: 'Problem hinzufuegen', addMaterial: 'Material hinzufuegen' },
     },
     sitesPage: {
       heading: 'Baustellen',
@@ -787,6 +821,7 @@ export const messages: Record<Locale, Messages> = {
       customers: 'Customers',
       orders: 'Orders',
       sites: 'Sites',
+      workshops: 'Workshops',
       employees: 'Employees',
       workEntries: 'Work Entries',
       timesheets: 'Timesheets',
@@ -895,12 +930,10 @@ export const messages: Record<Locale, Messages> = {
         { href: '/customers', title: 'Customers', desc: 'Manage clients' },
         { href: '/orders', title: 'Orders', desc: 'Create and review orders' },
         { href: '/sites', title: 'Sites', desc: 'Manage construction sites' },
-        { href: '/employees', title: 'Employees', desc: 'Manage employees' },
-        { href: '/work-entries', title: 'Work Entries', desc: 'Capture hours and create draft invoices' },
+        { href: '/workshops', title: 'Workshops', desc: 'Manage subcontractor partners and trades' },
         { href: '/invoices/drafts', title: 'Draft Invoices', desc: 'Group and merge draft invoices' },
         { href: '/invoices', title: 'Invoices', desc: 'All invoices with exports' },
-        { href: '/reports/hours', title: 'Hours Report', desc: 'Aggregate by employee, site, or order' },
-        { href: '/ai-intake', title: 'AI Intake', desc: 'Create proposal drafts and staffing suggestions from chat' },
+        { href: '/ai-intake', title: 'AI Intake', desc: 'Create proposal drafts with workshop execution from chat' },
       ],
     },
     invoiceSequence: {
@@ -980,6 +1013,25 @@ export const messages: Record<Locale, Messages> = {
       assignedEmployees: 'Employees',
       saveSite: 'Save',
       newSite: 'New',
+    },
+    trackingPage: {
+      heading: 'Project Tracking',
+      description: 'Manual tracking for photos, progress, tasks, issues, materials, and workshop scheduling.',
+      loading: 'Loading tracking data...',
+      refresh: 'Refresh',
+      none: 'None',
+      generalProjectUpdate: 'General project update',
+      noRecords: 'No records yet.',
+      selectedPhotos: 'Selected photos',
+      deleteConfirm: 'Delete this tracking item?',
+      tabs: { overview: 'Overview', timeline: 'Timeline', photos: 'Photos', tasks: 'Tasks', issues: 'Issues', materials: 'Materials', team: 'Workshops' },
+      metrics: {
+        overallStatus: 'Overall Status', overallStatusSub: 'Latest project state', overallProgress: 'Overall Progress', overallProgressSub: 'Based on completed tasks', openIssues: 'Open Issues', openIssuesSub: 'Blockers needing action', tasksCompleted: 'Tasks Completed', tasksCompletedSub: 'Checklist completion', upcomingActions: 'Upcoming Actions', noUpcomingActions: 'No upcoming actions recorded.', warnings: 'Warnings', noWarnings: 'No active warnings.',
+      },
+      labels: {
+        not_started: 'Not Started', in_progress: 'In Progress', waiting_materials: 'Waiting Materials', blocked: 'Blocked', needs_review: 'Needs Review', completed: 'Completed', resolved: 'Resolved', open: 'Open', needed: 'Needed', ordered: 'Ordered', delivered: 'Delivered', used: 'Used', low: 'Low', medium: 'Medium', high: 'High', before: 'Before', during: 'During', after: 'After', issue: 'Issue', material: 'Material', inspection: 'Inspection', workshop: 'Workshop', not_assigned: 'Not Assigned', missing_schedule: 'Schedule Missing', active: 'Active', upcoming: 'Upcoming', past: 'Past', siteArea: 'Site / Area', title: 'Title', status: 'Status', progressPercent: 'Progress %', updateDate: 'Update Date', description: 'Description', nextAction: 'Next Action', photoTag: 'Photo Tag', photoCaption: 'Photo Caption', photos: 'Photos', caption: 'Caption', task: 'Task', responsible: 'Responsible', dueDate: 'Due Date', responsibleName: 'Responsible Name', notes: 'Notes', severity: 'Severity', quantity: 'Quantity', actions: 'Actions', assignedWorkshops: 'Assigned workshops', coveredTrades: 'Covered trades', openBlockers: 'Open blockers', lastUpdate: 'Last update', complete: 'complete', schedule: 'Schedule', scheduledWorkshops: 'Scheduled workshops', scheduleWarnings: 'Schedule warnings', noSites: 'No sites available for this order yet.', noProgressUpdates: 'No progress updates yet.', noPhotos: 'No photos uploaded yet.', noWorkshopAssigned: 'No workshop assigned to this site yet.', projectPhoto: 'Project photo', progress: 'Progress', nextActionPrefix: 'Next action', addProgressUpdate: 'Add Progress Update', uploadPhotos: 'Upload Photos', addTask: 'Add Task', addIssue: 'Add Issue Or Blocker', addMaterial: 'Add Material Log', photoUpdate: 'Photo update', materialName: 'Material', noCoveredTrades: 'No covered trades set', scheduleMissing: 'Schedule missing', blocked_site: 'Site blocked', missing_workshop_schedule: 'Workshop schedule missing', workshop_unavailable: 'Workshop unavailable', high_issue: 'High severity issue open', overdue_task: 'Overdue task',
+      },
+      actions: { saving: 'Saving...', addUpdate: 'Add Update', uploading: 'Uploading...', uploadPhotos: 'Upload Photos', complete: 'Complete', delete: 'Delete', resolve: 'Resolve', delivered: 'Delivered', addTask: 'Add Task', addIssue: 'Add Issue', addMaterial: 'Add Material' },
     },
     sitesPage: {
       heading: 'Sites',
@@ -1187,6 +1239,7 @@ export const messages: Record<Locale, Messages> = {
       customers: 'العملاء',
       orders: 'الطلبات',
       sites: 'المواقع',
+      workshops: 'الورش',
       employees: 'الموظفون',
       workEntries: 'ساعات العمل',
       timesheets: 'الجداول الشهرية',
@@ -1295,12 +1348,10 @@ export const messages: Record<Locale, Messages> = {
         { href: '/customers', title: 'العملاء', desc: 'إدارة العملاء' },
         { href: '/orders', title: 'الطلبات', desc: 'إنشاء الطلبات ومراجعتها' },
         { href: '/sites', title: 'المواقع', desc: 'إدارة مواقع العمل' },
-        { href: '/employees', title: 'الموظفون', desc: 'إدارة الموظفين' },
-        { href: '/work-entries', title: 'ساعات العمل', desc: 'تسجيل الساعات وإنشاء مسودات الفواتير' },
+        { href: '/workshops', title: 'الورش', desc: 'إدارة الورش الخارجية والاختصاصات' },
         { href: '/invoices/drafts', title: 'مسودات الفواتير', desc: 'تجميع ودمج مسودات الفواتير' },
         { href: '/invoices', title: 'الفواتير', desc: 'جميع الفواتير مع التصدير' },
-        { href: '/reports/hours', title: 'تقرير الساعات', desc: 'تجميع حسب الموظف أو الموقع أو الطلب' },
-        { href: '/ai-intake', title: 'الاستقبال الذكي', desc: 'إنشاء عروض واقتراح فرق العمل من المحادثة' },
+        { href: '/ai-intake', title: 'الاستقبال الذكي', desc: 'إنشاء عروض مع تنفيذ الورش من المحادثة' },
       ],
     },
     invoiceSequence: {
@@ -1380,6 +1431,130 @@ export const messages: Record<Locale, Messages> = {
       saveSite: 'حفظ',
       newSite: 'جديد',
     },
+    trackingPage: {
+      'heading': 'متابعة المشروع',
+      'description': 'متابعة يدوية للصور، التقدم، المهام، المشاكل، المواد، وجدولة الورش.',
+      'loading': 'جار تحميل بيانات المتابعة...',
+      'refresh': 'تحديث',
+      'none': 'غير مذكور',
+      'generalProjectUpdate': 'تحديث عام للمشروع',
+      'noRecords': 'لا توجد سجلات بعد.',
+      'selectedPhotos': 'الصور المختارة',
+      'deleteConfirm': 'هل تريد حذف عنصر المتابعة؟',
+      'tabs': {
+            'overview': 'نظرة عامة',
+            'timeline': 'الخط الزمني',
+            'photos': 'الصور',
+            'tasks': 'المهام',
+            'issues': 'المشاكل',
+            'materials': 'المواد',
+            'team': 'الورش'
+      },
+      'metrics': {
+            'overallStatus': 'الحالة العامة',
+            'overallStatusSub': 'آخر حالة للمشروع',
+            'overallProgress': 'التقدم العام',
+            'overallProgressSub': 'حسب المهام المنجزة',
+            'openIssues': 'المشاكل المفتوحة',
+            'openIssuesSub': 'عوائق تحتاج متابعة',
+            'tasksCompleted': 'المهام المنجزة',
+            'tasksCompletedSub': 'تقدم قائمة المهام',
+            'upcomingActions': 'الإجراءات القادمة',
+            'noUpcomingActions': 'لا توجد إجراءات قادمة مسجلة.',
+            'warnings': 'التحذيرات',
+            'noWarnings': 'لا توجد تحذيرات حالياً.'
+      },
+      'labels': {
+            'not_started': 'لم يبدأ',
+            'in_progress': 'قيد التنفيذ',
+            'waiting_materials': 'بانتظار المواد',
+            'blocked': 'متوقف',
+            'needs_review': 'بحاجة مراجعة',
+            'completed': 'مكتمل',
+            'resolved': 'محلول',
+            'open': 'مفتوح',
+            'needed': 'مطلوب',
+            'ordered': 'تم الطلب',
+            'delivered': 'تم التسليم',
+            'used': 'مستخدم',
+            'low': 'منخفض',
+            'medium': 'متوسط',
+            'high': 'عالٍ',
+            'before': 'قبل',
+            'during': 'أثناء',
+            'after': 'بعد',
+            'issue': 'مشكلة',
+            'material': 'مادة',
+            'inspection': 'فحص',
+            'workshop': 'ورشة',
+            'not_assigned': 'غير معين',
+            'missing_schedule': 'الجدول غير محدد',
+            'active': 'نشط',
+            'upcoming': 'قادم',
+            'past': 'سابق',
+            'siteArea': 'الموقع / المنطقة',
+            'title': 'العنوان',
+            'status': 'الحالة',
+            'progressPercent': 'نسبة التقدم %',
+            'updateDate': 'تاريخ التحديث',
+            'description': 'الوصف',
+            'nextAction': 'الإجراء التالي',
+            'photoTag': 'وسم الصورة',
+            'photoCaption': 'تعليق الصورة',
+            'photos': 'الصور',
+            'caption': 'التعليق',
+            'task': 'المهمة',
+            'responsible': 'المسؤول',
+            'dueDate': 'تاريخ الاستحقاق',
+            'responsibleName': 'اسم المسؤول',
+            'notes': 'ملاحظات',
+            'severity': 'الخطورة',
+            'quantity': 'الكمية',
+            'actions': 'الإجراءات',
+            'assignedWorkshops': 'الورش المعينة',
+            'coveredTrades': 'الأعمال المغطاة',
+            'openBlockers': 'العوائق المفتوحة',
+            'lastUpdate': 'آخر تحديث',
+            'complete': 'مكتمل',
+            'schedule': 'الجدول',
+            'scheduledWorkshops': 'الورش المجدولة',
+            'scheduleWarnings': 'تحذيرات الجدولة',
+            'noSites': 'لا توجد مواقع لهذا الطلب بعد.',
+            'noProgressUpdates': 'لا توجد تحديثات تقدم بعد.',
+            'noPhotos': 'لم يتم رفع صور بعد.',
+            'noWorkshopAssigned': 'لا توجد ورشة معينة لهذا الموقع بعد.',
+            'projectPhoto': 'صورة المشروع',
+            'progress': 'التقدم',
+            'nextActionPrefix': 'الإجراء التالي',
+            'addProgressUpdate': 'إضافة تحديث تقدم',
+            'uploadPhotos': 'رفع الصور',
+            'addTask': 'إضافة مهمة',
+            'addIssue': 'إضافة مشكلة أو عائق',
+            'addMaterial': 'إضافة سجل مادة',
+            'photoUpdate': 'تحديث صور',
+            'materialName': 'المادة',
+            'noCoveredTrades': 'لا توجد أعمال محددة',
+            'scheduleMissing': 'الجدول غير محدد',
+            'blocked_site': 'الموقع متوقف',
+            'missing_workshop_schedule': 'جدول الورشة غير محدد',
+            'workshop_unavailable': 'الورشة غير متاحة',
+            'high_issue': 'مشكلة عالية الخطورة مفتوحة',
+            'overdue_task': 'مهمة متأخرة'
+      },
+      'actions': {
+            'saving': 'جار الحفظ...',
+            'addUpdate': 'إضافة التحديث',
+            'uploading': 'جار الرفع...',
+            'uploadPhotos': 'رفع الصور',
+            'complete': 'إنهاء',
+            'delete': 'حذف',
+            'resolve': 'حل المشكلة',
+            'delivered': 'تم التسليم',
+            'addTask': 'إضافة مهمة',
+            'addIssue': 'إضافة مشكلة',
+            'addMaterial': 'إضافة مادة'
+      }
+},
     sitesPage: {
       heading: 'المواقع',
       description: 'عرض مستقل وعمليات CRUD. كما تظهر المواقع داخل كل طلب.',
