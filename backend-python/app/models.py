@@ -87,6 +87,57 @@ class CustomerWorkshop(Base):
     customer: Mapped[Customer] = relationship(back_populates="workshops")
 
 
+class Workshop(Base):
+    __tablename__ = "Workshop"
+    __table_args__ = (Index("Workshop_name_idx", "name"),)
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid4()))
+    name: Mapped[str] = mapped_column(String, nullable=False)
+    contact_name: Mapped[str | None] = mapped_column("contactName", String)
+    phone: Mapped[str | None] = mapped_column(String)
+    email: Mapped[str | None] = mapped_column(String)
+    specialties_json: Mapped[str | None] = mapped_column("specialtiesJson", Text)
+    notes: Mapped[str | None] = mapped_column(Text)
+    availability_status: Mapped[str] = mapped_column(
+        "availabilityStatus", String, nullable=False, default="available", server_default="available"
+    )
+    availability_note: Mapped[str | None] = mapped_column("availabilityNote", Text)
+    is_active: Mapped[bool] = mapped_column("isActive", Boolean, nullable=False, default=True, server_default="true")
+    created_at: Mapped[datetime] = mapped_column("createdAt", DateTime(timezone=True), server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(
+        "updatedAt", DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
+    )
+
+    assignments: Mapped[list["WorkshopSiteAssignment"]] = relationship(back_populates="workshop")
+
+
+class WorkshopSiteAssignment(Base):
+    __tablename__ = "WorkshopSiteAssignment"
+    __table_args__ = (
+        Index("WorkshopSiteAssignment_orderId_idx", "orderId"),
+        Index("WorkshopSiteAssignment_siteId_idx", "siteId"),
+        Index("WorkshopSiteAssignment_workshopId_idx", "workshopId"),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid4()))
+    order_id: Mapped[str] = mapped_column("orderId", String(36), ForeignKey("Order.id"), nullable=False)
+    site_id: Mapped[str] = mapped_column("siteId", String(36), ForeignKey("Site.id"), nullable=False)
+    workshop_id: Mapped[str] = mapped_column("workshopId", String(36), ForeignKey("Workshop.id"), nullable=False)
+    covered_skills_json: Mapped[str | None] = mapped_column("coveredSkillsJson", Text)
+    start_date: Mapped[datetime | None] = mapped_column("startDate", DateTime(timezone=True))
+    end_date: Mapped[datetime | None] = mapped_column("endDate", DateTime(timezone=True))
+    status: Mapped[str] = mapped_column(String, nullable=False, default="assigned", server_default="assigned")
+    notes: Mapped[str | None] = mapped_column(Text)
+    created_at: Mapped[datetime] = mapped_column("createdAt", DateTime(timezone=True), server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(
+        "updatedAt", DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
+    )
+
+    order: Mapped["Order"] = relationship(back_populates="workshop_assignments")
+    site: Mapped["Site"] = relationship(back_populates="workshop_assignments")
+    workshop: Mapped[Workshop] = relationship(back_populates="assignments")
+
+
 class Order(Base):
     __tablename__ = "Order"
 
@@ -108,6 +159,17 @@ class Order(Base):
     customer: Mapped[Customer] = relationship(back_populates="orders")
     sites: Mapped[list["Site"]] = relationship(back_populates="order")
     work_entries: Mapped[list["WorkEntry"]] = relationship(back_populates="order")
+    progress_updates: Mapped[list["ProjectProgressUpdate"]] = relationship(
+        back_populates="order", cascade="all, delete-orphan"
+    )
+    tracking_tasks: Mapped[list["ProjectTask"]] = relationship(back_populates="order", cascade="all, delete-orphan")
+    tracking_issues: Mapped[list["ProjectIssue"]] = relationship(back_populates="order", cascade="all, delete-orphan")
+    material_logs: Mapped[list["ProjectMaterialLog"]] = relationship(
+        back_populates="order", cascade="all, delete-orphan"
+    )
+    workshop_assignments: Mapped[list["WorkshopSiteAssignment"]] = relationship(
+        back_populates="order", cascade="all, delete-orphan"
+    )
 
 
 class Site(Base):
@@ -129,6 +191,13 @@ class Site(Base):
     order: Mapped[Order] = relationship(back_populates="sites")
     assignments: Mapped[list["EmployeeAssignment"]] = relationship(back_populates="site")
     work_entries: Mapped[list["WorkEntry"]] = relationship(back_populates="site")
+    progress_updates: Mapped[list["ProjectProgressUpdate"]] = relationship(back_populates="site")
+    tracking_tasks: Mapped[list["ProjectTask"]] = relationship(back_populates="site")
+    tracking_issues: Mapped[list["ProjectIssue"]] = relationship(back_populates="site")
+    material_logs: Mapped[list["ProjectMaterialLog"]] = relationship(back_populates="site")
+    workshop_assignments: Mapped[list["WorkshopSiteAssignment"]] = relationship(
+        back_populates="site", cascade="all, delete-orphan"
+    )
 
 
 class Employee(Base):
@@ -235,6 +304,133 @@ class WorkEntry(Base):
     order: Mapped[Order] = relationship(back_populates="work_entries")
     site: Mapped[Site] = relationship(back_populates="work_entries")
     invoice_lines: Mapped[list["InvoiceLine"]] = relationship(back_populates="work_entry")
+
+
+
+class ProjectProgressUpdate(Base):
+    __tablename__ = "ProjectProgressUpdate"
+    __table_args__ = (
+        Index("ProjectProgressUpdate_orderId_idx", "orderId"),
+        Index("ProjectProgressUpdate_siteId_idx", "siteId"),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid4()))
+    order_id: Mapped[str] = mapped_column("orderId", String(36), ForeignKey("Order.id"), nullable=False)
+    site_id: Mapped[str | None] = mapped_column("siteId", String(36), ForeignKey("Site.id"))
+    title: Mapped[str] = mapped_column(String, nullable=False)
+    description: Mapped[str | None] = mapped_column(Text)
+    status: Mapped[str] = mapped_column(String, nullable=False, default="in_progress", server_default="in_progress")
+    progress_percent: Mapped[int | None] = mapped_column("progressPercent", Integer)
+    next_action: Mapped[str | None] = mapped_column("nextAction", Text)
+    update_date: Mapped[datetime] = mapped_column("updateDate", DateTime(timezone=True), nullable=False)
+    created_at: Mapped[datetime] = mapped_column("createdAt", DateTime(timezone=True), server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(
+        "updatedAt", DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
+    )
+
+    order: Mapped[Order] = relationship(back_populates="progress_updates")
+    site: Mapped[Site | None] = relationship(back_populates="progress_updates")
+    photos: Mapped[list["ProjectProgressPhoto"]] = relationship(
+        back_populates="update", cascade="all, delete-orphan", order_by="ProjectProgressPhoto.created_at"
+    )
+
+
+class ProjectProgressPhoto(Base):
+    __tablename__ = "ProjectProgressPhoto"
+    __table_args__ = (Index("ProjectProgressPhoto_updateId_idx", "updateId"),)
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid4()))
+    update_id: Mapped[str] = mapped_column(
+        "updateId", String(36), ForeignKey("ProjectProgressUpdate.id"), nullable=False
+    )
+    original_filename: Mapped[str | None] = mapped_column("originalFilename", String)
+    stored_filename: Mapped[str] = mapped_column("storedFilename", String, nullable=False)
+    content_type: Mapped[str] = mapped_column("contentType", String, nullable=False)
+    size_bytes: Mapped[int] = mapped_column("sizeBytes", Integer, nullable=False)
+    storage_path: Mapped[str] = mapped_column("storagePath", Text, nullable=False)
+    tag: Mapped[str | None] = mapped_column(String)
+    caption: Mapped[str | None] = mapped_column(Text)
+    created_at: Mapped[datetime] = mapped_column("createdAt", DateTime(timezone=True), server_default=func.now())
+
+    update: Mapped[ProjectProgressUpdate] = relationship(back_populates="photos")
+
+
+class ProjectTask(Base):
+    __tablename__ = "ProjectTask"
+    __table_args__ = (
+        Index("ProjectTask_orderId_idx", "orderId"),
+        Index("ProjectTask_siteId_idx", "siteId"),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid4()))
+    order_id: Mapped[str] = mapped_column("orderId", String(36), ForeignKey("Order.id"), nullable=False)
+    site_id: Mapped[str | None] = mapped_column("siteId", String(36), ForeignKey("Site.id"))
+    task_name: Mapped[str] = mapped_column("taskName", String, nullable=False)
+    status: Mapped[str] = mapped_column(String, nullable=False, default="not_started", server_default="not_started")
+    responsible_type: Mapped[str] = mapped_column(
+        "responsibleType", String, nullable=False, default="not_assigned", server_default="not_assigned"
+    )
+    responsible_name: Mapped[str | None] = mapped_column("responsibleName", String)
+    due_date: Mapped[datetime | None] = mapped_column("dueDate", DateTime(timezone=True))
+    notes: Mapped[str | None] = mapped_column(Text)
+    created_at: Mapped[datetime] = mapped_column("createdAt", DateTime(timezone=True), server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(
+        "updatedAt", DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
+    )
+
+    order: Mapped[Order] = relationship(back_populates="tracking_tasks")
+    site: Mapped[Site | None] = relationship(back_populates="tracking_tasks")
+
+
+class ProjectIssue(Base):
+    __tablename__ = "ProjectIssue"
+    __table_args__ = (
+        Index("ProjectIssue_orderId_idx", "orderId"),
+        Index("ProjectIssue_siteId_idx", "siteId"),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid4()))
+    order_id: Mapped[str] = mapped_column("orderId", String(36), ForeignKey("Order.id"), nullable=False)
+    site_id: Mapped[str | None] = mapped_column("siteId", String(36), ForeignKey("Site.id"))
+    title: Mapped[str] = mapped_column(String, nullable=False)
+    description: Mapped[str | None] = mapped_column(Text)
+    severity: Mapped[str] = mapped_column(String, nullable=False, default="medium", server_default="medium")
+    status: Mapped[str] = mapped_column(String, nullable=False, default="open", server_default="open")
+    responsible_type: Mapped[str] = mapped_column(
+        "responsibleType", String, nullable=False, default="not_assigned", server_default="not_assigned"
+    )
+    responsible_name: Mapped[str | None] = mapped_column("responsibleName", String)
+    resolution_note: Mapped[str | None] = mapped_column("resolutionNote", Text)
+    created_at: Mapped[datetime] = mapped_column("createdAt", DateTime(timezone=True), server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(
+        "updatedAt", DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
+    )
+
+    order: Mapped[Order] = relationship(back_populates="tracking_issues")
+    site: Mapped[Site | None] = relationship(back_populates="tracking_issues")
+
+
+class ProjectMaterialLog(Base):
+    __tablename__ = "ProjectMaterialLog"
+    __table_args__ = (
+        Index("ProjectMaterialLog_orderId_idx", "orderId"),
+        Index("ProjectMaterialLog_siteId_idx", "siteId"),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid4()))
+    order_id: Mapped[str] = mapped_column("orderId", String(36), ForeignKey("Order.id"), nullable=False)
+    site_id: Mapped[str | None] = mapped_column("siteId", String(36), ForeignKey("Site.id"))
+    material_name: Mapped[str] = mapped_column("materialName", String, nullable=False)
+    quantity: Mapped[str | None] = mapped_column(String)
+    status: Mapped[str] = mapped_column(String, nullable=False, default="needed", server_default="needed")
+    notes: Mapped[str | None] = mapped_column(Text)
+    created_at: Mapped[datetime] = mapped_column("createdAt", DateTime(timezone=True), server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(
+        "updatedAt", DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
+    )
+
+    order: Mapped[Order] = relationship(back_populates="material_logs")
+    site: Mapped[Site | None] = relationship(back_populates="material_logs")
 
 
 class Invoice(Base):

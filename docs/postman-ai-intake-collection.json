@@ -1,0 +1,368 @@
+{
+  "info": {
+    "name": "Mini ERP AI Intake API",
+    "_postman_id": "9fe47ae2-74b0-4df3-84f6-ai-intake-docs",
+    "description": "Postman collection for testing the FastAPI AI Intake chat, proposal generation, workshop recommendation, and proposal PDF endpoints.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "variable": [
+    {
+      "key": "base_url",
+      "value": "http://localhost:3001/api",
+      "type": "string"
+    },
+    {
+      "key": "intake_id",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "locale",
+      "value": "ar",
+      "type": "string"
+    }
+  ],
+  "item": [
+    {
+      "name": "AI Intake",
+      "item": [
+        {
+          "name": "1. Create Intake Session",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"customerCompanyName\": \"شركة إعمار الشام\",\n  \"orderTitle\": \"ترميم مطبخ وحمام وغرفة جلوس\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{base_url}}/ai/intakes",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "ai",
+                "intakes"
+              ]
+            },
+            "description": "Creates a new AI Intake session. Copy the returned `id` into the `intake_id` collection variable. The test script also does this automatically."
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const data = pm.response.json();",
+                  "if (data.id) {",
+                  "  pm.collectionVariables.set('intake_id', data.id);",
+                  "}"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "2. Get Intake Session",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/ai/intakes/{{intake_id}}",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "ai",
+                "intakes",
+                "{{intake_id}}"
+              ]
+            },
+            "description": "Returns the current intake/proposal draft, including messages when available."
+          },
+          "response": []
+        },
+        {
+          "name": "3. Send Arabic Chat Message",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "text/plain"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"content\": \"عندي مشروع ترميم في دمشق، حي المزة. المطبخ يحتاج إزالة بلاط قديم وتركيب سيراميك ٦٠ في ٦٠، والحمام يحتاج عزل مائي وتبديل مغسلة.\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{base_url}}/ai/intakes/{{intake_id}}/messages/stream",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "ai",
+                "intakes",
+                "{{intake_id}}",
+                "messages",
+                "stream"
+              ]
+            },
+            "description": "Sends a user message to the AI Intake assistant. The response is streamed as plain text."
+          },
+          "response": []
+        },
+        {
+          "name": "4. Send Follow-up Chat Message",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "text/plain"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"content\": \"الدفع كاش، يوجد عربون ٣٠٠٠ دولار بتاريخ بداية المشروع، وورشة الشام للبلاط والعزل ستنفذ أعمال البلاط والعزل.\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{base_url}}/ai/intakes/{{intake_id}}/messages/stream",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "ai",
+                "intakes",
+                "{{intake_id}}",
+                "messages",
+                "stream"
+              ]
+            },
+            "description": "Adds more project/payment/workshop details to the same intake session."
+          },
+          "response": []
+        },
+        {
+          "name": "5. Generate Proposal",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/ai/intakes/{{intake_id}}/proposal",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "ai",
+                "intakes",
+                "{{intake_id}}",
+                "proposal"
+              ]
+            },
+            "description": "Generates structured proposal data from the chat messages."
+          },
+          "response": []
+        },
+        {
+          "name": "6. Recommend Workshop Assignments",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/ai/intakes/{{intake_id}}/recommend-assignments",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "ai",
+                "intakes",
+                "{{intake_id}}",
+                "recommend-assignments"
+              ]
+            },
+            "description": "Returns workshop recommendation/assignment suggestions based on proposal sites and required trades."
+          },
+          "response": []
+        },
+        {
+          "name": "7. Get Proposal PDF",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/pdf"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/ai/intakes/{{intake_id}}/pdf?locale={{locale}}",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "ai",
+                "intakes",
+                "{{intake_id}}",
+                "pdf"
+              ],
+              "query": [
+                {
+                  "key": "locale",
+                  "value": "{{locale}}"
+                }
+              ]
+            },
+            "description": "Returns the generated proposal as a PDF. Use `locale=ar` to test Arabic PDF output."
+          },
+          "response": []
+        },
+        {
+          "name": "8. Clear Chat Messages",
+          "request": {
+            "method": "DELETE",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/ai/intakes/{{intake_id}}/messages",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "ai",
+                "intakes",
+                "{{intake_id}}",
+                "messages"
+              ]
+            },
+            "description": "Clears chat messages and memory for the selected intake session."
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "Workshops",
+      "item": [
+        {
+          "name": "List Available Workshops",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/workshops?availableOnly=true",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "workshops"
+              ],
+              "query": [
+                {
+                  "key": "availableOnly",
+                  "value": "true"
+                }
+              ]
+            },
+            "description": "Lists active and available workshop partners."
+          },
+          "response": []
+        },
+        {
+          "name": "Create Workshop",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"ورشة الشام للبلاط والعزل\",\n  \"contactName\": \"أبو سامر\",\n  \"phone\": \"0933445566\",\n  \"email\": \"workshop@example.com\",\n  \"specialties\": [\"بلاط\", \"عزل مائي\", \"سيراميك\"],\n  \"notes\": \"ورشة مفضلة لأعمال البلاط والعزل.\",\n  \"availabilityStatus\": \"available\",\n  \"isActive\": true\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{base_url}}/workshops",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "workshops"
+              ]
+            },
+            "description": "Creates a workshop partner that AI Intake can consider when suggesting workshops."
+          },
+          "response": []
+        }
+      ]
+    }
+  ]
+}

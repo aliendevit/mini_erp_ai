@@ -14,8 +14,9 @@ from sqlalchemy.orm import Session, sessionmaker
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from app.database import Base
-from app.models import Customer, CustomerWorkshop, Employee, EmployeeAvailabilityBlock, EmployeeSkill, PaymentRecord, Proposal, ProposalFact, ProposalMessage
-from app.schemas import ProposalDraftPayload
+from app.models import Customer, CustomerWorkshop, Employee, EmployeeAvailabilityBlock, EmployeeSkill, Order, PaymentRecord, ProjectIssue, ProjectProgressUpdate, ProjectTask, Proposal, ProposalFact, ProposalMessage, Site, Workshop, WorkshopSiteAssignment
+from app.schemas import ProjectIssuePayload, ProjectTaskPayload, ProposalDraftPayload, WorkshopSiteAssignmentPayload
+from app.routers.core import create_order_workshop_assignment, create_project_issue, create_project_task, update_project_issue, update_project_task, update_workshop_assignment, _tracking_response
 from app.services.proposal_documents import _arabic_visual_text, build_proposal_pdf
 from app.services.proposals import (
     ExtractedProposal,
@@ -30,6 +31,7 @@ from app.services.proposals import (
     sanitize_intake_assistant_reply,
 )
 from app.services.staffing import build_staffing_explanation_context, format_staffing_explanation, recommend_staff_for_proposal
+from app.routers.ai import _workshop_recommendations_for_proposal
 
 
 def build_employee(name: str, skill: str, rate: str = "50", capacity: str = "40") -> Employee:
@@ -54,6 +56,340 @@ class ProposalAndStaffingTests(unittest.TestCase):
 
     def tearDown(self) -> None:
         self.db.close()
+
+    def _workshop_order_fixture(self):
+        customer = Customer(company_name="Tracking Customer")
+        order = Order(customer=customer, title="Tracking Order", status="open")
+        site_a = Site(order=order, site_name="Kitchen")
+        site_b = Site(order=order, site_name="Bathroom")
+        workshop_a = Workshop(name="Workshop A", specialties_json='["tiles"]', availability_status="available", is_active=True)
+        workshop_b = Workshop(name="Workshop B", specialties_json='["plumbing"]', availability_status="available", is_active=True)
+        self.db.add_all([customer, order, site_a, site_b, workshop_a, workshop_b])
+        self.db.commit()
+        return order, site_a, site_b, workshop_a, workshop_b
+
+    def _assignment_payload(self, site: Site, workshop: Workshop, start: datetime | None, end: datetime | None) -> WorkshopSiteAssignmentPayload:
+        return WorkshopSiteAssignmentPayload(
+            siteId=site.id,
+            workshopId=workshop.id,
+            coveredSkills=["tiles"],
+            startDate=start,
+            endDate=end,
+            status="assigned",
+        )
+
+    def test_workshop_assignment_rejects_overlapping_different_workshop_on_same_site(self) -> None:
+        order, site, _other_site, workshop_a, workshop_b = self._workshop_order_fixture()
+        create_order_workshop_assignment(
+            order.id,
+            self._assignment_payload(
+                site,
+                workshop_a,
+                datetime(2026, 6, 1, tzinfo=timezone.utc),
+                datetime(2026, 6, 5, tzinfo=timezone.utc),
+            ),
+            self.db,
+        )
+
+        with self.assertRaises(HTTPException) as raised:
+            create_order_workshop_assignment(
+                order.id,
+                self._assignment_payload(
+                    site,
+                    workshop_b,
+                    datetime(2026, 6, 4, tzinfo=timezone.utc),
+                    datetime(2026, 6, 7, tzinfo=timezone.utc),
+                ),
+                self.db,
+            )
+
+        self.assertEqual(raised.exception.status_code, 409)
+
+    def test_workshop_assignment_allows_adjacent_or_different_site_dates(self) -> None:
+        order, site_a, site_b, workshop_a, workshop_b = self._workshop_order_fixture()
+        create_order_workshop_assignment(
+            order.id,
+            self._assignment_payload(
+                site_a,
+                workshop_a,
+                datetime(2026, 6, 1, tzinfo=timezone.utc),
+                datetime(2026, 6, 5, tzinfo=timezone.utc),
+            ),
+            self.db,
+        )
+        create_order_workshop_assignment(
+            order.id,
+            self._assignment_payload(
+                site_a,
+                workshop_b,
+                datetime(2026, 6, 6, tzinfo=timezone.utc),
+                datetime(2026, 6, 8, tzinfo=timezone.utc),
+            ),
+            self.db,
+        )
+        create_order_workshop_assignment(
+            order.id,
+            self._assignment_payload(
+                site_b,
+                workshop_b,
+                datetime(2026, 6, 3, tzinfo=timezone.utc),
+                datetime(2026, 6, 4, tzinfo=timezone.utc),
+            ),
+            self.db,
+        )
+
+        self.assertEqual(self.db.query(WorkshopSiteAssignment).count(), 3)
+
+    def test_tracking_response_includes_smart_warnings(self) -> None:
+        order, site, _other_site, workshop_a, _workshop_b = self._workshop_order_fixture()
+        workshop_a.availability_status = "not_available"
+        assignment = WorkshopSiteAssignment(order_id=order.id, site_id=site.id, workshop_id=workshop_a.id, covered_skills_json='["tiles"]')
+        overdue = ProjectTask(
+            order_id=order.id,
+            site_id=site.id,
+            task_name="Apply waterproofing",
+            status="in_progress",
+            due_date=datetime(2026, 1, 1, tzinfo=timezone.utc),
+        )
+        issue = ProjectIssue(order_id=order.id, site_id=site.id, title="Leak still open", severity="high", status="open")
+        self.db.add_all([assignment, overdue, issue])
+        self.db.commit()
+
+        result = _tracking_response(self.db, order.id)
+        warning_types = {warning["type"] for warning in result["dashboard"]["warnings"]}
+        site_card = next(card for card in result["siteCards"] if card["siteId"] == site.id)
+        site_warning_types = {warning["type"] for warning in site_card["scheduleWarnings"]}
+
+        self.assertIn("missing_workshop_schedule", warning_types)
+        self.assertIn("workshop_unavailable", warning_types)
+        self.assertIn("high_issue", warning_types)
+        self.assertIn("overdue_task", warning_types)
+        self.assertTrue(site_warning_types.issuperset(warning_types))
+        self.assertEqual(site_card["scheduledWorkshops"][0]["scheduleStatus"], "missing_schedule")
+
+    def test_task_completion_updates_site_progress_and_clears_overdue_warning(self) -> None:
+        order, site, _other_site, _workshop_a, _workshop_b = self._workshop_order_fixture()
+        old_due_date = datetime(2026, 1, 1, tzinfo=timezone.utc)
+
+        create_project_task(
+            order.id,
+            ProjectTaskPayload(
+                siteId=site.id,
+                taskName="Remove old tiles",
+                status="in_progress",
+                responsibleType="workshop",
+                responsibleName="Workshop A",
+                dueDate=old_due_date,
+            ),
+            self.db,
+        )
+        create_project_task(
+            order.id,
+            ProjectTaskPayload(
+                siteId=site.id,
+                taskName="Install new tiles",
+                status="not_started",
+                responsibleType="workshop",
+                responsibleName="Workshop A",
+            ),
+            self.db,
+        )
+
+        task = self.db.query(ProjectTask).filter(ProjectTask.task_name == "Remove old tiles").one()
+        before = _tracking_response(self.db, order.id)
+        before_site = next(card for card in before["siteCards"] if card["siteId"] == site.id)
+        before_warning_types = {warning["type"] for warning in before_site["scheduleWarnings"]}
+
+        self.assertEqual(before_site["progressPercent"], 0)
+        self.assertIn("overdue_task", before_warning_types)
+
+        result = update_project_task(
+            order.id,
+            task.id,
+            ProjectTaskPayload(
+                siteId=site.id,
+                taskName="Remove old tiles",
+                status="completed",
+                responsibleType="workshop",
+                responsibleName="Workshop A",
+                dueDate=old_due_date,
+            ),
+            self.db,
+        )
+        site_card = next(card for card in result["siteCards"] if card["siteId"] == site.id)
+        site_warning_types = {warning["type"] for warning in site_card["scheduleWarnings"]}
+
+        self.assertEqual(result["dashboard"]["completedTaskCount"], 1)
+        self.assertEqual(result["dashboard"]["totalTaskCount"], 2)
+        self.assertEqual(site_card["progressPercent"], 50)
+        self.assertNotIn("overdue_task", site_warning_types)
+
+    def test_issue_resolution_removes_open_blocker_and_warning(self) -> None:
+        order, site, _other_site, _workshop_a, _workshop_b = self._workshop_order_fixture()
+
+        create_project_issue(
+            order.id,
+            ProjectIssuePayload(
+                siteId=site.id,
+                title="Water leak",
+                description="Leak is blocking waterproofing.",
+                severity="high",
+                status="open",
+                responsibleType="workshop",
+                responsibleName="Workshop A",
+            ),
+            self.db,
+        )
+
+        issue = self.db.query(ProjectIssue).filter(ProjectIssue.title == "Water leak").one()
+        before = _tracking_response(self.db, order.id)
+        before_site = next(card for card in before["siteCards"] if card["siteId"] == site.id)
+        before_warning_types = {warning["type"] for warning in before["dashboard"]["warnings"]}
+
+        self.assertIn("high_issue", before_warning_types)
+        self.assertEqual(before["dashboard"]["openIssueCount"], 1)
+        self.assertEqual(len(before_site["openBlockers"]), 1)
+
+        result = update_project_issue(
+            order.id,
+            issue.id,
+            ProjectIssuePayload(
+                siteId=site.id,
+                title="Water leak",
+                description="Leak is blocking waterproofing.",
+                severity="high",
+                status="resolved",
+                responsibleType="workshop",
+                responsibleName="Workshop A",
+                resolutionNote="Leak repaired and checked.",
+            ),
+            self.db,
+        )
+        site_card = next(card for card in result["siteCards"] if card["siteId"] == site.id)
+        warning_types = {warning["type"] for warning in result["dashboard"]["warnings"]}
+
+        self.assertNotIn("high_issue", warning_types)
+        self.assertEqual(result["dashboard"]["openIssueCount"], 0)
+        self.assertEqual(site_card["openBlockers"], [])
+
+    def test_general_tracking_items_create_dashboard_warnings(self) -> None:
+        order, _site, _other_site, _workshop_a, _workshop_b = self._workshop_order_fixture()
+
+        result = create_project_issue(
+            order.id,
+            ProjectIssuePayload(
+                title="Missing access key",
+                description="The building key is not available.",
+                severity="high",
+                status="open",
+            ),
+            self.db,
+        )
+        result = create_project_task(
+            order.id,
+            ProjectTaskPayload(
+                taskName="Confirm material delivery",
+                status="in_progress",
+                dueDate=datetime(2026, 1, 1, tzinfo=timezone.utc),
+            ),
+            self.db,
+        )
+        warning_types = {warning["type"] for warning in result["dashboard"]["warnings"]}
+        warning_site_ids = {warning["siteId"] for warning in result["dashboard"]["warnings"]}
+
+        self.assertIn("high_issue", warning_types)
+        self.assertIn("overdue_task", warning_types)
+        self.assertIn(None, warning_site_ids)
+
+    def test_tracking_response_warns_when_work_site_has_no_workshop(self) -> None:
+        order, site, other_site, _workshop_a, _workshop_b = self._workshop_order_fixture()
+
+        result = create_project_task(
+            order.id,
+            ProjectTaskPayload(
+                siteId=site.id,
+                taskName="Prepare waterproofing",
+                status="not_started",
+                dueDate=datetime(2026, 12, 1, tzinfo=timezone.utc),
+            ),
+            self.db,
+        )
+        site_card = next(card for card in result["siteCards"] if card["siteId"] == site.id)
+        other_card = next(card for card in result["siteCards"] if card["siteId"] == other_site.id)
+        warning_types = {warning["type"] for warning in site_card["scheduleWarnings"]}
+        dashboard_warning = next(warning for warning in result["dashboard"]["warnings"] if warning["type"] == "no_workshop_assigned")
+
+        self.assertIn("no_workshop_assigned", warning_types)
+        self.assertEqual(dashboard_warning["fixArea"], "team")
+        self.assertTrue(dashboard_warning["recommendedAction"])
+        self.assertEqual(other_card["scheduleWarnings"], [])
+
+    def test_tracking_response_warns_when_progress_and_status_do_not_match(self) -> None:
+        order, site, _other_site, _workshop_a, _workshop_b = self._workshop_order_fixture()
+        self.db.add_all(
+            [
+                ProjectTask(order_id=order.id, site_id=site.id, task_name="Task A", status="completed"),
+                ProjectTask(order_id=order.id, site_id=site.id, task_name="Task B", status="completed"),
+            ]
+        )
+        self.db.commit()
+
+        result = _tracking_response(self.db, order.id)
+        site_card = next(card for card in result["siteCards"] if card["siteId"] == site.id)
+        warning = next(warning for warning in site_card["scheduleWarnings"] if warning["type"] == "progress_status_mismatch")
+
+        self.assertEqual(site_card["progressPercent"], 100)
+        self.assertEqual(site_card["currentStatus"], "not_started")
+        self.assertEqual(warning["fixArea"], "timeline")
+
+    def test_tracking_response_warns_when_completed_status_has_low_progress(self) -> None:
+        order, site, _other_site, _workshop_a, _workshop_b = self._workshop_order_fixture()
+        update = ProjectProgressUpdate(
+            order_id=order.id,
+            site_id=site.id,
+            title="Final inspection",
+            status="completed",
+            progress_percent=50,
+            update_date=datetime(2026, 6, 1, tzinfo=timezone.utc),
+        )
+        self.db.add(update)
+        self.db.commit()
+
+        result = _tracking_response(self.db, order.id)
+        site_card = next(card for card in result["siteCards"] if card["siteId"] == site.id)
+        warning_types = {warning["type"] for warning in site_card["scheduleWarnings"]}
+
+        self.assertEqual(site_card["currentStatus"], "completed")
+        self.assertEqual(site_card["progressPercent"], 50)
+        self.assertIn("progress_status_mismatch", warning_types)
+
+    def test_workshop_assignment_update_ignores_itself_for_overlap_check(self) -> None:
+        order, site, _other_site, workshop_a, _workshop_b = self._workshop_order_fixture()
+        created = create_order_workshop_assignment(
+            order.id,
+            self._assignment_payload(
+                site,
+                workshop_a,
+                datetime(2026, 6, 1, tzinfo=timezone.utc),
+                datetime(2026, 6, 5, tzinfo=timezone.utc),
+            ),
+            self.db,
+        )
+
+        updated = update_workshop_assignment(
+            created["id"],
+            self._assignment_payload(
+                site,
+                workshop_a,
+                datetime(2026, 6, 2, tzinfo=timezone.utc),
+                datetime(2026, 6, 6, tzinfo=timezone.utc),
+            ),
+            self.db,
+        )
+
+        self.assertEqual(updated["id"], created["id"])
+        self.assertTrue(str(updated["startDate"]).startswith("2026-06-02T00:00:00"))
+        self.assertTrue(str(updated["endDate"]).startswith("2026-06-06T00:00:00"))
 
     def test_build_proposal_pdf_returns_pdf_bytes(self) -> None:
         payload = {
@@ -218,6 +554,17 @@ class ProposalAndStaffingTests(unittest.TestCase):
         self.assertIn("Do not answer with vague generic summaries", prompt)
         self.assertIn("record concrete facts", prompt)
         self.assertIn("ready for proposal generation", prompt)
+
+    def test_intake_chat_prompt_includes_known_available_workshops(self) -> None:
+        prompt = build_intake_chat_prompt(
+            Proposal(status="intake"),
+            [ProposalMessage(role="user", content="Which workshop can handle electrical work?")],
+            known_available_workshops=[{"name": "Elektro Partner", "specialties": ["electrical"], "availabilityStatus": "available"}],
+        )
+
+        self.assertIn("Known available workshop partners", prompt)
+        self.assertIn("Elektro Partner", prompt)
+        self.assertIn("never suggest inactive or not-available workshops", prompt)
 
     def test_proposal_prompt_includes_construction_guidance_for_notes_and_skills(self) -> None:
         prompt = build_proposal_prompt([ProposalMessage(role="user", content="We need painting and flooring.")])
@@ -479,8 +826,8 @@ class ProposalAndStaffingTests(unittest.TestCase):
 
         site = extracted.proposedSites[0]
         self.assertEqual(site.assignedWorkshopName, "Hamburg Renovation Team")
-        self.assertEqual(site.coverageType, "mixed_with_workshop")
-        self.assertEqual(site.selectedInternalHeadcount, 1)
+        self.assertEqual(site.coverageType, "workshop_only")
+        self.assertIsNone(site.selectedInternalHeadcount)
         self.assertIn("Trockenbau", site.workshopCoveredSkills)
 
     def test_extract_proposal_enriches_partial_site_data_from_transcript(self) -> None:
@@ -515,7 +862,7 @@ class ProposalAndStaffingTests(unittest.TestCase):
 
         site = extracted.proposedSites[0]
         self.assertEqual(site.assignedWorkshopName, "Hamburg Renovation Team")
-        self.assertEqual(site.coverageType, "mixed_with_workshop")
+        self.assertEqual(site.coverageType, "workshop_only")
         self.assertIn("Trockenbau", site.workshopCoveredSkills)
         self.assertIn("Feuchtigkeitsschutz", site.workshopCoveredSkills)
         self.assertTrue(site.requiredSkills)
@@ -787,6 +1134,43 @@ class ProposalAndStaffingTests(unittest.TestCase):
         self.assertEqual(site["autoSelectedEmployeeIds"], [])
         self.assertEqual(site["selectedInternalHeadcount"], 0)
 
+    def test_ai_workshop_recommendations_exclude_unavailable_global_workshops(self) -> None:
+        available = Workshop(
+            name="Elektro Partner",
+            specialties_json='["electrical"]',
+            availability_status="available",
+            is_active=True,
+        )
+        unavailable = Workshop(
+            name="Busy Elektro",
+            specialties_json='["electrical"]',
+            availability_status="not_available",
+            availability_note="Booked this week",
+            is_active=True,
+        )
+        self.db.add_all([available, unavailable])
+
+        proposal = Proposal(status="draft", order_title="Electrical site")
+        apply_proposal_update(
+            proposal,
+            ProposalDraftPayload(
+                customerCompanyName="ACME",
+                orderTitle="Electrical site",
+                summary="Electrical scope",
+                proposedSites=[{"siteName": "Kitchen", "requiredSkills": ["electrical"], "estimatedHours": 8}],
+                requiredSkills=["electrical"],
+            ),
+        )
+        self.db.add(proposal)
+        self.db.commit()
+
+        recommendations = _workshop_recommendations_for_proposal(self.db, proposal)
+
+        names = [item["name"] for item in recommendations["sites"][0]["workshopRecommendations"]]
+        self.assertIn("Elektro Partner", names)
+        self.assertNotIn("Busy Elektro", names)
+        self.assertEqual(recommendations["sites"][0]["workshopRecommendations"][0]["availabilityStatus"], "available")
+
     def test_build_staffing_explanation_context_and_fallback_text(self) -> None:
         alice = build_employee("Alice Maler", "Maler")
         bruno = build_employee("Bruno Maler", "Maler")
@@ -887,6 +1271,9 @@ class ProposalAndStaffingTests(unittest.TestCase):
                         "city": "Bremen",
                         "requiredSkills": ["Maler"],
                         "estimatedHours": 16,
+                        "assignedWorkshopName": "Bremen Drywall Team",
+                        "workshopCoveredSkills": ["Trockenbau"],
+                        "coverageType": "workshop_only",
                     }
                 ],
                 estimatedHours=16,
@@ -908,7 +1295,9 @@ class ProposalAndStaffingTests(unittest.TestCase):
         self.assertEqual(proposal.status, "converted")
         self.assertEqual(float(proposal.estimated_price or 0), 800.0)
         self.assertEqual(self.db.query(PaymentRecord).filter(PaymentRecord.proposal_id == proposal.id).count(), 1)
-        self.assertEqual(self.db.query(CustomerWorkshop).count(), 1)
+        self.assertEqual(self.db.query(Workshop).count(), 1)
+        self.assertEqual(self.db.query(WorkshopSiteAssignment).count(), 1)
+        self.assertEqual(self.db.query(CustomerWorkshop).count(), 0)
 
 
 if __name__ == "__main__":

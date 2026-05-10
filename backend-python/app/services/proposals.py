@@ -12,7 +12,7 @@ from pydantic import BaseModel, Field, ValidationError, field_validator, model_v
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
-from ..models import Customer, CustomerWorkshop, Employee, EmployeeAssignment, Order, PaymentRecord, Proposal, ProposalFact, ProposalMessage, ProposalStatus, Site
+from ..models import Customer, Employee, Order, PaymentRecord, Proposal, ProposalFact, ProposalMessage, ProposalStatus, Site, Workshop, WorkshopSiteAssignment
 from ..schemas import ProposalDraftPayload
 from ..utils import as_datetime, decimal_or_none, ensure, json_dumps, json_loads
 from .gemini_client import generate_text
@@ -735,7 +735,7 @@ def build_memory_extraction_prompt(proposal: Proposal, messages: list[ProposalMe
             "Do not use knowledge from any other chat, customer, or proposal.",
             "Contractor context: the customer/contractor may mention workshops they already work with. If a workshop is an external team/subcontractor/company, put it in externalWorkshops and contractor_workshop/external_team facts. If it is a physical work area, room, site, or task package, put it in site/work_package facts instead.",
             "Payments: capture deposits, advance payments, installments, paid amounts, due payments, methods, and references.",
-            "Internal employees must not be invented. Store only staffing needs or external teams mentioned by the manager.",
+            "This business executes projects through external workshops/subcontractors. Never ask for or invent internal employees or internal headcount. Store required workshop trades and external teams mentioned by the manager.",
             f"Required JSON schema: {json.dumps(schema, ensure_ascii=True)}",
             "",
             "Current proposal id:",
@@ -992,7 +992,11 @@ def refresh_proposal_memory(db: Session, proposal: Proposal, messages: list[Prop
     return extracted
 
 
-def build_intake_chat_prompt(proposal: Proposal, messages: list[ProposalMessage]) -> str:
+def build_intake_chat_prompt(
+    proposal: Proposal,
+    messages: list[ProposalMessage],
+    known_available_workshops: list[dict[str, Any]] | None = None,
+) -> str:
     known_customer = proposal.customer_company_name or "unknown"
     known_title = proposal.order_title or "unknown"
     language_mode = _conversation_language_mode(messages)
@@ -1013,6 +1017,7 @@ def build_intake_chat_prompt(proposal: Proposal, messages: list[ProposalMessage]
     memory_summary = _safe_json(proposal.memory_summary_json, {})
     payment_drafts = _safe_json(proposal.payment_drafts_json, [])
     external_workshops = _safe_json(proposal.external_workshops_json, [])
+    known_available_workshops = known_available_workshops or []
 
     return "\n".join(
         [
@@ -1024,8 +1029,11 @@ def build_intake_chat_prompt(proposal: Proposal, messages: list[ProposalMessage]
             "- If the manager starts a different project in a new intake, treat it as empty memory.",
             "Contractor and workshop rules:",
             "- A contractor may have known workshops, subcontractor teams, or external crews they already work with.",
-            "- Keep external workshops separate from internal ERP employees.",
+            "- This business executes sites through external workshops/subcontractors; do not ask about internal employees or internal headcount.",
             "- If a workshop means a physical work area or work package, ask/record it as a site or work package, not as an employee.",
+            "- Known available workshop partners are listed below. Use them when the manager asks which workshop can cover a site/trade.",
+            "- Suggest only active and currently available workshops from that known list; never suggest inactive or not-available workshops.",
+            "- If no available known workshop matches the required trade, say the workshop is needed / to be selected instead of inventing a partner.",
             "Payment rules:",
             "- Ask about deposits, advance payments, installments, paid amounts, due dates, methods, and references when payment info is missing or mentioned.",
             "- If the manager already states a payment amount, currency, or method, repeat it exactly and ask only for the missing payment fields.",
@@ -1044,6 +1052,8 @@ def build_intake_chat_prompt(proposal: Proposal, messages: list[ProposalMessage]
             "Hidden construction checklist:",
             construction_scope_guidance(),
             "Chat rules:",
+            "- Never ask the manager for internal employees, employee counts, capacity, availability, or internal staffing.",
+            "- Ask which workshop/subcontractor will cover a site only when the execution partner is missing or unclear.",
             "- You are writing only the next assistant reply, not a transcript.",
             "- Never write role labels such as Manager:, User:, Assistant:, Human:, System:, ??????:, ????????:, or ???????:.",
             "- Never continue the conversation by inventing what the manager/user might say next.",
@@ -1080,6 +1090,9 @@ def build_intake_chat_prompt(proposal: Proposal, messages: list[ProposalMessage]
             "",
             "Current intake external workshops:",
             json.dumps(external_workshops, ensure_ascii=True),
+            "",
+            "Known available workshop partners:",
+            json.dumps(known_available_workshops, ensure_ascii=True),
             "",
             "Conversation so far for this intake only:",
             _chat_lines(messages),
@@ -1187,13 +1200,13 @@ def build_proposal_prompt(messages: list[ProposalMessage], proposal: Proposal | 
             "The sum of proposedSites[].estimatedHours should match the top-level estimatedHours whenever possible.",
             "Classify contractor-provided workshops carefully: physical work areas become proposedSites/work packages; external teams or subcontractors become externalWorkshops.",
             "If deposits, advance payments, installments, paid amounts, or due payments are mentioned, include them in paymentDrafts.",
-            "Leave proposedSites[].recommendedHeadcount null unless the transcript explicitly contains an estimator recommendation rather than a manager requirement.",
-            "Do not copy manager-stated employee counts into proposedSites[].recommendedHeadcount; the recommendation service calculates that number later from scope, hours, schedule, skills, and workshop coverage.",
-            "If the manager explicitly states or confirms how many internal employees/workers are wanted for a site, store that number only in proposedSites[].selectedInternalHeadcount.",
+            "Leave proposedSites[].recommendedHeadcount and proposedSites[].selectedInternalHeadcount null; internal employee planning is not part of this prototype flow.",
+            "If the manager mentions worker counts, treat them only as context notes unless they refer to workshop capacity; do not create internal employee requirements.",
+            "Identify the required workshop trades for each site and set assignedWorkshopName/workshopCoveredSkills only when the manager names a workshop.",
             "Suggest resourceStrategy per site when enough scope is known.",
             "Each proposed site must have its own requiredSkills subset. Do not copy the full project skill list into every site unless the transcript explicitly says the same scope applies to all sites.",
             "When a site is handled by a known external workshop or subcontractor, set proposedSites[].assignedWorkshopName, proposedSites[].workshopCoveredSkills, and proposedSites[].coverageType accordingly.",
-            "Use coverageType=internal_only when only internal employees are needed, mixed_with_workshop when a workshop covers part of the trade scope, and workshop_only when no internal employees are currently needed.",
+            "Use coverageType=workshop_only for sites handled entirely by a workshop. Use coverageType=mixed_with_workshop only if the manager explicitly says multiple workshops/parties split the scope. Do not use internal_only for new workshop-only proposals.",
             "Do not place workshop coverage only at the top level. Store workshop/site relationships inside the matching proposedSites[] item whenever the transcript makes the relationship clear.",
             "Use the hidden construction checklist below to enrich orderDescription, proposedSites[].notes, and requiredSkills.",
             "Never invent checklist details. If a critical construction detail is unknown, write it as to be confirmed in notes/orderDescription.",
@@ -1511,10 +1524,10 @@ def _enrich_extracted_sites_from_transcript(
         elif assigned_workshop and not site.coverageType:
             site.coverageType = "mixed_with_workshop"
 
-        inferred_count = _infer_internal_count_from_text(context)
-        # Manager-mentioned numbers are treated as the manager's selected target, not as the AI recommendation.
-        if site.selectedInternalHeadcount is None and inferred_count is not None and site.coverageType != "workshop_only":
-            site.selectedInternalHeadcount = inferred_count
+        # Workshop-only pivot: do not convert manager wording into internal employee requirements.
+        site.recommendedHeadcount = None
+        site.selectedInternalHeadcount = None
+        site.coverageType = "workshop_only" if assigned_workshop else (site.coverageType or "workshop_only")
 
         if assigned_workshop:
             workshop_skills = _dedupe_strings(workshop_confirmed_skills + workshop_specialties)
@@ -1527,7 +1540,7 @@ def _enrich_extracted_sites_from_transcript(
             site.workshopCoveredSkills = workshop_skills
 
         if site.coverageType == "workshop_only":
-            site.selectedInternalHeadcount = 0
+            site.selectedInternalHeadcount = None
 
     return extracted
 
@@ -1694,40 +1707,66 @@ def proposal_external_workshops(proposal: Proposal) -> list[dict[str, Any]]:
     return list(json_loads(proposal.external_workshops_json, []))
 
 
-def _find_existing_workshop(db: Session, customer_id: str, name: str) -> CustomerWorkshop | None:
+def _find_existing_workshop(db: Session, name: str) -> Workshop | None:
     normalized = name.strip().lower()
     if not normalized:
         return None
-    return db.scalar(
-        select(CustomerWorkshop)
-        .where(CustomerWorkshop.customer_id == customer_id)
-        .where(func.lower(CustomerWorkshop.name) == normalized)
-        .limit(1)
-    )
+    return db.scalar(select(Workshop).where(func.lower(Workshop.name) == normalized).limit(1))
 
 
-def create_confirmed_workshops(db: Session, proposal: Proposal, customer: Customer) -> list[str]:
-    created_or_linked: list[str] = []
+def _get_or_create_workshop(
+    db: Session,
+    name: str,
+    specialties: list[str] | None = None,
+    contact_name: str | None = None,
+    phone: str | None = None,
+    email: str | None = None,
+    notes: str | None = None,
+) -> Workshop:
+    clean_name = name.strip()
+    ensure(bool(clean_name), "Workshop-Name fehlt.")
+    workshop = _find_existing_workshop(db, clean_name)
+    if workshop is None:
+        workshop = Workshop(
+            name=clean_name,
+            contact_name=contact_name,
+            phone=phone,
+            email=email,
+            specialties_json=json_dumps(_dedupe_strings([str(value) for value in specialties or []])),
+            notes=notes,
+            is_active=True,
+        )
+        db.add(workshop)
+        db.flush()
+    else:
+        known_specialties = _dedupe_strings([str(value) for value in json_loads(workshop.specialties_json, [])])
+        merged_specialties = _dedupe_strings([*known_specialties, *[str(value) for value in specialties or []]])
+        if merged_specialties != known_specialties:
+            workshop.specialties_json = json_dumps(merged_specialties)
+        workshop.contact_name = workshop.contact_name or contact_name
+        workshop.phone = workshop.phone or phone
+        workshop.email = workshop.email or email
+        workshop.notes = workshop.notes or notes
+        db.flush()
+    return workshop
+
+
+def create_confirmed_workshops(db: Session, proposal: Proposal, customer: Customer | None = None) -> dict[str, str]:
+    created_or_linked: dict[str, str] = {}
     for workshop_data in proposal_external_workshops(proposal):
         name = str(workshop_data.get("name") or "").strip()
         if not name:
             continue
-        workshop = _find_existing_workshop(db, customer.id, name)
-        if workshop is None:
-            workshop = CustomerWorkshop(
-                customer_id=customer.id,
-                name=name,
-                contact_name=workshop_data.get("contactName"),
-                phone=workshop_data.get("phone"),
-                email=workshop_data.get("email"),
-                specialties_json=json_dumps(_dedupe_strings([str(value) for value in workshop_data.get("specialties") or []])),
-                notes=workshop_data.get("notes"),
-                relationship_status=workshop_data.get("relationshipStatus") or "known",
-                is_active=True,
-            )
-            db.add(workshop)
-            db.flush()
-        created_or_linked.append(workshop.id)
+        workshop = _get_or_create_workshop(
+            db,
+            name,
+            specialties=[str(value) for value in workshop_data.get("specialties") or []],
+            contact_name=workshop_data.get("contactName"),
+            phone=workshop_data.get("phone"),
+            email=workshop_data.get("email"),
+            notes=workshop_data.get("notes"),
+        )
+        created_or_linked[name.lower()] = workshop.id
     return created_or_linked
 
 
@@ -1772,13 +1811,15 @@ def calculate_price_from_assignments(
     manual_estimated_price: float | None = None,
 ) -> Decimal:
     if manual_estimated_price is not None:
-        return Decimal(str(manual_estimated_price))
+        return Decimal(str(manual_estimated_price)).quantize(Decimal("0.01"))
 
     sites = proposal_sites(proposal)
     total_hours = float(proposal.estimated_hours or 0)
     fallback_hours = (total_hours / max(len(sites), 1)) if total_hours else 8.0
     total_price = Decimal("0")
 
+    # Legacy compatibility: if old employee selections are still supplied, keep the previous
+    # price preview behavior. The visible product flow no longer creates these selections.
     for site_index, site in enumerate(sites):
         selected_employee_ids = list(dict.fromkeys(site_assignments.get(site_index, [])))
         if not selected_employee_ids:
@@ -1796,11 +1837,11 @@ def calculate_price_from_assignments(
         average_rate = sum(rates, Decimal("0")) / Decimal(str(len(rates)))
         total_price += average_rate * Decimal(str(_site_hours(site, fallback_hours)))
 
-    if total_price == Decimal("0"):
-        if proposal.estimated_price is not None:
-            return Decimal(str(proposal.estimated_price)).quantize(Decimal("0.01"))
-        return Decimal("0.00")
-    return total_price.quantize(Decimal("0.01"))
+    if total_price != Decimal("0"):
+        return total_price.quantize(Decimal("0.01"))
+    if proposal.estimated_price is not None:
+        return Decimal(str(proposal.estimated_price)).quantize(Decimal("0.01"))
+    return Decimal("0.00")
 
 
 def confirm_proposal(
@@ -1850,27 +1891,24 @@ def confirm_proposal(
     db.add(order)
     db.flush()
 
-    workshop_ids = create_confirmed_workshops(db, proposal, customer)
+    workshop_by_name = create_confirmed_workshops(db, proposal, customer)
 
     created_site_ids: list[str] = []
+    created_workshop_ids: set[str] = set(workshop_by_name.values())
     for index, site_data in enumerate(sites):
-        selected_employee_ids = list(dict.fromkeys(site_assignments.get(index, [])))
-        coverage_type = str(site_data.get("coverageType") or "internal_only").strip().lower()
-        try:
-            selected_internal_headcount = int(site_data.get("selectedInternalHeadcount"))
-        except (TypeError, ValueError):
-            selected_internal_headcount = None
-        allow_empty_staffing = coverage_type == "workshop_only" or selected_internal_headcount == 0
-        ensure(bool(selected_employee_ids) or allow_empty_staffing, f"Bitte mindestens einen Mitarbeiter fuer Baustelle {index + 1} auswaehlen.")
-
+        coverage_type = str(site_data.get("coverageType") or "workshop_only").strip().lower()
         workshop_name = str(site_data.get("assignedWorkshopName") or "").strip()
         workshop_covered_skills = [str(value).strip() for value in site_data.get("workshopCoveredSkills") or [] if str(value).strip()]
+        required_skills = [str(value).strip() for value in site_data.get("requiredSkills") or [] if str(value).strip()]
         site_notes = site_data.get("notes")
         if workshop_name:
-            staffing_note = f"Workshop: {workshop_name} | Coverage: {coverage_type}"
+            workshop_note = f"Workshop: {workshop_name} | Coverage: {coverage_type}"
             if workshop_covered_skills:
-                staffing_note += f" | Covered skills: {', '.join(workshop_covered_skills)}"
-            site_notes = f"{site_notes}\n\n{staffing_note}" if site_notes else staffing_note
+                workshop_note += f" | Covered trades: {', '.join(workshop_covered_skills)}"
+            site_notes = f"{site_notes}\n\n{workshop_note}" if site_notes else workshop_note
+        elif coverage_type == "workshop_only":
+            missing_note = "Workshop needed / to be selected."
+            site_notes = f"{site_notes}\n\n{missing_note}" if site_notes else missing_note
 
         site = Site(
             order_id=order.id,
@@ -1885,18 +1923,21 @@ def confirm_proposal(
         db.flush()
         created_site_ids.append(site.id)
 
-        for employee_id in selected_employee_ids:
-            employee = db.get(Employee, employee_id)
-            if not employee:
-                raise HTTPException(status_code=404, detail="Ausgewaehlter Mitarbeiter nicht gefunden.")
-            assignment = EmployeeAssignment(
-                employee_id=employee_id,
-                site_id=site.id,
-                start_date=proposal.preferred_start_date,
-                end_date=proposal.preferred_end_date,
-                notes=f"KI-Vorschlag {proposal.id}",
+        if workshop_name:
+            workshop = _find_existing_workshop(db, workshop_name)
+            if workshop is None:
+                workshop = _get_or_create_workshop(db, workshop_name, specialties=workshop_covered_skills or required_skills)
+            created_workshop_ids.add(workshop.id)
+            db.add(
+                WorkshopSiteAssignment(
+                    order_id=order.id,
+                    site_id=site.id,
+                    workshop_id=workshop.id,
+                    covered_skills_json=json_dumps(_dedupe_strings(workshop_covered_skills or required_skills)),
+                    status="assigned",
+                    notes=f"Created from AI proposal {proposal.id}",
+                )
             )
-            db.add(assignment)
 
     payment_record_ids = create_confirmed_payment_records(db, proposal, customer, order, payment_drafts=payment_drafts)
 
@@ -1916,7 +1957,7 @@ def confirm_proposal(
         "customerId": customer.id,
         "orderId": order.id,
         "siteIds": created_site_ids,
-        "workshopIds": workshop_ids,
+        "workshopIds": sorted(created_workshop_ids),
         "paymentRecordIds": payment_record_ids,
         "estimatedPrice": proposal.estimated_price,
         "currency": proposal.currency,

@@ -13,12 +13,9 @@ export function AppHeader() {
     { href: '/customers', label: messages.nav.customers },
     { href: '/orders', label: messages.nav.orders },
     { href: '/sites', label: messages.nav.sites },
-    { href: '/employees', label: messages.nav.employees },
-    { href: '/work-entries', label: messages.nav.workEntries },
-    { href: '/stundentabelle', label: messages.nav.timesheets },
+    { href: '/workshops', label: messages.nav.workshops },
     { href: '/invoices/drafts', label: messages.nav.invoiceDrafts },
     { href: '/invoices', label: messages.nav.invoices },
-    { href: '/reports/hours', label: messages.nav.hoursReport },
     { href: '/ai-intake', label: messages.nav.aiIntake },
   ];
 

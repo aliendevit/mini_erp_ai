@@ -1,4 +1,4 @@
-'use client';
+﻿'use client';
 
 import Link from 'next/link';
 import { useEffect, useMemo, useRef, useState } from 'react';
@@ -78,6 +78,8 @@ type WorkshopRecommendation = {
   score: number;
   matchedSkills: string[];
   relationshipStatus?: string | null;
+  availabilityStatus?: string | null;
+  availabilityNote?: string | null;
   reason?: string | null;
   notes?: string | null;
 };
@@ -288,26 +290,26 @@ function extraLabels(locale: string) {
       ],
       hiddenMemoryClear: "\u062d\u0630\u0641 \u0627\u0644\u0645\u062d\u0627\u062f\u062b\u0629 \u064a\u0645\u0633\u062d \u0647\u0630\u0647 \u0627\u0644\u0645\u062d\u0627\u062f\u062b\u0629 \u0641\u0642\u0637.",
       staffingCoverage: "\u062a\u063a\u0637\u064a\u0629 \u0627\u0644\u062a\u0646\u0641\u064a\u0630",
-      internalOnly: "\u0645\u0648\u0638\u0641\u0648\u0646 \u062f\u0627\u062e\u0644\u064a\u0648\u0646 \u0641\u0642\u0637",
-      mixedWithWorkshop: "\u0648\u0631\u0634\u0629 + \u0645\u0648\u0638\u0641\u0648\u0646 \u062f\u0627\u062e\u0644\u064a\u0648\u0646",
+      internalOnly: "\u0648\u0631\u0634\u0629 \u063a\u064a\u0631 \u0645\u062d\u062f\u062f\u0629",
+      mixedWithWorkshop: "\u062a\u0648\u0632\u064a\u0639 \u0639\u0644\u0649 \u0623\u0643\u062b\u0631 \u0645\u0646 \u0648\u0631\u0634\u0629",
       workshopOnly: "\u0648\u0631\u0634\u0629 \u0641\u0642\u0637",
       assignedWorkshop: "\u0627\u0644\u0648\u0631\u0634\u0629 \u0627\u0644\u0645\u0639\u062a\u0645\u062f\u0629",
       noWorkshop: "\u0628\u062f\u0648\u0646 \u0648\u0631\u0634\u0629",
       workshopCoveredSkills: "\u0627\u0644\u0645\u0647\u0627\u0631\u0627\u062a \u0627\u0644\u062a\u064a \u062a\u063a\u0637\u064a\u0647\u0627 \u0627\u0644\u0648\u0631\u0634\u0629",
-      internalSkillsRemaining: "\u0627\u0644\u0645\u0647\u0627\u0631\u0627\u062a \u0627\u0644\u062f\u0627\u062e\u0644\u064a\u0629 \u0627\u0644\u0645\u062a\u0628\u0642\u064a\u0629",
-      aiRecommendedCount: "\u0639\u062f\u062f \u0627\u0644\u0645\u0648\u0638\u0641\u064a\u0646 \u0627\u0644\u0645\u0642\u062a\u0631\u062d \u0645\u0646 \u0627\u0644\u0630\u0643\u0627\u0621",
-      selectedInternalCount: "\u0639\u062f\u062f \u0627\u0644\u0645\u0648\u0638\u0641\u064a\u0646 \u0627\u0644\u062f\u0627\u062e\u0644\u064a\u064a\u0646 \u0627\u0644\u0646\u0647\u0627\u0626\u064a",
+      internalSkillsRemaining: "\u0627\u0644\u0645\u0647\u0646 \u0627\u0644\u0645\u0637\u0644\u0648\u0628\u0629",
+      aiRecommendedCount: "\u0645\u0631\u0627\u062c\u0639\u0629 \u0627\u0644\u0648\u0631\u0634",
+      selectedInternalCount: "\u0627\u0644\u062a\u0646\u0641\u064a\u0630 \u0639\u0628\u0631 \u0627\u0644\u0648\u0631\u0634",
       selectedTeam: "\u0627\u0644\u0641\u0631\u064a\u0642 \u0627\u0644\u0645\u062e\u062a\u0627\u0631",
-      changeEmployees: "\u062a\u0639\u062f\u064a\u0644 \u0627\u0644\u0645\u0648\u0638\u0641\u064a\u0646",
-      hideEmployees: "\u0625\u062e\u0641\u0627\u0621 \u0627\u0644\u0645\u0648\u0638\u0641\u064a\u0646",
-      noSelectedEmployees: "\u0644\u0627 \u064a\u0648\u062c\u062f \u0645\u0648\u0638\u0641\u0648\u0646 \u062f\u0627\u062e\u0644\u064a\u0648\u0646 \u0645\u062d\u062f\u062f\u0648\u0646 \u0628\u0639\u062f.",
-      noInternalEmployeesNeeded: "\u0644\u0627 \u064a\u0644\u0632\u0645 \u0645\u0648\u0638\u0641\u0648\u0646 \u062f\u0627\u062e\u0644\u064a\u0648\u0646 \u062d\u0627\u0644\u064a\u064b\u0627.",
-      staffingCardDesc: "\u0627\u062e\u062a\u0631 \u0627\u0644\u0648\u0631\u0634\u0629 \u0625\u0646 \u0644\u0632\u0645\u060c \u062b\u0645 \u062b\u0628\u062a \u0639\u062f\u062f \u0627\u0644\u0645\u0648\u0638\u0641\u064a\u0646 \u0627\u0644\u062f\u0627\u062e\u0644\u064a\u064a\u0646 \u0648\u0633\u064a\u062a\u0645 \u062a\u062d\u062f\u064a\u062f \u0623\u0641\u0636\u0644 \u0627\u0644\u0623\u0633\u0645\u0627\u0621 \u062a\u0644\u0642\u0627\u0626\u064a\u064b\u0627.",
+      changeEmployees: "\u062a\u0639\u062f\u064a\u0644 \u0627\u0644\u0648\u0631\u0634\u0629",
+      hideEmployees: "\u0625\u062e\u0641\u0627\u0621 \u062a\u0641\u0627\u0635\u064a\u0644 \u0627\u0644\u0648\u0631\u0634\u0629",
+      noSelectedEmployees: "\u0644\u0627 \u064a\u0648\u062c\u062f \u0627\u062e\u062a\u064a\u0627\u0631 \u0645\u0648\u0638\u0641\u064a\u0646 \u062f\u0627\u062e\u0644\u064a\u064a\u0646 \u0641\u064a \u0647\u0630\u0627 \u0627\u0644\u062a\u062f\u0641\u0642.",
+      noInternalEmployeesNeeded: "\u0627\u0644\u062a\u0646\u0641\u064a\u0630 \u0639\u0628\u0631 \u0627\u0644\u0648\u0631\u0634 \u0641\u0642\u0637.",
+      staffingCardDesc: "\u0627\u062e\u062a\u0631 \u0627\u0644\u0648\u0631\u0634\u0629 \u0648\u062d\u062f\u062f \u0627\u0644\u0645\u0647\u0646 \u0627\u0644\u062a\u064a \u062a\u063a\u0637\u064a\u0647\u0627.",
       workshopSuggestionsCompact: "\u0627\u0642\u062a\u0631\u0627\u062d\u0627\u062a \u0627\u0644\u0648\u0631\u0634 \u0644\u0647\u0630\u0647 \u0627\u0644\u0645\u0648\u0642\u0639",
-      alternativeEmployees: "\u0627\u0644\u0645\u0648\u0638\u0641\u0648\u0646 \u0627\u0644\u0628\u062f\u0644\u0627\u0621 \u0648\u0627\u0644\u0623\u0633\u0628\u0627\u0628",
+      alternativeEmployees: "\u0648\u0631\u0634 \u0628\u062f\u064a\u0644\u0629",
       explainRecommendation: "\u0644\u0645\u0627\u0630\u0627 \u0647\u0630\u0627 \u0627\u0644\u0639\u062f\u062f\u061f",
       explainingRecommendationButton: "\u062c\u0627\u0631\u064a \u062a\u062d\u0644\u064a\u0644 \u0627\u0644\u0633\u0628\u0628...",
-      explanationTitle: "\u0634\u0631\u062d \u0627\u0642\u062a\u0631\u0627\u062d \u0627\u0644\u0639\u062f\u062f",
+      explanationTitle: "\u0634\u0631\u062d \u0642\u0631\u0627\u0631 \u0627\u0644\u0648\u0631\u0634\u0629",
       explanationStreaming: "\u062c\u0627\u0631\u064a \u062a\u0648\u0644\u064a\u062f \u0634\u0631\u062d \u0627\u0644\u0642\u0631\u0627\u0631...",
       explanationFailed: "\u062a\u0639\u0630\u0631 \u0625\u0646\u0634\u0627\u0621 \u0634\u0631\u062d \u0627\u0644\u0627\u0642\u062a\u0631\u0627\u062d.",
       explanationEmpty: "\u0644\u0627 \u064a\u0648\u062c\u062f \u0634\u0631\u062d \u0645\u062a\u0627\u062d \u0628\u0639\u062f.",
@@ -356,26 +358,26 @@ function extraLabels(locale: string) {
       ],
       hiddenMemoryClear: 'Clearing removes only the current conversation.',
       staffingCoverage: 'Execution coverage',
-      internalOnly: 'Internal employees only',
-      mixedWithWorkshop: 'Workshop + internal employees',
+      internalOnly: 'Workshop needed',
+      mixedWithWorkshop: 'Split between workshops',
       workshopOnly: 'Workshop only',
       assignedWorkshop: 'Assigned workshop',
       noWorkshop: 'No workshop',
       workshopCoveredSkills: 'Workshop-covered skills',
       internalSkillsRemaining: 'Remaining internal skills',
       aiRecommendedCount: 'AI-recommended internal count',
-      selectedInternalCount: 'Final internal employee count',
+      selectedInternalCount: 'Internal count disabled',
       selectedTeam: 'Selected team',
       changeEmployees: 'Change employees',
       hideEmployees: 'Hide employee list',
-      noSelectedEmployees: 'No internal employees selected yet.',
-      noInternalEmployeesNeeded: 'No internal employees are currently required.',
-      staffingCardDesc: 'Choose a workshop if needed, then confirm the internal employee count and the top candidates will be checked automatically.',
+      noSelectedEmployees: 'Workshop-only execution workflow.',
+      noInternalEmployeesNeeded: 'Workshop-only execution selected.',
+      staffingCardDesc: 'Choose the workshop partner and confirm which trades it covers.',
       workshopSuggestionsCompact: 'Workshop suggestions for this site',
       alternativeEmployees: 'Alternatives and excluded employees',
       explainRecommendation: 'Why this count?',
       explainingRecommendationButton: 'Explaining recommendation...',
-      explanationTitle: 'Recommended count explanation',
+      explanationTitle: 'Workshop decision explanation',
       explanationStreaming: 'Generating the decision explanation...',
       explanationFailed: 'Could not generate the recommendation explanation.',
       explanationEmpty: 'No explanation is available yet.',
@@ -408,9 +410,9 @@ function extraLabels(locale: string) {
     proposalGenerated: 'Vorschlag wurde erzeugt. Du kannst ihn jetzt pruefen und bearbeiten.',
     proposalGenerationFailed: 'Vorschlag konnte nicht erzeugt werden. Fehler pruefen und erneut versuchen.',
     recommendationCalculatingButton: 'Vorschlaege werden berechnet...',
-    recommendationCalculating: 'Mitarbeitervorschlaege werden berechnet und Skills sowie Kapazitaet geprueft.',
-    recommendationCalculated: 'Die Mitarbeitervorschlaege sind bereit. Baustellenkarten pruefen und Team bei Bedarf anpassen.',
-    recommendationCalculationFailed: 'Die Mitarbeitervorschlaege konnten nicht berechnet werden. Daten pruefen und erneut versuchen.',
+    recommendationCalculating: 'Workshop-Abdeckung wird geprueft.',
+    recommendationCalculated: 'Die Workshop-Pruefung ist bereit. Baustellenkarten pruefen und Partner zuordnen.',
+    recommendationCalculationFailed: 'Die Workshop-Pruefung konnte nicht berechnet werden. Daten pruefen und erneut versuchen.',
     proposalProgressSteps: [
       'Konversation wird analysiert...',
       'Projektfakten und Baustellen werden extrahiert...',
@@ -423,26 +425,26 @@ function extraLabels(locale: string) {
     ],
     hiddenMemoryClear: 'Loeschen entfernt nur die aktuelle Konversation.',
     staffingCoverage: 'Abdeckungsmodus',
-    internalOnly: 'Nur interne Mitarbeiter',
-    mixedWithWorkshop: 'Workshop + interne Mitarbeiter',
+    internalOnly: 'Workshop offen',
+    mixedWithWorkshop: 'Auf mehrere Workshops aufgeteilt',
     workshopOnly: 'Nur Workshop',
     assignedWorkshop: 'Zugeordneter Workshop',
     noWorkshop: 'Kein Workshop',
     workshopCoveredSkills: 'Vom Workshop abgedeckte Skills',
     internalSkillsRemaining: 'Verbleibende interne Skills',
-    aiRecommendedCount: 'KI-Empfehlung interne Mitarbeiter',
-    selectedInternalCount: 'Finale Anzahl interner Mitarbeiter',
+    aiRecommendedCount: 'Workshop-Pruefung',
+    selectedInternalCount: 'Interne Anzahl deaktiviert',
     selectedTeam: 'Ausgewaehltes Team',
-    changeEmployees: 'Mitarbeiter anpassen',
-    hideEmployees: 'Mitarbeiterliste ausblenden',
-    noSelectedEmployees: 'Noch keine internen Mitarbeiter ausgewaehlt.',
-    noInternalEmployeesNeeded: 'Aktuell werden keine internen Mitarbeiter benoetigt.',
-    staffingCardDesc: 'Workshop bei Bedarf waehlen, interne Mitarbeiterzahl festlegen und die besten Namen werden automatisch markiert.',
+    changeEmployees: 'Workshop anpassen',
+    hideEmployees: 'Workshopdetails ausblenden',
+    noSelectedEmployees: 'Keine interne Mitarbeiterauswahl in diesem Ablauf.',
+    noInternalEmployeesNeeded: 'Ausfuehrung ueber Workshops.',
+    staffingCardDesc: 'Workshop-Partner waehlen und abgedeckte Gewerke festlegen.',
     workshopSuggestionsCompact: 'Workshop-Vorschlaege fuer diese Baustelle',
-    alternativeEmployees: 'Alternativen und ausgeschlossene Mitarbeiter',
+    alternativeEmployees: 'Alternative Workshops',
     explainRecommendation: 'Warum diese Anzahl?',
     explainingRecommendationButton: 'Erklaerung wird erstellt...',
-    explanationTitle: 'Erklaerung der empfohlenen Anzahl',
+    explanationTitle: 'Erklaerung der Workshop-Entscheidung',
     explanationStreaming: 'Entscheidungserklaerung wird erzeugt...',
     explanationFailed: 'Die Erklaerung zur Empfehlung konnte nicht erzeugt werden.',
     explanationEmpty: 'Noch keine Erklaerung verfuegbar.',
@@ -467,9 +469,8 @@ function normalizeCoverageType(
 ): ProposalCoverageType {
   const normalized = String(value || '').trim().toLowerCase();
   const hasWorkshop = Boolean((assignedWorkshopName || '').trim());
-  if (!hasWorkshop) return 'internal_only';
-  if (normalized === 'workshop_only') return 'workshop_only';
-  return 'mixed_with_workshop';
+  if (normalized === 'mixed_with_workshop') return 'mixed_with_workshop';
+  return 'workshop_only';
 }
 
 function normalizeProposalSite(site?: Partial<ProposalSite> | null): ProposalSite {
@@ -1478,10 +1479,7 @@ export default function AIIntakePage() {
           existingCustomerId: existingCustomerId || null,
           manualEstimatedPrice:
             draft.estimatedPrice === '' || draft.estimatedPrice == null ? null : Number(draft.estimatedPrice),
-          siteAssignments: Object.entries(siteSelections).map(([siteIndex, employeeIds]) => ({
-            siteIndex: Number(siteIndex),
-            employeeIds,
-          })),
+          siteAssignments: [],
           paymentDrafts: (draft.paymentDrafts || []).map((payment) => ({
             ...payment,
             amount: payment.amount === '' || payment.amount == null ? null : Number(payment.amount),
@@ -1517,7 +1515,7 @@ export default function AIIntakePage() {
           estimatedHours: null,
           recommendedHeadcount: null,
           selectedInternalHeadcount: null,
-          coverageType: 'internal_only',
+          coverageType: 'workshop_only',
         }),
       ],
     }));
@@ -1688,46 +1686,30 @@ export default function AIIntakePage() {
   }
 
   function updateAssignedWorkshop(siteIndex: number, workshopName: string) {
-    const recommendationSite = recommendationSiteMap.get(siteIndex);
     const currentSite = normalizeProposalSite((draft.proposedSites || [])[siteIndex]);
     const normalizedWorkshop = workshopName.trim();
     if (!normalizedWorkshop) {
       updateSite(siteIndex, {
         assignedWorkshopName: '',
         workshopCoveredSkills: [],
-        coverageType: 'internal_only',
+        coverageType: 'workshop_only',
       });
-      if ((currentSite.selectedInternalHeadcount ?? 0) === 0) {
-        autoSelectEmployeesForSite(siteIndex, recommendationSite?.recommendedHeadcount ?? currentSite.recommendedHeadcount ?? 1);
-      }
       return;
     }
     const matchedWorkshop = workshopOptionsForSite(siteIndex).find((item) => item.name === normalizedWorkshop);
     const coveredSkills = currentSite.workshopCoveredSkills.length
       ? currentSite.workshopCoveredSkills
-      : matchedWorkshop?.matchedSkills || [];
-    const nextCoverageType = currentSite.coverageType === 'workshop_only' ? 'workshop_only' : 'mixed_with_workshop';
+      : matchedWorkshop?.matchedSkills || currentSite.requiredSkills || [];
     updateSite(siteIndex, {
       assignedWorkshopName: normalizedWorkshop,
-      coverageType: nextCoverageType,
+      coverageType: currentSite.coverageType === 'mixed_with_workshop' ? 'mixed_with_workshop' : 'workshop_only',
       workshopCoveredSkills: coveredSkills,
+      selectedInternalHeadcount: 0,
     });
-    if (nextCoverageType === 'workshop_only') {
-      autoSelectEmployeesForSite(siteIndex, 0);
-    }
   }
 
   function updateSiteCoverageType(siteIndex: number, coverageType: ProposalCoverageType) {
-    updateSite(siteIndex, { coverageType });
-    if (coverageType === 'workshop_only') {
-      autoSelectEmployeesForSite(siteIndex, 0);
-      return;
-    }
-    const currentSite = normalizeProposalSite((draft.proposedSites || [])[siteIndex]);
-    const nextHeadcount = currentSite.selectedInternalHeadcount ?? recommendationSiteMap.get(siteIndex)?.selectedInternalHeadcount ?? currentSite.recommendedHeadcount ?? 1;
-    if (nextHeadcount <= 0) {
-      autoSelectEmployeesForSite(siteIndex, recommendationSiteMap.get(siteIndex)?.recommendedHeadcount ?? 1);
-    }
+    updateSite(siteIndex, { coverageType, selectedInternalHeadcount: 0 });
   }
 
   function selectedEmployeesForSite(site: RecommendationSite): RecommendationEmployee[] {
@@ -2177,20 +2159,7 @@ export default function AIIntakePage() {
                       }
                     />
                   </div>
-                  <div>
-                    <label>{x.aiRecommendedCount}</label>
-                    <input
-                      type="number"
-                      min={0}
-                      placeholder={notMentioned}
-                      value={site.recommendedHeadcount ?? ''}
-                      onChange={(event) =>
-                        updateSite(index, {
-                          recommendedHeadcount: event.target.value ? Number(event.target.value) : null,
-                        })
-                      }
-                    />
-                  </div>
+
                 </div>
                 <div className="spacer" />
                 <div className="row">
@@ -2212,9 +2181,8 @@ export default function AIIntakePage() {
                         })
                       }
                     >
-                      <option value="internal_only">{x.internalOnly}</option>
-                      <option value="mixed_with_workshop">{x.mixedWithWorkshop}</option>
                       <option value="workshop_only">{x.workshopOnly}</option>
+                      <option value="mixed_with_workshop">{x.mixedWithWorkshop}</option>
                     </select>
                   </div>
                   <div>
@@ -2372,11 +2340,11 @@ export default function AIIntakePage() {
         <div className="card">
           <div style={{ display: 'flex', justifyContent: 'space-between', gap: 8, flexWrap: 'wrap' }}>
             <div>
-              <h2>{m.aiIntakePage.recommendations}</h2>
-              <div className="muted">{m.aiIntakePage.recommendationsDesc}</div>
+              <h2>Workshop execution review</h2>
+              <div className="muted">Review required trades, assigned workshops, and missing workshop decisions per site. This flow uses workshop partners only.</div>
             </div>
             <button className="btn primary" onClick={recommendAssignments} disabled={!selectedId || interactionLocked}>
-              {recommendationStatus === 'running' ? x.recommendationCalculatingButton : m.aiIntakePage.calculateRecommendations}
+              {recommendationStatus === 'running' ? x.recommendationCalculatingButton : 'Review workshops'}
             </button>
           </div>
 
@@ -2395,231 +2363,118 @@ export default function AIIntakePage() {
                         : 'rgba(96,165,250,0.45)',
                 }}
               >
-                {recommendationStatus === 'running' && x.recommendationProgressSteps[recommendationProgressStep % x.recommendationProgressSteps.length]}
-                {recommendationStatus === 'done' && x.recommendationCalculated}
-                {recommendationStatus === 'error' && x.recommendationCalculationFailed}
+                {recommendationStatus === 'running' && 'Reviewing site trades and workshop coverage...'}
+                {recommendationStatus === 'done' && 'Workshop review is ready. Check missing assignments before confirming.'}
+                {recommendationStatus === 'error' && 'Workshop review could not be calculated.'}
               </div>
             </>
           )}
 
-          {recommendations ? (
-            <>
-              <div className="spacer" />
-              <div className="muted">
-                {m.aiIntakePage.timeframe}: {recommendations.window.startDate.substring(0, 10)} -{' '}
-                {recommendations.window.endDate.substring(0, 10)} ({recommendations.window.weeks} {m.aiIntakePage.weeksUnit})
-              </div>
-              {recommendations.pricePreview != null && (
-                <div className="muted">
-                  {m.aiIntakePage.pricePreview}: {recommendations.pricePreview} {recommendations.currency || 'EUR'}
-                </div>
-              )}
-              <div className="spacer" />
-              <div style={{ display: 'grid', gap: 12 }}>
-                {recommendations.sites.map((site) => {
-                  const siteDraft = normalizeProposalSite((draft.proposedSites || [])[site.siteIndex]);
-                  const selectedEmployees = selectedEmployeesForSite(site);
-                  const hasWorkshop = Boolean((siteDraft.assignedWorkshopName || '').trim());
-                  const coverageType = normalizeCoverageType(siteDraft.coverageType || site.coverageType, siteDraft.assignedWorkshopName);
-                  const selectedHeadcount = siteDraft.selectedInternalHeadcount ?? site.selectedInternalHeadcount ?? 0;
-                  const workshopOptions = workshopOptionsForSite(site.siteIndex);
-                  const employeeListExpanded = Boolean(expandedEmployeeSites[site.siteIndex]);
+          <div className="spacer" />
+          <div style={{ display: 'grid', gap: 12 }}>
+            {(recommendations?.sites || (draft.proposedSites || []).map((site, index) => ({
+              siteIndex: index,
+              siteName: site.siteName || `${m.common.site} ${index + 1}`,
+              estimatedHours: Number(site.estimatedHours || 0),
+              requiredSkills: site.requiredSkills || [],
+              workshopRecommendations: [],
+              coverageType: site.assignedWorkshopName ? 'workshop_only' : 'workshop_only',
+              staffingWarning: !site.assignedWorkshopName ? 'No workshop is assigned yet.' : null,
+              coverageNote: site.assignedWorkshopName ? 'Workshop assigned for this site.' : 'Workshop needed / to be selected.',
+            }))).map((site) => {
+              const siteDraft = normalizeProposalSite((draft.proposedSites || [])[site.siteIndex]);
+              const workshopOptions = workshopOptionsForSite(site.siteIndex);
+              const hasWorkshop = Boolean((siteDraft.assignedWorkshopName || '').trim());
+              const coverageType = normalizeCoverageType(siteDraft.coverageType || site.coverageType, siteDraft.assignedWorkshopName);
 
-                  return (
-                    <div key={site.siteIndex} className="card">
-                      <div style={{ display: 'flex', justifyContent: 'space-between', gap: 8, flexWrap: 'wrap' }}>
-                        <div>
-                          <div style={{ fontWeight: 700 }}>{site.siteName}</div>
-                          <div className="muted">{x.staffingCardDesc}</div>
-                        </div>
-                        <div className="muted">{m.common.hours}: {site.estimatedHours}</div>
-                      </div>
-
-                      <div className="spacer" />
-                      <div className="row">
-                        <div>
-                          <label>{x.assignedWorkshop}</label>
-                          <select
-                            value={siteDraft.assignedWorkshopName || ''}
-                            onChange={(event) => updateAssignedWorkshop(site.siteIndex, event.target.value)}
-                          >
-                            <option value="">{x.noWorkshop}</option>
-                            {workshopOptions.map((workshop, index) => (
-                              <option key={`${workshop.kind}-${workshop.workshopId || workshop.draftIndex || index}`} value={workshop.name}>
-                                {workshop.name}
-                              </option>
-                            ))}
-                          </select>
-                        </div>
-                        <div>
-                          <label>{x.staffingCoverage}</label>
-                          <select
-                            value={coverageType}
-                            disabled={!hasWorkshop}
-                            onChange={(event) => updateSiteCoverageType(site.siteIndex, event.target.value as ProposalCoverageType)}
-                          >
-                            {!hasWorkshop && <option value="internal_only">{x.internalOnly}</option>}
-                            {hasWorkshop && <option value="mixed_with_workshop">{x.mixedWithWorkshop}</option>}
-                            {hasWorkshop && <option value="workshop_only">{x.workshopOnly}</option>}
-                          </select>
-                        </div>
-                        <div>
-                          <label>{x.workshopCoveredSkills}</label>
-                          <textarea
-                            placeholder={notMentioned}
-                            value={listText(siteDraft.workshopCoveredSkills)}
-                            disabled={!hasWorkshop}
-                            onChange={(event) => updateSite(site.siteIndex, { workshopCoveredSkills: parseList(event.target.value) })}
-                          />
-                        </div>
-                        <div>
-                          <label>{x.selectedInternalCount}</label>
-                          <input
-                            type="number"
-                            min={0}
-                            placeholder={notMentioned}
-                            value={selectedHeadcount}
-                            onChange={(event) => autoSelectEmployeesForSite(site.siteIndex, event.target.value ? Number(event.target.value) : 0)}
-                          />
-                        </div>
-                      </div>
-
-                      <div className="spacer" />
-                      <div className="row">
-                        <div>
-                          <label>{x.aiRecommendedCount}</label>
-                          <input placeholder={notMentioned} value={site.recommendedHeadcount} disabled />
-                        </div>
-                        <div>
-                          <label>{x.internalSkillsRemaining}</label>
-                          <div className="card" style={{ minHeight: 54 }}>
-                            {Array.isArray(site.internalRequiredSkills) && site.internalRequiredSkills.length > 0 ? listText(site.internalRequiredSkills) : (selectedHeadcount === 0 ? x.noInternalEmployeesNeeded : notMentioned)}
-                          </div>
-                        </div>
-                        <div>
-                          <label>{x.selectedTeam}</label>
-                          <div className="card" style={{ minHeight: 54 }}>
-                            {selectedEmployees.length > 0
-                              ? selectedEmployees.map((employee) => employee.employeeName).join(', ')
-                              : selectedHeadcount === 0
-                                ? x.noInternalEmployeesNeeded
-                                : x.noSelectedEmployees}
-                          </div>
-                        </div>
-                      </div>
-
-                      {site.coverageNote && (
-                        <>
-                          <div className="spacer" />
-                          <div className="muted">{site.coverageNote}</div>
-                        </>
-                      )}
-                      {site.staffingWarning && (
-                        <>
-                          <div className="spacer" />
-                          <div className="card" style={{ borderColor: 'rgba(245,158,11,0.45)' }}>{site.staffingWarning}</div>
-                        </>
-                      )}
-                      {workshopOptions.length > 0 && (
-                        <>
-                          <div className="spacer" />
-                          <div className="card">
-                            <div style={{ fontWeight: 700 }}>{x.workshopSuggestionsCompact}</div>
-                            <div className="muted" style={{ whiteSpace: 'pre-wrap' }}>
-                              {workshopOptions
-                                .map((workshop) => `${workshop.name}${workshop.matchedSkills.length ? ` (${listText(workshop.matchedSkills)})` : ''}`)
-                                .join(' ? ')}
-                            </div>
-                          </div>
-                        </>
-                      )}
-
-                      <div className="spacer" />
-                      <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-                        <button
-                          className="btn"
-                          onClick={() => explainRecommendation(site.siteIndex, site.siteName)}
-                          disabled={explanationStatus === 'running' && explanationSite?.siteIndex === site.siteIndex}
-                        >
-                          {explanationStatus === 'running' && explanationSite?.siteIndex === site.siteIndex
-                            ? x.explainingRecommendationButton
-                            : x.explainRecommendation}
-                        </button>
-                        <button className="btn" onClick={() => toggleEmployeeList(site.siteIndex)}>
-                          {employeeListExpanded ? x.hideEmployees : x.changeEmployees}
-                        </button>
-                      </div>
-
-                      {employeeListExpanded && (
-                        <>
-                          <div className="spacer" />
-                          <table className="table">
-                            <thead>
-                              <tr>
-                                <th>{m.aiIntakePage.select}</th>
-                                <th>{m.common.employee}</th>
-                                <th>{m.aiIntakePage.score}</th>
-                                <th>{m.aiIntakePage.reason}</th>
-                                <th>{m.aiIntakePage.capacity}</th>
-                              </tr>
-                            </thead>
-                            <tbody>
-                              {site.recommendations.map((employee) => (
-                                <tr key={employee.employeeId}>
-                                  <td>
-                                    <input
-                                      type="checkbox"
-                                      checked={(siteSelections[site.siteIndex] || []).includes(employee.employeeId)}
-                                      onChange={() => toggleEmployee(site.siteIndex, employee.employeeId)}
-                                    />
-                                  </td>
-                                  <td>{employee.employeeName}</td>
-                                  <td>{employee.score}</td>
-                                  <td>
-                                    {m.common.skills}: {employee.matchedSkills.length > 0 ? listText(employee.matchedSkills) : notMentioned}
-                                    <br />
-                                    {m.common.certifications}: {employee.matchedCertifications.length > 0 ? listText(employee.matchedCertifications) : notMentioned}
-                                    <br />
-                                    {m.aiIntakePage.history}: {employee.recentEntries} {m.aiIntakePage.entries}
-                                  </td>
-                                  <td>
-                                    {m.aiIntakePage.freeHours}: {employee.capacity.remainingHours}h
-                                    {employee.capacity.capacityDefaulted ? ` (${m.aiIntakePage.defaultCapacity})` : ''}
-                                    <br />
-                                    {m.aiIntakePage.bookedHours}: {employee.capacity.loggedHours}h
-                                    <br />
-                                    {m.aiIntakePage.assignmentPressure}: {employee.capacity.assignmentPressureHours}h
-                                  </td>
-                                </tr>
-                              ))}
-                              {site.recommendations.length === 0 && (
-                                <tr>
-                                  <td colSpan={5} className="muted">{m.aiIntakePage.noMatchingEmployees}</td>
-                                </tr>
-                              )}
-                            </tbody>
-                          </table>
-                          {site.excludedEmployees.length > 0 && (
-                            <>
-                              <div className="spacer" />
-                              <div className="muted">
-                                {x.alternativeEmployees}: {site.excludedEmployees.map((employee) => `${employee.employeeName} (${employee.details})`).join(', ')}
-                              </div>
-                            </>
-                          )}
-                        </>
-                      )}
+              return (
+                <div key={site.siteIndex} className="card">
+                  <div style={{ display: 'flex', justifyContent: 'space-between', gap: 8, flexWrap: 'wrap' }}>
+                    <div>
+                      <div style={{ fontWeight: 700 }}>{site.siteName}</div>
+                      <div className="muted">{m.common.hours}: {site.estimatedHours || siteDraft.estimatedHours || notMentioned}</div>
                     </div>
-                  );
-                })}
-              </div>
-            </>
-          ) : (
-            <>
-              <div className="spacer" />
-              <div className="muted">{m.aiIntakePage.noRecommendations}</div>
-            </>
-          )}
+                    <button
+                      className="btn"
+                      onClick={() => explainRecommendation(site.siteIndex, site.siteName)}
+                      disabled={explanationStatus === 'running' && explanationSite?.siteIndex === site.siteIndex}
+                    >
+                      {explanationStatus === 'running' && explanationSite?.siteIndex === site.siteIndex
+                        ? x.explainingRecommendationButton
+                        : 'Explain workshop decision'}
+                    </button>
+                  </div>
+
+                  <div className="spacer" />
+                  <div className="row">
+                    <div>
+                      <label>{m.common.skills}</label>
+                      <div className="card" style={{ minHeight: 54 }}>{listText(site.requiredSkills || siteDraft.requiredSkills) || notMentioned}</div>
+                    </div>
+                    <div>
+                      <label>{x.assignedWorkshop}</label>
+                      <select
+                        value={siteDraft.assignedWorkshopName || ''}
+                        onChange={(event) => updateAssignedWorkshop(site.siteIndex, event.target.value)}
+                      >
+                        <option value="">Workshop needed / to be selected</option>
+                        {workshopOptions.map((workshop, index) => (
+                          <option key={`${workshop.kind}-${workshop.workshopId || workshop.draftIndex || index}`} value={workshop.name}>
+                            {workshop.name}{workshop.matchedSkills.length ? ` (${listText(workshop.matchedSkills)})` : ''}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                    <div>
+                      <label>{x.staffingCoverage}</label>
+                      <select
+                        value={coverageType}
+                        onChange={(event) => updateSiteCoverageType(site.siteIndex, event.target.value as ProposalCoverageType)}
+                      >
+                        <option value="workshop_only">{x.workshopOnly}</option>
+                        <option value="mixed_with_workshop">{x.mixedWithWorkshop}</option>
+                      </select>
+                    </div>
+                    <div>
+                      <label>{x.workshopCoveredSkills}</label>
+                      <textarea
+                        placeholder={notMentioned}
+                        value={listText(siteDraft.workshopCoveredSkills)}
+                        onChange={(event) => updateSite(site.siteIndex, { workshopCoveredSkills: parseList(event.target.value) })}
+                      />
+                    </div>
+                  </div>
+
+                  {workshopOptions.length > 0 && (
+                    <>
+                      <div className="spacer" />
+                      <div className="card">
+                        <div style={{ fontWeight: 700 }}>{x.workshopSuggestionsCompact}</div>
+                        <div className="muted" style={{ whiteSpace: 'pre-wrap' }}>
+                          {workshopOptions
+                            .map((workshop) => `${workshop.name}${workshop.matchedSkills.length ? ` (${listText(workshop.matchedSkills)})` : ''}${workshop.availabilityStatus === 'available' ? ' - available' : ''}`)
+                            .join(' | ')}
+                        </div>
+                      </div>
+                    </>
+                  )}
+                  {site.coverageNote && (
+                    <>
+                      <div className="spacer" />
+                      <div className="muted">{site.coverageNote}</div>
+                    </>
+                  )}
+                  {site.staffingWarning && !hasWorkshop && (
+                    <>
+                      <div className="spacer" />
+                      <div className="card" style={{ borderColor: 'rgba(245,158,11,0.45)' }}>{site.staffingWarning}</div>
+                    </>
+                  )}
+                </div>
+              );
+            })}
+            {(draft.proposedSites || []).length === 0 && <div className="muted">{m.aiIntakePage.noSites}</div>}
+          </div>
         </div>
 
         <div className="card">
@@ -2718,3 +2573,4 @@ export default function AIIntakePage() {
     </div>
   );
 }
+

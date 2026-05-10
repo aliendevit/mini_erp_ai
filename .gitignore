@@ -16,6 +16,7 @@ frontend/.env.local
 .env
 .env.local
 backend-python/app.db
+backend-python/uploads/
 *.db
 env/
 

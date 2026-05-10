@@ -74,12 +74,54 @@ def _ensure_ai_intake_columns() -> None:
             conn.execute(text(statement))
 
 
+def _ensure_workshop_columns() -> None:
+    inspector = inspect(engine)
+    if "Workshop" not in inspector.get_table_names():
+        return
+
+    column_names = {column["name"] for column in inspector.get_columns("Workshop")}
+    statements: list[str] = []
+    if "availabilityStatus" not in column_names:
+        statements.append("ALTER TABLE \"Workshop\" ADD COLUMN \"availabilityStatus\" VARCHAR DEFAULT 'available' NOT NULL")
+    if "availabilityNote" not in column_names:
+        statements.append('ALTER TABLE "Workshop" ADD COLUMN "availabilityNote" TEXT')
+
+    if not statements:
+        return
+
+    with engine.begin() as conn:
+        for statement in statements:
+            conn.execute(text(statement))
+
+
+def _ensure_workshop_assignment_columns() -> None:
+    inspector = inspect(engine)
+    if "WorkshopSiteAssignment" not in inspector.get_table_names():
+        return
+
+    column_names = {column["name"] for column in inspector.get_columns("WorkshopSiteAssignment")}
+    statements: list[str] = []
+    if "startDate" not in column_names:
+        statements.append('ALTER TABLE "WorkshopSiteAssignment" ADD COLUMN "startDate" TIMESTAMP')
+    if "endDate" not in column_names:
+        statements.append('ALTER TABLE "WorkshopSiteAssignment" ADD COLUMN "endDate" TIMESTAMP')
+
+    if not statements:
+        return
+
+    with engine.begin() as conn:
+        for statement in statements:
+            conn.execute(text(statement))
+
+
 def init_db() -> None:
     from . import models  # noqa: F401
 
     Base.metadata.create_all(bind=engine)
     _ensure_employee_staffing_columns()
     _ensure_ai_intake_columns()
+    _ensure_workshop_columns()
+    _ensure_workshop_assignment_columns()
 
 
 def get_db() -> Generator[Session, None, None]:
