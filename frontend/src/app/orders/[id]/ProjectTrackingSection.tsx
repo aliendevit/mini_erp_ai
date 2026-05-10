@@ -71,6 +71,8 @@ type TrackingWarning = {
   message: string;
   siteId?: string | null;
   siteName?: string | null;
+  recommendedAction?: string | null;
+  fixArea?: string | null;
 };
 
 type WorkshopAssignment = {
@@ -182,6 +184,9 @@ const STATUS_STYLES: Record<string, { color: string; background: string; border:
   ordered: { color: '#2563eb', background: 'rgba(37,99,235,.12)', border: 'rgba(37,99,235,.35)' },
   delivered: { color: '#16a34a', background: 'rgba(22,163,74,.12)', border: 'rgba(22,163,74,.35)' },
   used: { color: '#475569', background: 'rgba(71,85,105,.12)', border: 'rgba(71,85,105,.35)' },
+  low: { color: '#16a34a', background: 'rgba(22,163,74,.12)', border: 'rgba(22,163,74,.35)' },
+  medium: { color: '#d97706', background: 'rgba(217,119,6,.14)', border: 'rgba(217,119,6,.38)' },
+  high: { color: '#dc2626', background: 'rgba(220,38,38,.12)', border: 'rgba(220,38,38,.35)' },
   missing_schedule: { color: '#d97706', background: 'rgba(217,119,6,.14)', border: 'rgba(217,119,6,.38)' },
   active: { color: '#16a34a', background: 'rgba(22,163,74,.12)', border: 'rgba(22,163,74,.35)' },
   upcoming: { color: '#2563eb', background: 'rgba(37,99,235,.12)', border: 'rgba(37,99,235,.35)' },
@@ -213,6 +218,30 @@ function joinList(values: string[] | null | undefined, none: string) {
 function warningText(warning: TrackingWarning, labels: Labels) {
   const base = labels[warning.type] || warning.message;
   return warning.siteName ? `${base}: ${warning.siteName}` : base;
+}
+
+function warningGuidanceText(warning: TrackingWarning, labels: Labels) {
+  const guidance = labels[`${warning.type}_action`] || warning.recommendedAction || warning.message;
+  return warning.siteName ? `${guidance}
+
+${labels.siteArea}: ${warning.siteName}` : guidance;
+}
+
+function showWarningGuidance(warning: TrackingWarning, labels: Labels) {
+  const title = labels.whatToDo || 'What should I do?';
+  window.alert(`${title}
+
+${warningGuidanceText(warning, labels)}`);
+}
+
+
+function warningTargetTab(warning: TrackingWarning): TabKey {
+  if (warning.fixArea && tabKeys.includes(warning.fixArea as TabKey)) return warning.fixArea as TabKey;
+  if (warning.type === 'overdue_task') return 'tasks';
+  if (warning.type === 'high_issue' || warning.type === 'blocked_site') return 'issues';
+  if (warning.type === 'missing_workshop_schedule' || warning.type === 'workshop_unavailable' || warning.type === 'no_workshop_assigned') return 'team';
+  if (warning.type === 'progress_status_mismatch') return 'timeline';
+  return 'overview';
 }
 
 export default function ProjectTrackingSection({ orderId }: { orderId: string }) {
@@ -265,67 +294,99 @@ export default function ProjectTrackingSection({ orderId }: { orderId: string })
 
   async function createTask() {
     if (!taskForm.taskName.trim()) return alert(`${labels.task} ${labels.needed}`);
-    const data = await apiJson<TrackingPayload>(`/orders/${orderId}/tasks`, 'POST', { ...taskForm, siteId: taskForm.siteId || null, dueDate: taskForm.dueDate || null });
-    setTracking(data);
-    setTaskForm(emptyTaskForm);
+    try {
+      const data = await apiJson<TrackingPayload>(`/orders/${orderId}/tasks`, 'POST', { ...taskForm, siteId: taskForm.siteId || null, dueDate: taskForm.dueDate || null });
+      setTracking(data);
+      setTaskForm(emptyTaskForm);
+    } catch (error: any) {
+      alert(error.message);
+    }
   }
 
   async function createIssue() {
     if (!issueForm.title.trim()) return alert(`${labels.issue} ${labels.needed}`);
-    const data = await apiJson<TrackingPayload>(`/orders/${orderId}/issues`, 'POST', { ...issueForm, siteId: issueForm.siteId || null });
-    setTracking(data);
-    setIssueForm(emptyIssueForm);
+    try {
+      const data = await apiJson<TrackingPayload>(`/orders/${orderId}/issues`, 'POST', { ...issueForm, siteId: issueForm.siteId || null });
+      setTracking(data);
+      setIssueForm(emptyIssueForm);
+    } catch (error: any) {
+      alert(error.message);
+    }
   }
 
   async function createMaterial() {
     if (!materialForm.materialName.trim()) return alert(`${labels.materialName} ${labels.needed}`);
-    const data = await apiJson<TrackingPayload>(`/orders/${orderId}/materials`, 'POST', { ...materialForm, siteId: materialForm.siteId || null });
-    setTracking(data);
-    setMaterialForm(emptyMaterialForm);
+    try {
+      const data = await apiJson<TrackingPayload>(`/orders/${orderId}/materials`, 'POST', { ...materialForm, siteId: materialForm.siteId || null });
+      setTracking(data);
+      setMaterialForm(emptyMaterialForm);
+    } catch (error: any) {
+      alert(error.message);
+    }
   }
 
   async function deleteItem(path: string) {
     if (!confirm(x.deleteConfirm)) return;
-    const data = await apiJson<TrackingPayload>(path, 'DELETE');
-    setTracking(data);
+    try {
+      const data = await apiJson<TrackingPayload>(path, 'DELETE');
+      setTracking(data);
+    } catch (error: any) {
+      alert(error.message);
+    }
   }
 
   async function updateTaskStatus(task: TrackingTask, status: string) {
-    const data = await apiJson<TrackingPayload>(`/orders/${orderId}/tasks/${task.id}`, 'PATCH', {
-      siteId: task.siteId || null,
-      taskName: task.taskName,
-      status,
-      responsibleType: task.responsibleType,
-      responsibleName: task.responsibleName,
-      dueDate: task.dueDate,
-      notes: task.notes,
-    });
-    setTracking(data);
+    try {
+      const data = await apiJson<TrackingPayload>(`/orders/${orderId}/tasks/${task.id}`, 'PATCH', {
+        siteId: task.siteId || null,
+        taskName: task.taskName,
+        status,
+        responsibleType: task.responsibleType,
+        responsibleName: task.responsibleName,
+        dueDate: task.dueDate,
+        notes: task.notes,
+      });
+      setTracking(data);
+    } catch (error: any) {
+      alert(error.message);
+    }
   }
 
   async function updateIssueStatus(issue: TrackingIssue, status: string) {
-    const data = await apiJson<TrackingPayload>(`/orders/${orderId}/issues/${issue.id}`, 'PATCH', {
-      siteId: issue.siteId || null,
-      title: issue.title,
-      description: issue.description,
-      severity: issue.severity,
-      status,
-      responsibleType: issue.responsibleType,
-      responsibleName: issue.responsibleName,
-      resolutionNote: issue.resolutionNote,
-    });
-    setTracking(data);
+    try {
+      let resolutionNote = issue.resolutionNote || '';
+      if (status === 'resolved' && !resolutionNote.trim()) {
+        resolutionNote = window.prompt(labels.notes, '') || '';
+      }
+      const data = await apiJson<TrackingPayload>(`/orders/${orderId}/issues/${issue.id}`, 'PATCH', {
+        siteId: issue.siteId || null,
+        title: issue.title,
+        description: issue.description,
+        severity: issue.severity,
+        status,
+        responsibleType: issue.responsibleType,
+        responsibleName: issue.responsibleName,
+        resolutionNote,
+      });
+      setTracking(data);
+    } catch (error: any) {
+      alert(error.message);
+    }
   }
 
   async function updateMaterialStatus(material: TrackingMaterial, status: string) {
-    const data = await apiJson<TrackingPayload>(`/orders/${orderId}/materials/${material.id}`, 'PATCH', {
-      siteId: material.siteId || null,
-      materialName: material.materialName,
-      quantity: material.quantity,
-      status,
-      notes: material.notes,
-    });
-    setTracking(data);
+    try {
+      const data = await apiJson<TrackingPayload>(`/orders/${orderId}/materials/${material.id}`, 'PATCH', {
+        siteId: material.siteId || null,
+        materialName: material.materialName,
+        quantity: material.quantity,
+        status,
+        notes: material.notes,
+      });
+      setTracking(data);
+    } catch (error: any) {
+      alert(error.message);
+    }
   }
 
   if (!tracking) {
@@ -366,7 +427,7 @@ export default function ProjectTrackingSection({ orderId }: { orderId: string })
           <div className="card">
             <strong>{x.metrics.warnings}</strong>
             <div className="spacer" />
-            <WarningList warnings={tracking.dashboard.warnings || []} labels={labels} emptyLabel={x.metrics.noWarnings} />
+            <WarningList warnings={tracking.dashboard.warnings || []} labels={labels} emptyLabel={x.metrics.noWarnings} onOpenAction={(warning) => setActiveTab(warningTargetTab(warning))} onRefresh={loadTracking} />
           </div>
 
           <div className="card">
@@ -408,7 +469,7 @@ export default function ProjectTrackingSection({ orderId }: { orderId: string })
                     <div className="card" style={{ background: 'rgba(217,119,6,.06)' }}>
                       <strong>{labels.scheduleWarnings}</strong>
                       <div className="spacer" />
-                      <WarningList warnings={site.scheduleWarnings || []} labels={labels} emptyLabel={x.metrics.noWarnings} />
+                      <WarningList warnings={site.scheduleWarnings || []} labels={labels} emptyLabel={x.metrics.noWarnings} onOpenAction={(warning) => setActiveTab(warningTargetTab(warning))} onRefresh={loadTracking} />
                     </div>
                   </>
                 )}
@@ -516,7 +577,8 @@ export default function ProjectTrackingSection({ orderId }: { orderId: string })
               <Field label={labels.issue}><input value={issueForm.title} onChange={(event) => setIssueForm({ ...issueForm, title: event.target.value })} /></Field>
               <Field label={labels.severity}><OptionSelect value={issueForm.severity} options={issueSeverityOptions} labels={labels} none={x.none} onChange={(severity) => setIssueForm({ ...issueForm, severity })} /></Field>
               <Field label={labels.status}><OptionSelect value={issueForm.status} options={issueStatusOptions} labels={labels} none={x.none} onChange={(status) => setIssueForm({ ...issueForm, status })} /></Field>
-              <Field label={labels.responsible}><input value={issueForm.responsibleName} onChange={(event) => setIssueForm({ ...issueForm, responsibleName: event.target.value })} /></Field>
+              <Field label={labels.responsible}><OptionSelect value={issueForm.responsibleType} options={['not_assigned', 'workshop']} labels={labels} none={x.none} onChange={(responsibleType) => setIssueForm({ ...issueForm, responsibleType })} /></Field>
+              <Field label={labels.responsibleName}><input value={issueForm.responsibleName} onChange={(event) => setIssueForm({ ...issueForm, responsibleName: event.target.value })} /></Field>
             </div>
             <div className="spacer" />
             <label>{labels.description}</label>
@@ -527,13 +589,20 @@ export default function ProjectTrackingSection({ orderId }: { orderId: string })
             <div className="spacer" />
             <button className="btn primary" onClick={createIssue}>{x.actions.addIssue}</button>
           </TrackingFormCard>
-          <TrackingTable headers={[labels.issue, labels.siteArea, labels.severity, labels.status, labels.responsible, labels.actions]} emptyLabel={x.noRecords} rows={tracking.issues.map((issue) => [
+          <TrackingTable headers={[labels.issue, labels.siteArea, labels.description, labels.severity, labels.status, labels.responsible, labels.notes, labels.actions]} emptyLabel={x.noRecords} rows={tracking.issues.map((issue) => [
             issue.title,
             siteName(issue, x.generalProjectUpdate),
-            displayLabel(issue.severity, labels, x.none),
+            issue.description || x.none,
+            <StatusBadge key="severity" value={issue.severity} labels={labels} none={x.none} />,
             <StatusBadge key="status" value={issue.status} labels={labels} none={x.none} />,
-            issue.responsibleName || x.none,
-            <div key="actions" style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}><button className="btn secondary" onClick={() => updateIssueStatus(issue, 'resolved')}>{x.actions.resolve}</button><button className="btn danger secondary" onClick={() => deleteItem(`/orders/${orderId}/issues/${issue.id}`)}>{x.actions.delete}</button></div>,
+            `${displayLabel(issue.responsibleType, labels, x.none)}${issue.responsibleName ? `: ${issue.responsibleName}` : ''}`,
+            issue.resolutionNote || x.none,
+            <div key="actions" style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+              {issue.status === 'resolved'
+                ? <button className="btn secondary" onClick={() => updateIssueStatus(issue, 'open')}>{labels.open}</button>
+                : <button className="btn secondary" onClick={() => updateIssueStatus(issue, 'resolved')}>{x.actions.resolve}</button>}
+              <button className="btn danger secondary" onClick={() => deleteItem(`/orders/${orderId}/issues/${issue.id}`)}>{x.actions.delete}</button>
+            </div>,
           ])} />
         </div>
       )}
@@ -606,13 +675,24 @@ function StatusBadge({ value, labels, none, size = 'sm' }: { value?: string | nu
   );
 }
 
-function WarningList({ warnings, labels, emptyLabel }: { warnings: TrackingWarning[]; labels: Labels; emptyLabel: string }) {
+function WarningList({ warnings, labels, emptyLabel, onOpenAction, onRefresh }: { warnings: TrackingWarning[]; labels: Labels; emptyLabel: string; onOpenAction?: (warning: TrackingWarning) => void; onRefresh?: () => void }) {
   if (!warnings.length) return <div className="muted">{emptyLabel}</div>;
   return (
     <div style={{ display: 'grid', gap: 8 }}>
       {warnings.map((warning, index) => (
         <div key={`${warning.type}-${warning.siteId || 'general'}-${index}`} style={{ border: warning.severity === 'high' ? '1px solid rgba(220,38,38,.35)' : '1px solid rgba(217,119,6,.35)', background: warning.severity === 'high' ? 'rgba(220,38,38,.08)' : 'rgba(217,119,6,.08)', borderRadius: 12, padding: '9px 11px' }}>
-          <strong>{displayLabel(warning.severity, labels, '')}</strong> - {warningText(warning, labels)}
+          <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 10 }}>
+            <div>
+              <strong>{displayLabel(warning.severity, labels, '')}</strong> - {warningText(warning, labels)}
+            </div>
+            <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', justifyContent: 'flex-end', flex: '0 0 auto' }}>
+              <button type="button" className="btn secondary" style={{ padding: '4px 8px', fontSize: 12, lineHeight: 1 }} title={labels.whatToDo || 'What should I do?'} onClick={() => showWarningGuidance(warning, labels)}>
+                {labels.info || 'Info'}
+              </button>
+              {onOpenAction && <button type="button" className="btn secondary" style={{ padding: '4px 8px', fontSize: 12, lineHeight: 1 }} onClick={() => onOpenAction(warning)}>{labels.openFix || 'Open fix'}</button>}
+              {onRefresh && <button type="button" className="btn secondary" style={{ padding: '4px 8px', fontSize: 12, lineHeight: 1 }} onClick={onRefresh}>{labels.refreshWarnings || 'Check again'}</button>}
+            </div>
+          </div>
         </div>
       ))}
     </div>

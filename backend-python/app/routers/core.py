@@ -327,6 +327,27 @@ def _load_tracking_parts(db: Session, order_id: str) -> tuple[
     return order, updates, tasks, issues, materials
 
 
+_WARNING_FIX_AREAS: dict[str, str] = {
+    "blocked_site": "issues",
+    "missing_workshop_schedule": "team",
+    "workshop_unavailable": "team",
+    "high_issue": "issues",
+    "overdue_task": "tasks",
+    "no_workshop_assigned": "team",
+    "progress_status_mismatch": "timeline",
+}
+
+_WARNING_ACTIONS: dict[str, str] = {
+    "blocked_site": "Review the blocker, set the responsible workshop, and add a new progress update when the site can continue.",
+    "missing_workshop_schedule": "Edit the existing workshop assignment and add start/end dates.",
+    "workshop_unavailable": "Update workshop availability or assign another available workshop.",
+    "high_issue": "Open the issue, add the responsible party and resolution note, then resolve it after the fix is done.",
+    "overdue_task": "Update the task due date or mark the task as completed if the work is done.",
+    "no_workshop_assigned": "Assign a workshop to this site before execution starts.",
+    "progress_status_mismatch": "Add a progress update so the site status and completion percentage match.",
+}
+
+
 def _warning_payload(kind: str, severity: str, message: str, site: Site | None = None) -> dict:
     return {
         "type": kind,
@@ -334,6 +355,8 @@ def _warning_payload(kind: str, severity: str, message: str, site: Site | None =
         "message": message,
         "siteId": site.id if site else None,
         "siteName": site.site_name if site else None,
+        "recommendedAction": _WARNING_ACTIONS.get(kind),
+        "fixArea": _WARNING_FIX_AREAS.get(kind, "overview"),
     }
 
 
@@ -373,6 +396,7 @@ def _tracking_response(db: Session, order_id: str) -> dict:
     for site in order.sites:
         site_updates = [item for item in updates if item.site_id == site.id]
         site_tasks = [item for item in tasks if item.site_id == site.id]
+        site_materials = [item for item in materials if item.site_id == site.id]
         site_issues = [item for item in issues if item.site_id == site.id and item.status in open_issue_statuses]
         latest_site_update = site_updates[0] if site_updates else None
         site_completed = [item for item in site_tasks if item.status in completed_task_statuses]
@@ -382,6 +406,7 @@ def _tracking_response(db: Session, order_id: str) -> dict:
             progress_percent = round((len(site_completed) / len(site_tasks)) * 100)
         else:
             progress_percent = 0
+        current_status = latest_site_update.status if latest_site_update else "not_started"
 
         latest_photos: list[dict] = []
         for update in site_updates:
@@ -396,9 +421,16 @@ def _tracking_response(db: Session, order_id: str) -> dict:
         workshop_names = [item.get("workshop", {}).get("name") for item in workshop_assignments if item.get("workshop", {}).get("name")]
         workshop_skills = sorted({skill for item in workshop_assignments for skill in item.get("coveredSkills", [])})
         schedule_warnings: list[dict] = []
-        latest_blocked = bool(latest_site_update and latest_site_update.status == "blocked")
+        site_has_execution_data = bool(site_updates or site_tasks or site_materials or site_issues)
+        if site.is_active and site_has_execution_data and not site.workshop_assignments:
+            schedule_warnings.append(_warning_payload("no_workshop_assigned", "medium", f"Site {site.site_name} has tracking work but no workshop assignment.", site))
+        latest_blocked = current_status == "blocked"
         if latest_blocked:
             schedule_warnings.append(_warning_payload("blocked_site", "high", f"Site {site.site_name} is currently blocked.", site))
+        if site_has_execution_data and progress_percent >= 100 and current_status not in {"completed", "done"}:
+            schedule_warnings.append(_warning_payload("progress_status_mismatch", "low", f"Site {site.site_name} is 100% complete but status is {current_status}.", site))
+        if site_has_execution_data and current_status in {"completed", "done"} and progress_percent < 100:
+            schedule_warnings.append(_warning_payload("progress_status_mismatch", "medium", f"Site {site.site_name} is marked completed but progress is {progress_percent}%.", site))
         for assignment in site.workshop_assignments:
             workshop_name = assignment.workshop.name if assignment.workshop else "Workshop"
             if not assignment.start_date or not assignment.end_date:
@@ -418,7 +450,7 @@ def _tracking_response(db: Session, order_id: str) -> dict:
             {
                 "siteId": site.id,
                 "siteName": site.site_name,
-                "currentStatus": latest_site_update.status if latest_site_update else "not_started",
+                "currentStatus": current_status,
                 "progressPercent": progress_percent,
                 "lastUpdateDate": latest_site_update.update_date if latest_site_update else None,
                 "assignedEmployees": [],
@@ -431,6 +463,14 @@ def _tracking_response(db: Session, order_id: str) -> dict:
                 "latestPhotos": latest_photos[:4],
             }
         )
+
+    for issue in open_issues:
+        if issue.site_id is None and issue.severity == "high":
+            dashboard_warnings.append(_warning_payload("high_issue", "high", f"High severity issue is open: {issue.title}"))
+    for task in tasks:
+        due_date = _comparison_datetime(task.due_date)
+        if task.site_id is None and due_date and due_date < today_start and task.status not in completed_task_statuses:
+            dashboard_warnings.append(_warning_payload("overdue_task", "medium", f"Task is overdue: {task.task_name}"))
 
     all_photos = [progress_photo_payload(photo) for update in updates for photo in update.photos]
     total_tasks = len(tasks)

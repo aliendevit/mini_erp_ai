@@ -14,9 +14,9 @@ from sqlalchemy.orm import Session, sessionmaker
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from app.database import Base
-from app.models import Customer, CustomerWorkshop, Employee, EmployeeAvailabilityBlock, EmployeeSkill, Order, PaymentRecord, ProjectIssue, ProjectTask, Proposal, ProposalFact, ProposalMessage, Site, Workshop, WorkshopSiteAssignment
-from app.schemas import ProposalDraftPayload, WorkshopSiteAssignmentPayload
-from app.routers.core import create_order_workshop_assignment, _tracking_response
+from app.models import Customer, CustomerWorkshop, Employee, EmployeeAvailabilityBlock, EmployeeSkill, Order, PaymentRecord, ProjectIssue, ProjectProgressUpdate, ProjectTask, Proposal, ProposalFact, ProposalMessage, Site, Workshop, WorkshopSiteAssignment
+from app.schemas import ProjectIssuePayload, ProjectTaskPayload, ProposalDraftPayload, WorkshopSiteAssignmentPayload
+from app.routers.core import create_order_workshop_assignment, create_project_issue, create_project_task, update_project_issue, update_project_task, update_workshop_assignment, _tracking_response
 from app.services.proposal_documents import _arabic_visual_text, build_proposal_pdf
 from app.services.proposals import (
     ExtractedProposal,
@@ -166,6 +166,230 @@ class ProposalAndStaffingTests(unittest.TestCase):
         self.assertIn("overdue_task", warning_types)
         self.assertTrue(site_warning_types.issuperset(warning_types))
         self.assertEqual(site_card["scheduledWorkshops"][0]["scheduleStatus"], "missing_schedule")
+
+    def test_task_completion_updates_site_progress_and_clears_overdue_warning(self) -> None:
+        order, site, _other_site, _workshop_a, _workshop_b = self._workshop_order_fixture()
+        old_due_date = datetime(2026, 1, 1, tzinfo=timezone.utc)
+
+        create_project_task(
+            order.id,
+            ProjectTaskPayload(
+                siteId=site.id,
+                taskName="Remove old tiles",
+                status="in_progress",
+                responsibleType="workshop",
+                responsibleName="Workshop A",
+                dueDate=old_due_date,
+            ),
+            self.db,
+        )
+        create_project_task(
+            order.id,
+            ProjectTaskPayload(
+                siteId=site.id,
+                taskName="Install new tiles",
+                status="not_started",
+                responsibleType="workshop",
+                responsibleName="Workshop A",
+            ),
+            self.db,
+        )
+
+        task = self.db.query(ProjectTask).filter(ProjectTask.task_name == "Remove old tiles").one()
+        before = _tracking_response(self.db, order.id)
+        before_site = next(card for card in before["siteCards"] if card["siteId"] == site.id)
+        before_warning_types = {warning["type"] for warning in before_site["scheduleWarnings"]}
+
+        self.assertEqual(before_site["progressPercent"], 0)
+        self.assertIn("overdue_task", before_warning_types)
+
+        result = update_project_task(
+            order.id,
+            task.id,
+            ProjectTaskPayload(
+                siteId=site.id,
+                taskName="Remove old tiles",
+                status="completed",
+                responsibleType="workshop",
+                responsibleName="Workshop A",
+                dueDate=old_due_date,
+            ),
+            self.db,
+        )
+        site_card = next(card for card in result["siteCards"] if card["siteId"] == site.id)
+        site_warning_types = {warning["type"] for warning in site_card["scheduleWarnings"]}
+
+        self.assertEqual(result["dashboard"]["completedTaskCount"], 1)
+        self.assertEqual(result["dashboard"]["totalTaskCount"], 2)
+        self.assertEqual(site_card["progressPercent"], 50)
+        self.assertNotIn("overdue_task", site_warning_types)
+
+    def test_issue_resolution_removes_open_blocker_and_warning(self) -> None:
+        order, site, _other_site, _workshop_a, _workshop_b = self._workshop_order_fixture()
+
+        create_project_issue(
+            order.id,
+            ProjectIssuePayload(
+                siteId=site.id,
+                title="Water leak",
+                description="Leak is blocking waterproofing.",
+                severity="high",
+                status="open",
+                responsibleType="workshop",
+                responsibleName="Workshop A",
+            ),
+            self.db,
+        )
+
+        issue = self.db.query(ProjectIssue).filter(ProjectIssue.title == "Water leak").one()
+        before = _tracking_response(self.db, order.id)
+        before_site = next(card for card in before["siteCards"] if card["siteId"] == site.id)
+        before_warning_types = {warning["type"] for warning in before["dashboard"]["warnings"]}
+
+        self.assertIn("high_issue", before_warning_types)
+        self.assertEqual(before["dashboard"]["openIssueCount"], 1)
+        self.assertEqual(len(before_site["openBlockers"]), 1)
+
+        result = update_project_issue(
+            order.id,
+            issue.id,
+            ProjectIssuePayload(
+                siteId=site.id,
+                title="Water leak",
+                description="Leak is blocking waterproofing.",
+                severity="high",
+                status="resolved",
+                responsibleType="workshop",
+                responsibleName="Workshop A",
+                resolutionNote="Leak repaired and checked.",
+            ),
+            self.db,
+        )
+        site_card = next(card for card in result["siteCards"] if card["siteId"] == site.id)
+        warning_types = {warning["type"] for warning in result["dashboard"]["warnings"]}
+
+        self.assertNotIn("high_issue", warning_types)
+        self.assertEqual(result["dashboard"]["openIssueCount"], 0)
+        self.assertEqual(site_card["openBlockers"], [])
+
+    def test_general_tracking_items_create_dashboard_warnings(self) -> None:
+        order, _site, _other_site, _workshop_a, _workshop_b = self._workshop_order_fixture()
+
+        result = create_project_issue(
+            order.id,
+            ProjectIssuePayload(
+                title="Missing access key",
+                description="The building key is not available.",
+                severity="high",
+                status="open",
+            ),
+            self.db,
+        )
+        result = create_project_task(
+            order.id,
+            ProjectTaskPayload(
+                taskName="Confirm material delivery",
+                status="in_progress",
+                dueDate=datetime(2026, 1, 1, tzinfo=timezone.utc),
+            ),
+            self.db,
+        )
+        warning_types = {warning["type"] for warning in result["dashboard"]["warnings"]}
+        warning_site_ids = {warning["siteId"] for warning in result["dashboard"]["warnings"]}
+
+        self.assertIn("high_issue", warning_types)
+        self.assertIn("overdue_task", warning_types)
+        self.assertIn(None, warning_site_ids)
+
+    def test_tracking_response_warns_when_work_site_has_no_workshop(self) -> None:
+        order, site, other_site, _workshop_a, _workshop_b = self._workshop_order_fixture()
+
+        result = create_project_task(
+            order.id,
+            ProjectTaskPayload(
+                siteId=site.id,
+                taskName="Prepare waterproofing",
+                status="not_started",
+                dueDate=datetime(2026, 12, 1, tzinfo=timezone.utc),
+            ),
+            self.db,
+        )
+        site_card = next(card for card in result["siteCards"] if card["siteId"] == site.id)
+        other_card = next(card for card in result["siteCards"] if card["siteId"] == other_site.id)
+        warning_types = {warning["type"] for warning in site_card["scheduleWarnings"]}
+        dashboard_warning = next(warning for warning in result["dashboard"]["warnings"] if warning["type"] == "no_workshop_assigned")
+
+        self.assertIn("no_workshop_assigned", warning_types)
+        self.assertEqual(dashboard_warning["fixArea"], "team")
+        self.assertTrue(dashboard_warning["recommendedAction"])
+        self.assertEqual(other_card["scheduleWarnings"], [])
+
+    def test_tracking_response_warns_when_progress_and_status_do_not_match(self) -> None:
+        order, site, _other_site, _workshop_a, _workshop_b = self._workshop_order_fixture()
+        self.db.add_all(
+            [
+                ProjectTask(order_id=order.id, site_id=site.id, task_name="Task A", status="completed"),
+                ProjectTask(order_id=order.id, site_id=site.id, task_name="Task B", status="completed"),
+            ]
+        )
+        self.db.commit()
+
+        result = _tracking_response(self.db, order.id)
+        site_card = next(card for card in result["siteCards"] if card["siteId"] == site.id)
+        warning = next(warning for warning in site_card["scheduleWarnings"] if warning["type"] == "progress_status_mismatch")
+
+        self.assertEqual(site_card["progressPercent"], 100)
+        self.assertEqual(site_card["currentStatus"], "not_started")
+        self.assertEqual(warning["fixArea"], "timeline")
+
+    def test_tracking_response_warns_when_completed_status_has_low_progress(self) -> None:
+        order, site, _other_site, _workshop_a, _workshop_b = self._workshop_order_fixture()
+        update = ProjectProgressUpdate(
+            order_id=order.id,
+            site_id=site.id,
+            title="Final inspection",
+            status="completed",
+            progress_percent=50,
+            update_date=datetime(2026, 6, 1, tzinfo=timezone.utc),
+        )
+        self.db.add(update)
+        self.db.commit()
+
+        result = _tracking_response(self.db, order.id)
+        site_card = next(card for card in result["siteCards"] if card["siteId"] == site.id)
+        warning_types = {warning["type"] for warning in site_card["scheduleWarnings"]}
+
+        self.assertEqual(site_card["currentStatus"], "completed")
+        self.assertEqual(site_card["progressPercent"], 50)
+        self.assertIn("progress_status_mismatch", warning_types)
+
+    def test_workshop_assignment_update_ignores_itself_for_overlap_check(self) -> None:
+        order, site, _other_site, workshop_a, _workshop_b = self._workshop_order_fixture()
+        created = create_order_workshop_assignment(
+            order.id,
+            self._assignment_payload(
+                site,
+                workshop_a,
+                datetime(2026, 6, 1, tzinfo=timezone.utc),
+                datetime(2026, 6, 5, tzinfo=timezone.utc),
+            ),
+            self.db,
+        )
+
+        updated = update_workshop_assignment(
+            created["id"],
+            self._assignment_payload(
+                site,
+                workshop_a,
+                datetime(2026, 6, 2, tzinfo=timezone.utc),
+                datetime(2026, 6, 6, tzinfo=timezone.utc),
+            ),
+            self.db,
+        )
+
+        self.assertEqual(updated["id"], created["id"])
+        self.assertTrue(str(updated["startDate"]).startswith("2026-06-02T00:00:00"))
+        self.assertTrue(str(updated["endDate"]).startswith("2026-06-06T00:00:00"))
 
     def test_build_proposal_pdf_returns_pdf_bytes(self) -> None:
         payload = {

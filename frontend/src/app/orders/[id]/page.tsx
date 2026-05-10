@@ -112,6 +112,10 @@ function listText(values?: string[] | null): string {
   return (values || []).join(', ');
 }
 
+function dateInputValue(value?: string | null): string {
+  return value ? String(value).substring(0, 10) : '';
+}
+
 function address(site: Site, fallback: string) {
   return [site.street, [site.zipCode, site.city].filter(Boolean).join(' ')].filter(Boolean).join(', ') || fallback;
 }
@@ -130,15 +134,21 @@ export default function OrderDetailPage() {
   const [siteForm, setSiteForm] = useState<Partial<Site>>(emptySite);
   const [editingSiteId, setEditingSiteId] = useState<string | null>(null);
   const [assignmentForm, setAssignmentForm] = useState<AssignmentForm>(emptyAssignment);
+  const [editingAssignmentId, setEditingAssignmentId] = useState<string | null>(null);
 
   const siteOptions = useMemo(() => order?.sites || [], [order]);
   const activeWorkshops = useMemo(() => workshops.filter((workshop) => workshop.isActive && workshop.availabilityStatus !== 'not_available'), [workshops]);
+  const workshopOptions = useMemo(() => {
+    if (!editingAssignmentId) return activeWorkshops;
+    const selected = workshops.find((workshop) => workshop.id === assignmentForm.workshopId);
+    return selected && !activeWorkshops.some((workshop) => workshop.id === selected.id) ? [selected, ...activeWorkshops] : activeWorkshops;
+  }, [activeWorkshops, assignmentForm.workshopId, editingAssignmentId, workshops]);
 
   async function load() {
     const [nextOrder, nextCustomers, nextWorkshops, nextWorkshopAssignments] = await Promise.all([
       apiGet<Order>(`/orders/${id}`),
       apiGet<Customer[]>('/customers'),
-      apiGet<Workshop[]>('/workshops?availableOnly=true'),
+      apiGet<Workshop[]>('/workshops?activeOnly=true'),
       apiGet<WorkshopAssignment[]>(`/orders/${id}/workshop-assignments`),
     ]);
     setOrder(nextOrder);
@@ -252,23 +262,51 @@ export default function OrderDetailPage() {
     }
   }
 
-  async function addWorkshopAssignment() {
+  function startEditWorkshopAssignment(assignment: WorkshopAssignment) {
+    setEditingAssignmentId(assignment.id);
+    setAssignmentForm({
+      siteId: assignment.siteId,
+      workshopId: assignment.workshopId,
+      coveredSkills: listText(assignment.coveredSkills),
+      startDate: dateInputValue(assignment.startDate),
+      endDate: dateInputValue(assignment.endDate),
+      status: assignment.status || 'assigned',
+      notes: assignment.notes || '',
+    });
+  }
+
+  function cancelWorkshopAssignmentEdit() {
+    setEditingAssignmentId(null);
+    setAssignmentForm((current) => ({
+      ...emptyAssignment,
+      siteId: current.siteId || order?.sites[0]?.id || '',
+      workshopId: activeWorkshops[0]?.id || '',
+    }));
+  }
+
+  async function saveWorkshopAssignment() {
     if (!id) return;
     if (!assignmentForm.siteId) return alert('Please select a site.');
     if (!assignmentForm.workshopId) return alert('Please select a workshop.');
     if (!assignmentForm.startDate || !assignmentForm.endDate) return alert('Please select workshop start and end dates.');
+    const payload = {
+      siteId: assignmentForm.siteId,
+      workshopId: assignmentForm.workshopId,
+      coveredSkills: parseList(assignmentForm.coveredSkills),
+      startDate: assignmentForm.startDate || null,
+      endDate: assignmentForm.endDate || null,
+      status: assignmentForm.status || 'assigned',
+      notes: assignmentForm.notes || null,
+    };
     try {
-      await apiJson(`/orders/${id}/workshop-assignments`, 'POST', {
-        siteId: assignmentForm.siteId,
-        workshopId: assignmentForm.workshopId,
-        coveredSkills: parseList(assignmentForm.coveredSkills),
-        startDate: assignmentForm.startDate || null,
-        endDate: assignmentForm.endDate || null,
-        status: assignmentForm.status || 'assigned',
-        notes: assignmentForm.notes || null,
-      });
+      if (editingAssignmentId) {
+        await apiJson(`/workshop-assignments/${editingAssignmentId}`, 'PUT', payload);
+      } else {
+        await apiJson(`/orders/${id}/workshop-assignments`, 'POST', payload);
+      }
       await load();
-      setAssignmentForm((current) => ({ ...emptyAssignment, siteId: current.siteId, workshopId: current.workshopId }));
+      setEditingAssignmentId(null);
+      setAssignmentForm((current) => ({ ...emptyAssignment, siteId: current.siteId, workshopId: activeWorkshops[0]?.id || current.workshopId }));
     } catch (error: any) {
       alert(error.message);
     }
@@ -278,6 +316,7 @@ export default function OrderDetailPage() {
     if (!confirm(m.common.deleteConfirm)) return;
     try {
       await apiJson(`/workshop-assignments/${assignmentId}`, 'DELETE');
+      if (editingAssignmentId === assignmentId) setEditingAssignmentId(null);
       await load();
     } catch (error: any) {
       alert(error.message);
@@ -415,6 +454,7 @@ export default function OrderDetailPage() {
                           <span>{assignment.workshop?.name || 'Workshop'}</span>
                           <span className="muted">{listText(assignment.coveredSkills) || 'No covered trades set'}</span>
                           <span className="muted">{assignment.startDate && assignment.endDate ? `${String(assignment.startDate).substring(0, 10)} - ${String(assignment.endDate).substring(0, 10)}` : 'Schedule missing'}</span>
+                          <button className="btn secondary" onClick={() => startEditWorkshopAssignment(assignment)}>{m.common.edit}</button>
                           <button className="btn danger secondary" onClick={() => removeWorkshopAssignment(assignment.id)}>{m.common.remove}</button>
                         </div>
                       ))
@@ -444,8 +484,8 @@ export default function OrderDetailPage() {
       <div className="card">
         <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12, flexWrap: 'wrap' }}>
           <div>
-            <h3>Workshop execution</h3>
-            <div className="muted">Assign trusted workshops to each site or work package. Employee assignment is no longer part of the main workflow.</div>
+            <h3>{editingAssignmentId ? 'Edit workshop assignment' : 'Workshop execution'}</h3>
+            <div className="muted">{editingAssignmentId ? 'Update the existing workshop schedule, status, covered scope, or notes. This fixes schedule warnings without creating duplicate assignments.' : 'Assign trusted workshops to each site or work package. Employee assignment is no longer part of the main workflow.'}</div>
           </div>
           <Link className="btn" href="/workshops">Manage workshops</Link>
         </div>
@@ -461,8 +501,8 @@ export default function OrderDetailPage() {
           <div>
             <label>Workshop *</label>
             <select value={assignmentForm.workshopId} onChange={(event) => setAssignmentForm({ ...assignmentForm, workshopId: event.target.value })}>
-              {activeWorkshops.map((workshop) => <option key={workshop.id} value={workshop.id}>{workshop.name}{workshop.specialties?.length ? ` (${listText(workshop.specialties)})` : ''}</option>)}
-              {activeWorkshops.length === 0 && <option value="">No available workshops</option>}
+              {workshopOptions.map((workshop) => <option key={workshop.id} value={workshop.id}>{workshop.name}{workshop.availabilityStatus === 'not_available' ? ' (not available)' : ''}{workshop.specialties?.length ? ` (${listText(workshop.specialties)})` : ''}</option>)}
+              {workshopOptions.length === 0 && <option value="">No available workshops</option>}
             </select>
           </div>
           <div>
@@ -497,7 +537,10 @@ export default function OrderDetailPage() {
           </div>
         </div>
         <div className="spacer" />
-        <button className="btn primary" onClick={addWorkshopAssignment} disabled={!assignmentForm.siteId || !assignmentForm.workshopId || !assignmentForm.startDate || !assignmentForm.endDate}>Assign workshop</button>
+        <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+          <button className="btn primary" onClick={saveWorkshopAssignment} disabled={!assignmentForm.siteId || !assignmentForm.workshopId || !assignmentForm.startDate || !assignmentForm.endDate}>{editingAssignmentId ? 'Save workshop assignment' : 'Assign workshop'}</button>
+          {editingAssignmentId && <button className="btn" onClick={cancelWorkshopAssignmentEdit}>Cancel edit</button>}
+        </div>
       </div>
 
       <div className="spacer" />
