@@ -149,10 +149,20 @@ class ProjectProgressUpdatePayload(BaseModel):
     updateDate: datetime | date | None = None
 
 
+class ProjectSiteBaselinePayload(BaseModel):
+    plannedStartDate: datetime | date | None = None
+    plannedEndDate: datetime | date | None = None
+    baselineStatus: Literal["draft", "confirmed"] = "draft"
+    source: Literal["ai_suggested", "manual"] = "manual"
+    notes: str | None = None
+
+
 class ProjectTaskPayload(BaseModel):
     siteId: str | None = None
     taskName: str
     status: str = "not_started"
+    weightPercent: float | int | None = None
+    progressPercent: int | None = None
     responsibleType: str = "not_assigned"
     responsibleName: str | None = None
     dueDate: datetime | date | None = None

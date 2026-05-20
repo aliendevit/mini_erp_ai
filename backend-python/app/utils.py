@@ -27,6 +27,7 @@ from .models import (
     ProjectMaterialLog,
     ProjectProgressPhoto,
     ProjectProgressUpdate,
+    ProjectSiteBaseline,
     ProjectTask,
     Proposal,
     ProposalFact,
@@ -281,6 +282,25 @@ def workshop_site_assignment_payload(assignment: WorkshopSiteAssignment) -> dict
     if assignment.site:
         data["site"] = {"id": assignment.site.id, "siteName": assignment.site.site_name}
     return jsonable_encoder(data)
+
+
+def project_site_baseline_payload(item: ProjectSiteBaseline | None) -> dict[str, Any] | None:
+    if not item:
+        return None
+    return jsonable_encoder(
+        {
+            "id": item.id,
+            "orderId": item.order_id,
+            "siteId": item.site_id,
+            "plannedStartDate": item.planned_start_date,
+            "plannedEndDate": item.planned_end_date,
+            "baselineStatus": item.baseline_status,
+            "source": item.source,
+            "notes": item.notes,
+            "createdAt": item.created_at,
+            "updatedAt": item.updated_at,
+        }
+    )
 
 
 def employee_skill_payload(skill: EmployeeSkill) -> dict[str, Any]:
@@ -545,6 +565,8 @@ def project_task_payload(task: ProjectTask) -> dict[str, Any]:
         "siteId": task.site_id,
         "taskName": task.task_name,
         "status": task.status,
+        "weightPercent": float(task.weight_percent) if task.weight_percent is not None else None,
+        "progressPercent": task.progress_percent,
         "responsibleType": task.responsible_type,
         "responsibleName": task.responsible_name,
         "dueDate": task.due_date,

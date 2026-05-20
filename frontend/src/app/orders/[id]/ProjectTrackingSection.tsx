@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useState } from 'react';
 import type { ReactNode } from 'react';
+import Link from 'next/link';
 
 import { API_BASE, apiForm, apiGet, apiJson } from '../../../lib/api';
 import { useI18n } from '../../../lib/i18n';
@@ -36,6 +37,8 @@ type TrackingTask = {
   site?: { siteName?: string | null } | null;
   taskName: string;
   status: string;
+  weightPercent?: number | null;
+  progressPercent?: number | null;
   responsibleType: string;
   responsibleName?: string | null;
   dueDate?: string | null;
@@ -98,6 +101,16 @@ type SiteCard = {
   siteName: string;
   currentStatus: string;
   progressPercent: number;
+  actualProgressPercent?: number | null;
+  plannedProgressPercent?: number | null;
+  progressDeltaPercent?: number | null;
+  baselinePlan?: { notes?: string | null } | null;
+  baselineStartDate?: string | null;
+  baselineEndDate?: string | null;
+  baselineStatus?: string | null;
+  predictedFinishDate?: string | null;
+  delayDays?: number | null;
+  delayStatus?: string | null;
   lastUpdateDate?: string | null;
   workshopAssignments: WorkshopAssignment[];
   scheduledWorkshops?: WorkshopAssignment[];
@@ -111,6 +124,9 @@ type TrackingPayload = {
   dashboard: {
     overallStatus: string;
     overallProgressPercent: number;
+    plannedProgressPercent?: number | null;
+    actualProgressPercent?: number | null;
+    behindScheduleSiteCount?: number | null;
     openIssueCount: number;
     completedTaskCount: number;
     totalTaskCount: number;
@@ -128,7 +144,7 @@ type TrackingPayload = {
 
 type FormState = Record<string, string>;
 type Labels = Record<string, string>;
-type TabKey = 'overview' | 'timeline' | 'photos' | 'tasks' | 'issues' | 'materials' | 'team';
+type TabKey = 'overview' | 'baseline' | 'timeline' | 'photos' | 'tasks' | 'issues' | 'materials' | 'team';
 
 const emptyUpdateForm: FormState = {
   siteId: '',
@@ -145,6 +161,8 @@ const emptyTaskForm: FormState = {
   siteId: '',
   taskName: '',
   status: 'not_started',
+  weightPercent: '',
+  progressPercent: '',
   responsibleType: 'not_assigned',
   responsibleName: '',
   dueDate: '',
@@ -162,7 +180,7 @@ const emptyIssueForm: FormState = {
 };
 const emptyMaterialForm: FormState = { siteId: '', materialName: '', quantity: '', status: 'needed', notes: '' };
 
-const tabKeys: TabKey[] = ['overview', 'timeline', 'photos', 'tasks', 'issues', 'materials', 'team'];
+const tabKeys: TabKey[] = ['overview', 'baseline', 'timeline', 'photos', 'tasks', 'issues', 'materials', 'team'];
 const siteStatusOptions = ['not_started', 'in_progress', 'waiting_materials', 'blocked', 'needs_review', 'completed'];
 const taskStatusOptions = ['not_started', 'in_progress', 'completed'];
 const issueStatusOptions = ['open', 'in_progress', 'resolved'];
@@ -201,6 +219,10 @@ function displayLabel(value: string | null | undefined, labels: Labels, none: st
 
 function shortDate(value: string | null | undefined, none: string) {
   return value ? value.substring(0, 10) : none;
+}
+
+function dateInputValue(value: string | null | undefined) {
+  return value ? value.substring(0, 10) : '';
 }
 
 function photoSrc(photo: TrackingPhoto) {
@@ -249,8 +271,11 @@ export default function ProjectTrackingSection({ orderId }: { orderId: string })
   const x = messages.trackingPage;
   const labels = x.labels;
   const [tracking, setTracking] = useState<TrackingPayload | null>(null);
+  const [suggestingBaseline, setSuggestingBaseline] = useState(false);
   const [activeTab, setActiveTab] = useState<TabKey>('overview');
   const [saving, setSaving] = useState(false);
+  const [baselineForms, setBaselineForms] = useState<Record<string, FormState>>({});
+  const [taskEditForms, setTaskEditForms] = useState<Record<string, FormState>>({});
   const [updateForm, setUpdateForm] = useState<FormState>(emptyUpdateForm);
   const [taskForm, setTaskForm] = useState<FormState>(emptyTaskForm);
   const [issueForm, setIssueForm] = useState<FormState>(emptyIssueForm);
@@ -262,9 +287,72 @@ export default function ProjectTrackingSection({ orderId }: { orderId: string })
   const selectedPhotos = useMemo(() => Array.from(photos || []), [photos]);
   const siteOptions = useMemo(() => siteCards.map((site) => ({ id: site.siteId, name: site.siteName })), [siteCards]);
 
+  function syncBaselineForms(data: TrackingPayload) {
+    setBaselineForms(() => {
+      const next: Record<string, FormState> = {};
+      for (const site of data.siteCards || []) {
+        next[site.siteId] = {
+          plannedStartDate: dateInputValue(site.baselineStartDate),
+          plannedEndDate: dateInputValue(site.baselineEndDate),
+          baselineStatus: site.baselineStatus || 'draft',
+          notes: site.baselinePlan?.notes || '',
+        };
+      }
+      return next;
+    });
+  }
+
+  function syncTaskEditForms(data: TrackingPayload) {
+    setTaskEditForms(() => {
+      const next: Record<string, FormState> = {};
+      for (const task of data.tasks || []) {
+        next[task.id] = {
+          status: task.status || 'not_started',
+          weightPercent: task.weightPercent === null || task.weightPercent === undefined ? '' : String(task.weightPercent),
+          progressPercent: task.progressPercent === null || task.progressPercent === undefined ? '' : String(task.progressPercent),
+        };
+      }
+      return next;
+    });
+  }
+
+  function applyTracking(data: TrackingPayload) {
+    setTracking(data);
+    syncBaselineForms(data);
+    syncTaskEditForms(data);
+  }
+
   async function loadTracking() {
     const data = await apiGet<TrackingPayload>(`/orders/${orderId}/tracking`);
-    setTracking(data);
+    applyTracking(data);
+  }
+
+  async function suggestBaseline() {
+    setSuggestingBaseline(true);
+    try {
+      const data = await apiJson<TrackingPayload>(`/orders/${orderId}/tracking/baseline/suggest`, 'POST');
+      applyTracking(data);
+    } catch (error: any) {
+      alert(error.message);
+    } finally {
+      setSuggestingBaseline(false);
+    }
+  }
+
+  async function saveBaseline(site: SiteCard, status?: 'draft' | 'confirmed') {
+    const form = baselineForms[site.siteId] || {};
+    try {
+      const data = await apiJson<TrackingPayload>(`/orders/${orderId}/tracking/baseline/${site.siteId}`, 'PUT', {
+        plannedStartDate: form.plannedStartDate || null,
+        plannedEndDate: form.plannedEndDate || null,
+        baselineStatus: status || form.baselineStatus || 'draft',
+        source: 'manual',
+        notes: form.notes || null,
+      });
+      applyTracking(data);
+    } catch (error: any) {
+      alert(error.message);
+    }
   }
 
   useEffect(() => {
@@ -281,7 +369,7 @@ export default function ProjectTrackingSection({ orderId }: { orderId: string })
       });
       Array.from(photos || []).forEach((file) => form.append('photos', file));
       const data = await apiForm<TrackingPayload>(`/orders/${orderId}/progress-updates`, 'POST', form);
-      setTracking(data);
+      applyTracking(data);
       setUpdateForm(emptyUpdateForm);
       setPhotos(null);
       setPhotoInputKey((value) => value + 1);
@@ -295,8 +383,14 @@ export default function ProjectTrackingSection({ orderId }: { orderId: string })
   async function createTask() {
     if (!taskForm.taskName.trim()) return alert(`${labels.task} ${labels.needed}`);
     try {
-      const data = await apiJson<TrackingPayload>(`/orders/${orderId}/tasks`, 'POST', { ...taskForm, siteId: taskForm.siteId || null, dueDate: taskForm.dueDate || null });
-      setTracking(data);
+      const data = await apiJson<TrackingPayload>(`/orders/${orderId}/tasks`, 'POST', {
+        ...taskForm,
+        siteId: taskForm.siteId || null,
+        dueDate: taskForm.dueDate || null,
+        weightPercent: taskForm.weightPercent || null,
+        progressPercent: taskForm.progressPercent || null,
+      });
+      applyTracking(data);
       setTaskForm(emptyTaskForm);
     } catch (error: any) {
       alert(error.message);
@@ -307,7 +401,7 @@ export default function ProjectTrackingSection({ orderId }: { orderId: string })
     if (!issueForm.title.trim()) return alert(`${labels.issue} ${labels.needed}`);
     try {
       const data = await apiJson<TrackingPayload>(`/orders/${orderId}/issues`, 'POST', { ...issueForm, siteId: issueForm.siteId || null });
-      setTracking(data);
+      applyTracking(data);
       setIssueForm(emptyIssueForm);
     } catch (error: any) {
       alert(error.message);
@@ -318,7 +412,7 @@ export default function ProjectTrackingSection({ orderId }: { orderId: string })
     if (!materialForm.materialName.trim()) return alert(`${labels.materialName} ${labels.needed}`);
     try {
       const data = await apiJson<TrackingPayload>(`/orders/${orderId}/materials`, 'POST', { ...materialForm, siteId: materialForm.siteId || null });
-      setTracking(data);
+      applyTracking(data);
       setMaterialForm(emptyMaterialForm);
     } catch (error: any) {
       alert(error.message);
@@ -329,24 +423,28 @@ export default function ProjectTrackingSection({ orderId }: { orderId: string })
     if (!confirm(x.deleteConfirm)) return;
     try {
       const data = await apiJson<TrackingPayload>(path, 'DELETE');
-      setTracking(data);
+      applyTracking(data);
     } catch (error: any) {
       alert(error.message);
     }
   }
 
-  async function updateTaskStatus(task: TrackingTask, status: string) {
+  async function saveTask(task: TrackingTask, forcedStatus?: string) {
+    const form = taskEditForms[task.id] || {};
+    const status = forcedStatus || form.status || task.status;
     try {
       const data = await apiJson<TrackingPayload>(`/orders/${orderId}/tasks/${task.id}`, 'PATCH', {
         siteId: task.siteId || null,
         taskName: task.taskName,
         status,
+        weightPercent: form.weightPercent === '' || form.weightPercent === undefined ? null : form.weightPercent,
+        progressPercent: form.progressPercent === '' || form.progressPercent === undefined ? null : form.progressPercent,
         responsibleType: task.responsibleType,
         responsibleName: task.responsibleName,
         dueDate: task.dueDate,
         notes: task.notes,
       });
-      setTracking(data);
+      applyTracking(data);
     } catch (error: any) {
       alert(error.message);
     }
@@ -368,7 +466,7 @@ export default function ProjectTrackingSection({ orderId }: { orderId: string })
         responsibleName: issue.responsibleName,
         resolutionNote,
       });
-      setTracking(data);
+      applyTracking(data);
     } catch (error: any) {
       alert(error.message);
     }
@@ -383,7 +481,7 @@ export default function ProjectTrackingSection({ orderId }: { orderId: string })
         status,
         notes: material.notes,
       });
-      setTracking(data);
+      applyTracking(data);
     } catch (error: any) {
       alert(error.message);
     }
@@ -405,7 +503,20 @@ export default function ProjectTrackingSection({ orderId }: { orderId: string })
           <h3>{x.heading}</h3>
           <div className="muted">{x.description}</div>
         </div>
-        <button className="btn" onClick={loadTracking}>{x.refresh}</button>
+        <div className="project-page-actions">
+          <Link className="project-page-action" href={`/orders/${orderId}`}>
+            <span>ORDER</span>
+            <strong>{messages.common.back}</strong>
+          </Link>
+          <Link className="project-page-action monitoring" href={`/orders/${orderId}/monitoring`}>
+            <span>AI</span>
+            <strong>{labels.openMonitoring || x.aiAnalysis.title}</strong>
+          </Link>
+          <button className="project-page-action" onClick={loadTracking}>
+            <span>SYNC</span>
+            <strong>{x.refresh}</strong>
+          </button>
+        </div>
       </div>
 
       <div className="spacer" />
@@ -422,6 +533,11 @@ export default function ProjectTrackingSection({ orderId }: { orderId: string })
             <MetricCard title={x.metrics.overallProgress} subtitle={x.metrics.overallProgressSub} value={`${tracking.dashboard.overallProgressPercent}%`} accent="#2563eb" />
             <MetricCard title={x.metrics.openIssues} subtitle={x.metrics.openIssuesSub} value={tracking.dashboard.openIssueCount} accent="#dc2626" />
             <MetricCard title={x.metrics.tasksCompleted} subtitle={x.metrics.tasksCompletedSub} value={`${tracking.dashboard.completedTaskCount}/${tracking.dashboard.totalTaskCount}`} accent="#16a34a" />
+          </div>
+          <div className="row">
+            <MetricCard title={labels.plannedProgress} subtitle={labels.baseline} value={tracking.dashboard.plannedProgressPercent === null || tracking.dashboard.plannedProgressPercent === undefined ? x.none : `${tracking.dashboard.plannedProgressPercent}%`} accent="#7c3aed" />
+            <MetricCard title={labels.actualProgress} subtitle={labels.weightedProgress} value={`${tracking.dashboard.actualProgressPercent ?? tracking.dashboard.overallProgressPercent}%`} accent="#2563eb" />
+            <MetricCard title={labels.behindScheduleSites} subtitle={labels.delayPrediction} value={tracking.dashboard.behindScheduleSiteCount ?? 0} accent="#d97706" />
           </div>
 
           <div className="card">
@@ -451,6 +567,9 @@ export default function ProjectTrackingSection({ orderId }: { orderId: string })
                   <div style={{ width: `${site.progressPercent}%`, height: '100%', background: '#2563eb' }} />
                 </div>
                 <div className="muted" style={{ marginTop: 6 }}>{site.progressPercent}% {labels.complete}</div>
+                <div className="muted" style={{ marginTop: 6 }}>
+                  {labels.plannedProgress}: {site.plannedProgressPercent === null || site.plannedProgressPercent === undefined ? x.none : `${site.plannedProgressPercent}%`} | {labels.actualProgress}: {site.actualProgressPercent ?? site.progressPercent}% | {labels.delayStatus}: {displayLabel(site.delayStatus, labels, x.none)}
+                </div>
                 <div className="spacer" />
                 <div className="row">
                   <div><label>{labels.assignedWorkshops}</label><div>{site.workshopAssignments.length ? site.workshopAssignments.map((item) => item.workshop?.name || labels.workshop).join(', ') : x.none}</div></div>
@@ -478,6 +597,54 @@ export default function ProjectTrackingSection({ orderId }: { orderId: string })
             ))}
             {siteCards.length === 0 && <div className="muted">{labels.noSites}</div>}
           </div>
+        </div>
+      )}
+
+      {activeTab === 'baseline' && (
+        <div style={{ display: 'grid', gap: 12 }}>
+          <div className="card">
+            <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12, flexWrap: 'wrap', alignItems: 'center' }}>
+              <div>
+                <strong>{labels.baseline}</strong>
+                <div className="muted">{labels.baselineDescription}</div>
+              </div>
+              <button className="btn primary" onClick={suggestBaseline} disabled={suggestingBaseline}>{suggestingBaseline ? labels.suggestingBaseline : labels.suggestBaseline}</button>
+            </div>
+          </div>
+          {siteCards.map((site) => {
+            const form = baselineForms[site.siteId] || {};
+            return (
+              <div key={`baseline-${site.siteId}`} className="card">
+                <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12, flexWrap: 'wrap', alignItems: 'center' }}>
+                  <div>
+                    <div style={{ fontWeight: 800 }}>{site.siteName}</div>
+                    <div className="muted">{labels.baselineStatus}: {displayLabel(site.baselineStatus, labels, x.none)}</div>
+                  </div>
+                  <StatusBadge value={site.delayStatus || 'unknown'} labels={labels} none={x.none} />
+                </div>
+                <div className="spacer" />
+                <div className="row">
+                  <Field label={labels.baselineStartDate}><input type="date" value={form.plannedStartDate || ''} onChange={(event) => setBaselineForms({ ...baselineForms, [site.siteId]: { ...form, plannedStartDate: event.target.value } })} /></Field>
+                  <Field label={labels.baselineEndDate}><input type="date" value={form.plannedEndDate || ''} onChange={(event) => setBaselineForms({ ...baselineForms, [site.siteId]: { ...form, plannedEndDate: event.target.value } })} /></Field>
+                  <Field label={labels.notes}><input value={form.notes || ''} onChange={(event) => setBaselineForms({ ...baselineForms, [site.siteId]: { ...form, notes: event.target.value } })} /></Field>
+                </div>
+                <div className="spacer" />
+                <div className="row">
+                  <div><label>{labels.plannedProgress}</label><div>{site.plannedProgressPercent === null || site.plannedProgressPercent === undefined ? x.none : `${site.plannedProgressPercent}%`}</div></div>
+                  <div><label>{labels.actualProgress}</label><div>{site.actualProgressPercent ?? site.progressPercent}%</div></div>
+                  <div><label>{labels.progressDelta}</label><div>{site.progressDeltaPercent === null || site.progressDeltaPercent === undefined ? x.none : `${site.progressDeltaPercent}%`}</div></div>
+                  <div><label>{labels.predictedFinish}</label><div>{shortDate(site.predictedFinishDate, x.none)}</div></div>
+                  <div><label>{labels.delayDays}</label><div>{site.delayDays === null || site.delayDays === undefined ? x.none : site.delayDays}</div></div>
+                </div>
+                <div className="spacer" />
+                <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+                  <button className="btn" onClick={() => saveBaseline(site, 'draft')}>{labels.saveBaseline}</button>
+                  <button className="btn primary" onClick={() => saveBaseline(site, 'confirmed')}>{labels.confirmBaseline}</button>
+                </div>
+              </div>
+            );
+          })}
+          {siteCards.length === 0 && <div className="muted">{labels.noSites}</div>}
         </div>
       )}
 
@@ -547,6 +714,8 @@ export default function ProjectTrackingSection({ orderId }: { orderId: string })
             <div className="row">
               <Field label={labels.task}><input value={taskForm.taskName} onChange={(event) => setTaskForm({ ...taskForm, taskName: event.target.value })} /></Field>
               <Field label={labels.status}><OptionSelect value={taskForm.status} options={taskStatusOptions} labels={labels} none={x.none} onChange={(status) => setTaskForm({ ...taskForm, status })} /></Field>
+              <Field label={labels.weightPercent}><input type="number" min="0" max="100" value={taskForm.weightPercent} onChange={(event) => setTaskForm({ ...taskForm, weightPercent: event.target.value })} /></Field>
+              <Field label={labels.taskProgressPercent}><input type="number" min="0" max="100" value={taskForm.progressPercent} onChange={(event) => setTaskForm({ ...taskForm, progressPercent: event.target.value })} /></Field>
               <Field label={labels.responsible}><OptionSelect value={taskForm.responsibleType} options={['not_assigned', 'workshop']} labels={labels} none={x.none} onChange={(responsibleType) => setTaskForm({ ...taskForm, responsibleType })} /></Field>
               <Field label={labels.dueDate}><input type="date" value={taskForm.dueDate} onChange={(event) => setTaskForm({ ...taskForm, dueDate: event.target.value })} /></Field>
             </div>
@@ -558,14 +727,24 @@ export default function ProjectTrackingSection({ orderId }: { orderId: string })
             <div className="spacer" />
             <button className="btn primary" onClick={createTask}>{x.actions.addTask}</button>
           </TrackingFormCard>
-          <TrackingTable headers={[labels.task, labels.siteArea, labels.status, labels.responsible, labels.dueDate, labels.actions]} emptyLabel={x.noRecords} rows={tracking.tasks.map((task) => [
-            task.taskName,
-            siteName(task, x.generalProjectUpdate),
-            <StatusBadge key="status" value={task.status} labels={labels} none={x.none} />,
-            `${displayLabel(task.responsibleType, labels, x.none)}${task.responsibleName ? `: ${task.responsibleName}` : ''}`,
-            shortDate(task.dueDate, x.none),
-            <div key="actions" style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}><button className="btn secondary" onClick={() => updateTaskStatus(task, 'completed')}>{x.actions.complete}</button><button className="btn danger secondary" onClick={() => deleteItem(`/orders/${orderId}/tasks/${task.id}`)}>{x.actions.delete}</button></div>,
-          ])} />
+          <TrackingTable headers={[labels.task, labels.siteArea, labels.status, labels.weightPercent, labels.taskProgressPercent, labels.responsible, labels.dueDate, labels.actions]} emptyLabel={x.noRecords} rows={tracking.tasks.map((task) => {
+            const form = taskEditForms[task.id] || {};
+            const updateTaskForm = (patch: FormState) => setTaskEditForms({ ...taskEditForms, [task.id]: { ...form, ...patch } });
+            return [
+              task.taskName,
+              siteName(task, x.generalProjectUpdate),
+              <OptionSelect key="status" value={form.status || task.status} options={taskStatusOptions} labels={labels} none={x.none} onChange={(status) => updateTaskForm({ status })} />,
+              <input key="weight" type="number" min="0" max="100" value={form.weightPercent ?? ''} onChange={(event) => updateTaskForm({ weightPercent: event.target.value })} style={{ maxWidth: 90 }} />,
+              <input key="progress" type="number" min="0" max="100" value={form.progressPercent ?? ''} onChange={(event) => updateTaskForm({ progressPercent: event.target.value })} style={{ maxWidth: 90 }} />,
+              `${displayLabel(task.responsibleType, labels, x.none)}${task.responsibleName ? `: ${task.responsibleName}` : ''}`,
+              shortDate(task.dueDate, x.none),
+              <div key="actions" style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+                <button className="btn secondary" onClick={() => saveTask(task)}>{x.actions.saveTask}</button>
+                <button className="btn secondary" onClick={() => saveTask(task, 'completed')}>{x.actions.complete}</button>
+                <button className="btn danger secondary" onClick={() => deleteItem(`/orders/${orderId}/tasks/${task.id}`)}>{x.actions.delete}</button>
+              </div>,
+            ];
+          })} />
         </div>
       )}
 
