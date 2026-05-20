@@ -170,6 +170,9 @@ class Order(Base):
     workshop_assignments: Mapped[list["WorkshopSiteAssignment"]] = relationship(
         back_populates="order", cascade="all, delete-orphan"
     )
+    site_baselines: Mapped[list["ProjectSiteBaseline"]] = relationship(
+        back_populates="order", cascade="all, delete-orphan"
+    )
 
 
 class Site(Base):
@@ -198,6 +201,36 @@ class Site(Base):
     workshop_assignments: Mapped[list["WorkshopSiteAssignment"]] = relationship(
         back_populates="site", cascade="all, delete-orphan"
     )
+    baseline_plan: Mapped["ProjectSiteBaseline | None"] = relationship(
+        back_populates="site", cascade="all, delete-orphan", uselist=False
+    )
+
+
+class ProjectSiteBaseline(Base):
+    __tablename__ = "ProjectSiteBaseline"
+    __table_args__ = (
+        UniqueConstraint("orderId", "siteId", name="ProjectSiteBaseline_orderId_siteId_key"),
+        Index("ProjectSiteBaseline_orderId_idx", "orderId"),
+        Index("ProjectSiteBaseline_siteId_idx", "siteId"),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid4()))
+    order_id: Mapped[str] = mapped_column("orderId", String(36), ForeignKey("Order.id"), nullable=False)
+    site_id: Mapped[str] = mapped_column("siteId", String(36), ForeignKey("Site.id"), nullable=False)
+    planned_start_date: Mapped[datetime | None] = mapped_column("plannedStartDate", DateTime(timezone=True))
+    planned_end_date: Mapped[datetime | None] = mapped_column("plannedEndDate", DateTime(timezone=True))
+    baseline_status: Mapped[str] = mapped_column(
+        "baselineStatus", String, nullable=False, default="draft", server_default="draft"
+    )
+    source: Mapped[str] = mapped_column(String, nullable=False, default="manual", server_default="manual")
+    notes: Mapped[str | None] = mapped_column(Text)
+    created_at: Mapped[datetime] = mapped_column("createdAt", DateTime(timezone=True), server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(
+        "updatedAt", DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
+    )
+
+    order: Mapped[Order] = relationship(back_populates="site_baselines")
+    site: Mapped[Site] = relationship(back_populates="baseline_plan")
 
 
 class Employee(Base):
@@ -367,6 +400,8 @@ class ProjectTask(Base):
     site_id: Mapped[str | None] = mapped_column("siteId", String(36), ForeignKey("Site.id"))
     task_name: Mapped[str] = mapped_column("taskName", String, nullable=False)
     status: Mapped[str] = mapped_column(String, nullable=False, default="not_started", server_default="not_started")
+    weight_percent: Mapped[Decimal | None] = mapped_column("weightPercent", Numeric(6, 2))
+    progress_percent: Mapped[int | None] = mapped_column("progressPercent", Integer)
     responsible_type: Mapped[str] = mapped_column(
         "responsibleType", String, nullable=False, default="not_assigned", server_default="not_assigned"
     )

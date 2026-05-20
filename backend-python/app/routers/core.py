@@ -1,7 +1,8 @@
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from decimal import Decimal
+from math import ceil
 from pathlib import Path
 from uuid import uuid4
 
@@ -28,6 +29,7 @@ from ..models import (
     ProjectMaterialLog,
     ProjectProgressPhoto,
     ProjectProgressUpdate,
+    ProjectSiteBaseline,
     ProjectTask,
     Site,
     Workshop,
@@ -46,12 +48,14 @@ from ..schemas import (
     ProjectIssuePayload,
     ProjectMaterialLogPayload,
     ProjectProgressUpdatePayload,
+    ProjectSiteBaselinePayload,
     ProjectTaskPayload,
     SitePayload,
     WorkshopPayload,
     WorkshopSiteAssignmentPayload,
     WorkEntryPayload,
 )
+from ..services.tracking_ai import analyze_tracking
 from ..services.timesheets import compute_timesheet_data
 from ..services.timesheet_documents import build_timesheet_docx, build_timesheet_pdf
 from ..utils import (
@@ -77,6 +81,7 @@ from ..utils import (
     progress_update_payload,
     project_issue_payload,
     project_material_log_payload,
+    project_site_baseline_payload,
     project_task_payload,
     parse_ymd_to_utc_start,
     raise_delete_error,
@@ -250,6 +255,14 @@ def _progress_percent(value: int | None) -> int | None:
     return int(value)
 
 
+def _task_weight_percent(value: float | int | None) -> Decimal | None:
+    parsed = decimal_or_none(value)
+    if parsed is None:
+        return None
+    ensure(Decimal("0") <= parsed <= Decimal("100"), "Aufgabengewicht muss zwischen 0 und 100 liegen.")
+    return parsed
+
+
 def _progress_photo_type_and_suffix(file: UploadFile) -> tuple[str, str]:
     content_type = (file.content_type or "").split(";")[0].strip().lower()
     suffix = Path(file.filename or "").suffix.lower()
@@ -294,6 +307,7 @@ def _load_tracking_parts(db: Session, order_id: str) -> tuple[
             joinedload(Order.customer),
             selectinload(Order.sites).selectinload(Site.assignments).joinedload(EmployeeAssignment.employee),
             selectinload(Order.sites).selectinload(Site.workshop_assignments).joinedload(WorkshopSiteAssignment.workshop),
+            selectinload(Order.sites).joinedload(Site.baseline_plan),
         )
         .where(Order.id == order_id)
     ).unique().scalar_one_or_none()
@@ -335,6 +349,12 @@ _WARNING_FIX_AREAS: dict[str, str] = {
     "overdue_task": "tasks",
     "no_workshop_assigned": "team",
     "progress_status_mismatch": "timeline",
+    "baseline_missing": "baseline",
+    "baseline_not_confirmed": "baseline",
+    "behind_schedule": "baseline",
+    "predicted_delay": "baseline",
+    "no_progress_velocity": "baseline",
+    "task_weights_missing": "tasks",
 }
 
 _WARNING_ACTIONS: dict[str, str] = {
@@ -345,6 +365,12 @@ _WARNING_ACTIONS: dict[str, str] = {
     "overdue_task": "Update the task due date or mark the task as completed if the work is done.",
     "no_workshop_assigned": "Assign a workshop to this site before execution starts.",
     "progress_status_mismatch": "Add a progress update so the site status and completion percentage match.",
+    "baseline_missing": "Create or confirm a baseline plan for this site.",
+    "baseline_not_confirmed": "Review the draft baseline dates and confirm them before using them for schedule control.",
+    "behind_schedule": "Review site progress and update tasks, blockers, materials, or workshop dates.",
+    "predicted_delay": "Review the predicted finish date and adjust the plan or execution actions.",
+    "no_progress_velocity": "Add task progress or progress updates so the system can forecast completion.",
+    "task_weights_missing": "Add task weights to improve automatic progress calculation.",
 }
 
 
@@ -381,6 +407,121 @@ def _scheduled_workshop_payload(assignment: WorkshopSiteAssignment, now: datetim
     return data
 
 
+def _effective_task_weights(tasks: list[ProjectTask]) -> tuple[dict[str, float], bool]:
+    if not tasks:
+        return {}, False
+
+    explicit: dict[str, float] = {}
+    missing: list[ProjectTask] = []
+    for task in tasks:
+        if task.weight_percent is None:
+            missing.append(task)
+            continue
+        weight = max(0.0, float(task.weight_percent))
+        if weight > 0:
+            explicit[task.id] = weight
+        else:
+            missing.append(task)
+
+    if not explicit:
+        even = 100.0 / len(tasks)
+        return {task.id: even for task in tasks}, True
+
+    remaining = max(0.0, 100.0 - sum(explicit.values()))
+    missing_weight = remaining / len(missing) if missing else 0.0
+    weights = dict(explicit)
+    for task in missing:
+        weights[task.id] = missing_weight
+    return weights, bool(missing)
+
+
+def _task_completion_percent(task: ProjectTask) -> float:
+    if task.status in {"completed", "done"}:
+        return 100.0
+    if task.status == "in_progress":
+        return float(_progress_percent(task.progress_percent) or 0)
+    return 0.0
+
+
+def _actual_site_progress(site_tasks: list[ProjectTask], latest_site_update: ProjectProgressUpdate | None) -> tuple[int, bool]:
+    if not site_tasks:
+        if latest_site_update and latest_site_update.progress_percent is not None:
+            return _progress_percent(latest_site_update.progress_percent) or 0, False
+        return 0, False
+
+    weights, weights_missing = _effective_task_weights(site_tasks)
+    total_weight = sum(weights.values())
+    if total_weight <= 0:
+        return 0, weights_missing
+
+    progress = sum((weights.get(task.id, 0.0) * _task_completion_percent(task)) / 100.0 for task in site_tasks)
+    return max(0, min(100, round((progress / total_weight) * 100))), weights_missing
+
+
+def _baseline_plan_payload(item: ProjectSiteBaseline | None) -> dict | None:
+    return project_site_baseline_payload(item)
+
+
+def _linear_planned_progress(baseline: ProjectSiteBaseline | None, now: datetime) -> int | None:
+    if not baseline or not baseline.planned_start_date or not baseline.planned_end_date:
+        return None
+    start = _comparison_datetime(baseline.planned_start_date)
+    end = _comparison_datetime(baseline.planned_end_date)
+    current = _comparison_datetime(now)
+    if not start or not end or not current:
+        return None
+    if end <= start:
+        return 100 if current >= end else 0
+    if current <= start:
+        return 0
+    if current >= end:
+        return 100
+    return max(0, min(100, round(((current - start).total_seconds() / (end - start).total_seconds()) * 100)))
+
+
+def _delay_forecast(baseline: ProjectSiteBaseline | None, actual_progress: int, now: datetime) -> dict:
+    empty = {"predictedFinishDate": None, "delayDays": None, "delayStatus": "unknown"}
+    if not baseline or baseline.baseline_status != "confirmed" or not baseline.planned_start_date or not baseline.planned_end_date:
+        return empty
+
+    start = _comparison_datetime(baseline.planned_start_date)
+    end = _comparison_datetime(baseline.planned_end_date)
+    current = _comparison_datetime(now)
+    if not start or not end or not current:
+        return empty
+
+    if current < start:
+        return {"predictedFinishDate": baseline.planned_end_date, "delayDays": 0, "delayStatus": "on_track"}
+
+    if actual_progress >= 100:
+        delay_days = max(0, ceil((current - end).total_seconds() / 86400))
+        return {
+            "predictedFinishDate": now,
+            "delayDays": delay_days,
+            "delayStatus": "delayed" if delay_days > 0 else "on_track",
+        }
+
+    elapsed_days = max((current - start).total_seconds() / 86400, 0.0)
+    if elapsed_days <= 0 or actual_progress <= 0:
+        if current > end:
+            return {"predictedFinishDate": None, "delayDays": ceil((current - end).total_seconds() / 86400), "delayStatus": "delayed"}
+        return empty
+
+    daily_progress = actual_progress / elapsed_days
+    if daily_progress <= 0:
+        return empty
+    remaining_days = (100 - actual_progress) / daily_progress
+    predicted = now + timedelta(days=remaining_days)
+    delay_days = max(0, ceil((_comparison_datetime(predicted) - end).total_seconds() / 86400))
+    if delay_days == 0:
+        status = "on_track"
+    elif delay_days <= 2:
+        status = "watch"
+    else:
+        status = "delayed"
+    return {"predictedFinishDate": predicted, "delayDays": delay_days, "delayStatus": status}
+
+
 def _tracking_response(db: Session, order_id: str) -> dict:
     order, updates, tasks, issues, materials = _load_tracking_parts(db, order_id)
     completed_task_statuses = {"completed", "done"}
@@ -391,6 +532,9 @@ def _tracking_response(db: Session, order_id: str) -> dict:
     now = datetime.now(timezone.utc)
     today_start = datetime(now.year, now.month, now.day)
     dashboard_warnings: list[dict] = []
+    site_actual_values: list[int] = []
+    site_planned_values: list[int] = []
+    behind_schedule_site_count = 0
 
     site_cards = []
     for site in order.sites:
@@ -399,14 +543,21 @@ def _tracking_response(db: Session, order_id: str) -> dict:
         site_materials = [item for item in materials if item.site_id == site.id]
         site_issues = [item for item in issues if item.site_id == site.id and item.status in open_issue_statuses]
         latest_site_update = site_updates[0] if site_updates else None
-        site_completed = [item for item in site_tasks if item.status in completed_task_statuses]
-        if latest_site_update and latest_site_update.progress_percent is not None:
-            progress_percent = latest_site_update.progress_percent
-        elif site_tasks:
-            progress_percent = round((len(site_completed) / len(site_tasks)) * 100)
-        else:
-            progress_percent = 0
+        actual_progress_percent, task_weights_missing = _actual_site_progress(site_tasks, latest_site_update)
+        progress_percent = actual_progress_percent
         current_status = latest_site_update.status if latest_site_update else "not_started"
+        baseline_plan = site.baseline_plan
+        confirmed_baseline_plan = baseline_plan if baseline_plan and baseline_plan.baseline_status == "confirmed" else None
+        planned_progress_percent = _linear_planned_progress(confirmed_baseline_plan, now)
+        progress_delta_percent = (
+            actual_progress_percent - planned_progress_percent if planned_progress_percent is not None else None
+        )
+        forecast = _delay_forecast(confirmed_baseline_plan, actual_progress_percent, now)
+        site_actual_values.append(actual_progress_percent)
+        if planned_progress_percent is not None:
+            site_planned_values.append(planned_progress_percent)
+        if progress_delta_percent is not None and progress_delta_percent < -10:
+            behind_schedule_site_count += 1
 
         latest_photos: list[dict] = []
         for update in site_updates:
@@ -421,7 +572,22 @@ def _tracking_response(db: Session, order_id: str) -> dict:
         workshop_names = [item.get("workshop", {}).get("name") for item in workshop_assignments if item.get("workshop", {}).get("name")]
         workshop_skills = sorted({skill for item in workshop_assignments for skill in item.get("coveredSkills", [])})
         schedule_warnings: list[dict] = []
-        site_has_execution_data = bool(site_updates or site_tasks or site_materials or site_issues)
+        site_has_execution_data = bool(site_updates or site_tasks or site_materials or site_issues or site.workshop_assignments)
+        if site.is_active and site_has_execution_data and not baseline_plan:
+            schedule_warnings.append(_warning_payload("baseline_missing", "medium", f"Site {site.site_name} has no baseline schedule.", site))
+        elif baseline_plan and baseline_plan.baseline_status != "confirmed":
+            schedule_warnings.append(_warning_payload("baseline_not_confirmed", "low", f"Site {site.site_name} has a draft baseline schedule.", site))
+        if progress_delta_percent is not None and progress_delta_percent < -10:
+            schedule_warnings.append(_warning_payload("behind_schedule", "medium", f"Site {site.site_name} is {abs(progress_delta_percent)}% behind planned progress.", site))
+        if forecast.get("delayStatus") in {"watch", "delayed"} and forecast.get("delayDays"):
+            severity = "high" if forecast.get("delayStatus") == "delayed" else "medium"
+            schedule_warnings.append(_warning_payload("predicted_delay", severity, f"Site {site.site_name} is predicted to finish {forecast.get('delayDays')} day(s) late.", site))
+        if site_has_execution_data and baseline_plan and baseline_plan.baseline_status == "confirmed" and forecast.get("delayStatus") == "unknown":
+            start = _comparison_datetime(baseline_plan.planned_start_date)
+            if start and _comparison_datetime(now) and _comparison_datetime(now) > start and actual_progress_percent <= 0:
+                schedule_warnings.append(_warning_payload("no_progress_velocity", "medium", f"Site {site.site_name} has no measurable progress velocity.", site))
+        if task_weights_missing:
+            schedule_warnings.append(_warning_payload("task_weights_missing", "low", f"Site {site.site_name} has tasks without weight values.", site))
         if site.is_active and site_has_execution_data and not site.workshop_assignments:
             schedule_warnings.append(_warning_payload("no_workshop_assigned", "medium", f"Site {site.site_name} has tracking work but no workshop assignment.", site))
         latest_blocked = current_status == "blocked"
@@ -452,6 +618,16 @@ def _tracking_response(db: Session, order_id: str) -> dict:
                 "siteName": site.site_name,
                 "currentStatus": current_status,
                 "progressPercent": progress_percent,
+                "actualProgressPercent": actual_progress_percent,
+                "plannedProgressPercent": planned_progress_percent,
+                "progressDeltaPercent": progress_delta_percent,
+                "baselinePlan": _baseline_plan_payload(baseline_plan),
+                "baselineStartDate": baseline_plan.planned_start_date if baseline_plan else None,
+                "baselineEndDate": baseline_plan.planned_end_date if baseline_plan else None,
+                "baselineStatus": baseline_plan.baseline_status if baseline_plan else None,
+                "predictedFinishDate": forecast.get("predictedFinishDate"),
+                "delayDays": forecast.get("delayDays"),
+                "delayStatus": forecast.get("delayStatus"),
                 "lastUpdateDate": latest_site_update.update_date if latest_site_update else None,
                 "assignedEmployees": [],
                 "workshopAssignments": workshop_assignments,
@@ -474,7 +650,8 @@ def _tracking_response(db: Session, order_id: str) -> dict:
 
     all_photos = [progress_photo_payload(photo) for update in updates for photo in update.photos]
     total_tasks = len(tasks)
-    dashboard_progress = round((len(completed_tasks) / total_tasks) * 100) if total_tasks else 0
+    dashboard_progress = round(sum(site_actual_values) / len(site_actual_values)) if site_actual_values else (round((len(completed_tasks) / total_tasks) * 100) if total_tasks else 0)
+    dashboard_planned_progress = round(sum(site_planned_values) / len(site_planned_values)) if site_planned_values else None
     next_actions = [
         update.next_action for update in updates if update.next_action and update.status not in {"completed", "done"}
     ][:5]
@@ -484,6 +661,9 @@ def _tracking_response(db: Session, order_id: str) -> dict:
         "dashboard": {
             "overallStatus": "blocked" if open_issues else (latest_update.status if latest_update else order.status),
             "overallProgressPercent": dashboard_progress,
+            "plannedProgressPercent": dashboard_planned_progress,
+            "actualProgressPercent": dashboard_progress,
+            "behindScheduleSiteCount": behind_schedule_site_count,
             "openIssueCount": len(open_issues),
             "completedTaskCount": len(completed_tasks),
             "totalTaskCount": total_tasks,
@@ -498,6 +678,59 @@ def _tracking_response(db: Session, order_id: str) -> dict:
         "issues": [project_issue_payload(issue) for issue in issues],
         "materials": [project_material_log_payload(material) for material in materials],
     }
+
+
+def _suggest_site_baseline_dates(order: Order, sites: list[Site], site: Site, index: int, now: datetime) -> tuple[datetime, datetime]:
+    dated_assignments = [
+        item
+        for item in site.workshop_assignments
+        if item.start_date is not None and item.end_date is not None
+    ]
+    if dated_assignments:
+        return min(item.start_date for item in dated_assignments if item.start_date), max(
+            item.end_date for item in dated_assignments if item.end_date
+        )
+
+    order_start = order.start_date or now
+    order_end = order.end_date or (order_start + timedelta(days=max(1, len(sites) * 3)))
+    start = _comparison_datetime(order_start) or _comparison_datetime(now) or datetime.utcnow()
+    end = _comparison_datetime(order_end) or start
+    if end < start:
+        end = start
+
+    total_days = max(1, (end - start).days + 1)
+    slot_days = max(1, ceil(total_days / max(1, len(sites))))
+    site_start = start + timedelta(days=min(index * slot_days, total_days - 1))
+    site_end = end if index == len(sites) - 1 else min(end, site_start + timedelta(days=slot_days - 1))
+    return site_start.replace(tzinfo=timezone.utc), site_end.replace(tzinfo=timezone.utc)
+
+
+def _upsert_site_baseline(
+    db: Session,
+    order_id: str,
+    site_id: str,
+    planned_start: datetime,
+    planned_end: datetime,
+    status: str,
+    source: str,
+    notes: str | None,
+) -> ProjectSiteBaseline:
+    ensure(planned_end >= planned_start, "Baseline-Enddatum muss nach dem Startdatum liegen.")
+    item = db.scalar(
+        select(ProjectSiteBaseline).where(
+            ProjectSiteBaseline.order_id == order_id,
+            ProjectSiteBaseline.site_id == site_id,
+        )
+    )
+    if not item:
+        item = ProjectSiteBaseline(order_id=order_id, site_id=site_id)
+        db.add(item)
+    item.planned_start_date = planned_start
+    item.planned_end_date = planned_end
+    item.baseline_status = status
+    item.source = source
+    item.notes = _normalize_optional_text(notes)
+    return item
 
 
 
@@ -1042,6 +1275,71 @@ def get_order_tracking(order_id: str, db: Session = Depends(get_db)) -> dict:
     return _tracking_response(db, order_id)
 
 
+@router.post("/orders/{order_id}/tracking/baseline/suggest")
+def suggest_order_tracking_baseline(order_id: str, db: Session = Depends(get_db)) -> dict:
+    order = db.execute(
+        select(Order)
+        .options(
+            selectinload(Order.sites).joinedload(Site.baseline_plan),
+            selectinload(Order.sites).selectinload(Site.workshop_assignments),
+        )
+        .where(Order.id == order_id)
+    ).unique().scalar_one_or_none()
+    if not order:
+        raise not_found()
+
+    sites = sorted([site for site in order.sites if site.is_active], key=lambda item: item.created_at)
+    now = datetime.now(timezone.utc)
+    for index, site in enumerate(sites):
+        if site.baseline_plan and site.baseline_plan.baseline_status == "confirmed":
+            continue
+        planned_start, planned_end = _suggest_site_baseline_dates(order, sites, site, index, now)
+        _upsert_site_baseline(
+            db,
+            order_id=order.id,
+            site_id=site.id,
+            planned_start=planned_start,
+            planned_end=planned_end,
+            status="draft",
+            source="ai_suggested",
+            notes="Draft baseline suggested from order dates and workshop schedule.",
+        )
+    db.commit()
+    return _tracking_response(db, order_id)
+
+
+@router.put("/orders/{order_id}/tracking/baseline/{site_id}")
+def update_order_site_tracking_baseline(
+    order_id: str, site_id: str, payload: ProjectSiteBaselinePayload, db: Session = Depends(get_db)
+) -> dict:
+    if not db.get(Order, order_id):
+        raise not_found()
+    _ensure_site_belongs_to_order(db, order_id, site_id)
+    planned_start = as_datetime(payload.plannedStartDate)
+    planned_end = as_datetime(payload.plannedEndDate)
+    ensure(planned_start is not None and planned_end is not None, "Baseline-Start und -Ende sind erforderlich.")
+    _upsert_site_baseline(
+        db,
+        order_id=order_id,
+        site_id=site_id,
+        planned_start=planned_start,
+        planned_end=planned_end,
+        status=payload.baselineStatus,
+        source=payload.source,
+        notes=payload.notes,
+    )
+    db.commit()
+    return _tracking_response(db, order_id)
+
+
+@router.post("/orders/{order_id}/tracking/analyze")
+def analyze_order_tracking(order_id: str, locale: str = Query(default="en"), db: Session = Depends(get_db)) -> dict:
+    if not db.get(Order, order_id):
+        raise not_found()
+    tracking = _tracking_response(db, order_id)
+    return analyze_tracking(tracking, locale=locale)
+
+
 @router.post("/orders/{order_id}/progress-updates", status_code=201)
 async def create_progress_update(
     order_id: str,
@@ -1185,6 +1483,8 @@ def create_project_task(order_id: str, payload: ProjectTaskPayload, db: Session 
         site_id=_normalize_optional_text(payload.siteId),
         task_name=payload.taskName.strip(),
         status=payload.status or "not_started",
+        weight_percent=_task_weight_percent(payload.weightPercent),
+        progress_percent=_progress_percent(payload.progressPercent),
         responsible_type=payload.responsibleType or "not_assigned",
         responsible_name=_normalize_optional_text(payload.responsibleName),
         due_date=as_datetime(payload.dueDate),
@@ -1205,6 +1505,8 @@ def update_project_task(order_id: str, task_id: str, payload: ProjectTaskPayload
     item.site_id = _normalize_optional_text(payload.siteId)
     item.task_name = payload.taskName.strip()
     item.status = payload.status or "not_started"
+    item.weight_percent = _task_weight_percent(payload.weightPercent)
+    item.progress_percent = _progress_percent(payload.progressPercent)
     item.responsible_type = payload.responsibleType or "not_assigned"
     item.responsible_name = _normalize_optional_text(payload.responsibleName)
     item.due_date = as_datetime(payload.dueDate)

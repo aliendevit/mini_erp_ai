@@ -6,7 +6,6 @@ import { useParams, useRouter } from 'next/navigation';
 
 import { useI18n } from '../../../lib/i18n';
 import { apiGet, apiJson } from '../../../lib/api';
-import ProjectTrackingSection from './ProjectTrackingSection';
 
 type Customer = { id: string; companyName: string };
 
@@ -286,9 +285,9 @@ export default function OrderDetailPage() {
 
   async function saveWorkshopAssignment() {
     if (!id) return;
-    if (!assignmentForm.siteId) return alert('Please select a site.');
-    if (!assignmentForm.workshopId) return alert('Please select a workshop.');
-    if (!assignmentForm.startDate || !assignmentForm.endDate) return alert('Please select workshop start and end dates.');
+    if (!assignmentForm.siteId) return alert(trackingLabels.selectSiteRequired || 'Please select a site.');
+    if (!assignmentForm.workshopId) return alert(trackingLabels.selectWorkshopRequired || 'Please select a workshop.');
+    if (!assignmentForm.startDate || !assignmentForm.endDate) return alert(trackingLabels.selectWorkshopDatesRequired || 'Please select workshop start and end dates.');
     const payload = {
       siteId: assignmentForm.siteId,
       workshopId: assignmentForm.workshopId,
@@ -332,6 +331,7 @@ export default function OrderDetailPage() {
   }
 
   const statusLabels = m.statuses.order;
+  const trackingLabels = m.trackingPage.labels;
 
   return (
     <div className="card">
@@ -344,6 +344,27 @@ export default function OrderDetailPage() {
           <Link className="btn" href="/orders">{m.common.back}</Link>
           <button className="btn danger" onClick={deleteOrder}>{m.orderDetailPage.deleteOrder}</button>
         </div>
+      </div>
+
+      <div className="spacer" />
+
+      <div className="order-action-panel">
+        <Link className="order-action-card tracking" href={`/orders/${order.id}/tracking`}>
+          <span className="order-action-icon">TRACK</span>
+          <span>
+            <strong>{trackingLabels.openTracking || m.trackingPage.heading}</strong>
+            <small>{m.trackingPage.description}</small>
+          </span>
+          <b>{'>'}</b>
+        </Link>
+        <Link className="order-action-card monitoring" href={`/orders/${order.id}/monitoring`}>
+          <span className="order-action-icon">AI</span>
+          <span>
+            <strong>{trackingLabels.openMonitoring || m.trackingPage.aiAnalysis.title}</strong>
+            <small>{m.trackingPage.aiAnalysis.description}</small>
+          </span>
+          <b>{'>'}</b>
+        </Link>
       </div>
 
       <div className="spacer" />
@@ -379,7 +400,7 @@ export default function OrderDetailPage() {
           <input value={orderForm.title || ''} onChange={(event) => setOrderForm({ ...orderForm, title: event.target.value })} />
         </div>
         <div>
-          <label>Fixed-price note / legacy hourly rate</label>
+          <label>{trackingLabels.fixedPriceNote || 'Fixed-price note / legacy hourly rate'}</label>
           <input value={(orderForm.defaultHourlyRate as string) || ''} onChange={(event) => setOrderForm({ ...orderForm, defaultHourlyRate: event.target.value })} />
         </div>
       </div>
@@ -436,7 +457,7 @@ export default function OrderDetailPage() {
           <tr>
             <th>{m.common.site}</th>
             <th>{m.orderDetailPage.address}</th>
-            <th>Assigned workshops</th>
+            <th>{trackingLabels.assignedWorkshops}</th>
             <th style={{ width: 260 }}>{m.common.actions}</th>
           </tr>
         </thead>
@@ -451,9 +472,9 @@ export default function OrderDetailPage() {
                   {siteAssignments.length > 0
                     ? siteAssignments.map((assignment) => (
                         <div key={assignment.id} style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
-                          <span>{assignment.workshop?.name || 'Workshop'}</span>
-                          <span className="muted">{listText(assignment.coveredSkills) || 'No covered trades set'}</span>
-                          <span className="muted">{assignment.startDate && assignment.endDate ? `${String(assignment.startDate).substring(0, 10)} - ${String(assignment.endDate).substring(0, 10)}` : 'Schedule missing'}</span>
+                          <span>{assignment.workshop?.name || trackingLabels.workshop}</span>
+                          <span className="muted">{listText(assignment.coveredSkills) || trackingLabels.noCoveredTrades}</span>
+                          <span className="muted">{assignment.startDate && assignment.endDate ? `${String(assignment.startDate).substring(0, 10)} - ${String(assignment.endDate).substring(0, 10)}` : trackingLabels.scheduleMissing}</span>
                           <button className="btn secondary" onClick={() => startEditWorkshopAssignment(assignment)}>{m.common.edit}</button>
                           <button className="btn danger secondary" onClick={() => removeWorkshopAssignment(assignment.id)}>{m.common.remove}</button>
                         </div>
@@ -484,10 +505,10 @@ export default function OrderDetailPage() {
       <div className="card">
         <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12, flexWrap: 'wrap' }}>
           <div>
-            <h3>{editingAssignmentId ? 'Edit workshop assignment' : 'Workshop execution'}</h3>
-            <div className="muted">{editingAssignmentId ? 'Update the existing workshop schedule, status, covered scope, or notes. This fixes schedule warnings without creating duplicate assignments.' : 'Assign trusted workshops to each site or work package. Employee assignment is no longer part of the main workflow.'}</div>
+            <h3>{editingAssignmentId ? trackingLabels.editWorkshopAssignment || 'Edit workshop assignment' : trackingLabels.workshopExecution || 'Workshop execution'}</h3>
+            <div className="muted">{editingAssignmentId ? trackingLabels.editWorkshopAssignmentDescription || 'Update the existing workshop schedule, status, covered scope, or notes. This fixes schedule warnings without creating duplicate assignments.' : trackingLabels.workshopExecutionDescription || 'Assign trusted workshops to each site or work package. Employee assignment is no longer part of the main workflow.'}</div>
           </div>
-          <Link className="btn" href="/workshops">Manage workshops</Link>
+          <Link className="btn" href="/workshops">{trackingLabels.manageWorkshops || 'Manage workshops'}</Link>
         </div>
         <div className="spacer" />
         <div className="row">
@@ -499,37 +520,37 @@ export default function OrderDetailPage() {
             </select>
           </div>
           <div>
-            <label>Workshop *</label>
+            <label>{trackingLabels.workshop} *</label>
             <select value={assignmentForm.workshopId} onChange={(event) => setAssignmentForm({ ...assignmentForm, workshopId: event.target.value })}>
-              {workshopOptions.map((workshop) => <option key={workshop.id} value={workshop.id}>{workshop.name}{workshop.availabilityStatus === 'not_available' ? ' (not available)' : ''}{workshop.specialties?.length ? ` (${listText(workshop.specialties)})` : ''}</option>)}
-              {workshopOptions.length === 0 && <option value="">No available workshops</option>}
+              {workshopOptions.map((workshop) => <option key={workshop.id} value={workshop.id}>{workshop.name}{workshop.availabilityStatus === 'not_available' ? ` (${trackingLabels.workshopUnavailable || 'not available'})` : ''}{workshop.specialties?.length ? ` (${listText(workshop.specialties)})` : ''}</option>)}
+              {workshopOptions.length === 0 && <option value="">{trackingLabels.noAvailableWorkshops || 'No available workshops'}</option>}
             </select>
           </div>
           <div>
-            <label>Status</label>
+            <label>{trackingLabels.status}</label>
             <select value={assignmentForm.status} onChange={(event) => setAssignmentForm({ ...assignmentForm, status: event.target.value })}>
-              <option value="planned">Planned</option>
-              <option value="assigned">Assigned</option>
-              <option value="in_progress">In progress</option>
-              <option value="blocked">Blocked</option>
-              <option value="completed">Completed</option>
-              <option value="canceled">Canceled</option>
+              <option value="planned">{trackingLabels.planned || 'Planned'}</option>
+              <option value="assigned">{trackingLabels.assigned || 'Assigned'}</option>
+              <option value="in_progress">{trackingLabels.in_progress}</option>
+              <option value="blocked">{trackingLabels.blocked}</option>
+              <option value="completed">{trackingLabels.completed}</option>
+              <option value="canceled">{trackingLabels.canceled || 'Canceled'}</option>
             </select>
           </div>
           <div>
-            <label>Start date *</label>
+            <label>{trackingLabels.startDate || 'Start date'} *</label>
             <input type="date" value={assignmentForm.startDate} onChange={(event) => setAssignmentForm({ ...assignmentForm, startDate: event.target.value })} />
           </div>
           <div>
-            <label>End date *</label>
+            <label>{trackingLabels.endDate || 'End date'} *</label>
             <input type="date" value={assignmentForm.endDate} onChange={(event) => setAssignmentForm({ ...assignmentForm, endDate: event.target.value })} />
           </div>
         </div>
         <div className="spacer" />
         <div className="row">
           <div>
-            <label>Covered trades / scope</label>
-            <textarea value={assignmentForm.coveredSkills} onChange={(event) => setAssignmentForm({ ...assignmentForm, coveredSkills: event.target.value })} placeholder="tiles, waterproofing, painting" />
+            <label>{trackingLabels.coveredTradesScope || trackingLabels.coveredTrades}</label>
+            <textarea value={assignmentForm.coveredSkills} onChange={(event) => setAssignmentForm({ ...assignmentForm, coveredSkills: event.target.value })} placeholder={trackingLabels.coveredTradesPlaceholder || 'tiles, waterproofing, painting'} />
           </div>
           <div>
             <label>{m.common.notes}</label>
@@ -538,15 +559,11 @@ export default function OrderDetailPage() {
         </div>
         <div className="spacer" />
         <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-          <button className="btn primary" onClick={saveWorkshopAssignment} disabled={!assignmentForm.siteId || !assignmentForm.workshopId || !assignmentForm.startDate || !assignmentForm.endDate}>{editingAssignmentId ? 'Save workshop assignment' : 'Assign workshop'}</button>
-          {editingAssignmentId && <button className="btn" onClick={cancelWorkshopAssignmentEdit}>Cancel edit</button>}
+          <button className="btn primary" onClick={saveWorkshopAssignment} disabled={!assignmentForm.siteId || !assignmentForm.workshopId || !assignmentForm.startDate || !assignmentForm.endDate}>{editingAssignmentId ? trackingLabels.saveWorkshopAssignment || 'Save workshop assignment' : trackingLabels.assignWorkshop || 'Assign workshop'}</button>
+          {editingAssignmentId && <button className="btn" onClick={cancelWorkshopAssignmentEdit}>{trackingLabels.cancelEdit || 'Cancel edit'}</button>}
         </div>
       </div>
 
-      <div className="spacer" />
-      <hr />
-
-      <ProjectTrackingSection orderId={order.id} />
     </div>
   );
 }

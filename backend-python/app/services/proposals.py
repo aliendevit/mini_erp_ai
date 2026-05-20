@@ -603,7 +603,7 @@ FACT_CATEGORIES = {
     "work_package",
     "contractor_workshop",
     "external_team",
-    "internal_staffing_need",
+    "workshop_need",
     "payment",
     "open_question",
 }
@@ -686,7 +686,7 @@ def build_memory_extraction_prompt(proposal: Proposal, messages: list[ProposalMe
     schema = {
         "facts": [
             {
-                "category": "customer|contact|project|site|work_package|contractor_workshop|external_team|internal_staffing_need|payment|open_question",
+                "category": "customer|contact|project|site|work_package|contractor_workshop|external_team|workshop_need|payment|open_question",
                 "key": "short stable key",
                 "value": "string, number, object, or array",
                 "confidence": "0.0-1.0",
@@ -726,7 +726,7 @@ def build_memory_extraction_prompt(proposal: Proposal, messages: list[ProposalMe
                 "notes": "string|null",
             }
         ],
-        "staffingPlan": "object|null",
+        "staffingPlan": "null",
     }
     return "\n".join(
         [
@@ -736,6 +736,7 @@ def build_memory_extraction_prompt(proposal: Proposal, messages: list[ProposalMe
             "Contractor context: the customer/contractor may mention workshops they already work with. If a workshop is an external team/subcontractor/company, put it in externalWorkshops and contractor_workshop/external_team facts. If it is a physical work area, room, site, or task package, put it in site/work_package facts instead.",
             "Payments: capture deposits, advance payments, installments, paid amounts, due payments, methods, and references.",
             "This business executes projects through external workshops/subcontractors. Never ask for or invent internal employees or internal headcount. Store required workshop trades and external teams mentioned by the manager.",
+            "staffingPlan must always be null. If execution responsibility is missing, store it as workshop_need / workshop to be selected, not as internal staffing.",
             f"Required JSON schema: {json.dumps(schema, ensure_ascii=True)}",
             "",
             "Current proposal id:",
@@ -1021,8 +1022,8 @@ def build_intake_chat_prompt(
 
     return "\n".join(
         [
-            "You are an ERP intake assistant for a German construction company.",
-            "Your job is to help a manager capture one contractor/client project intake as clearly as possible.",
+            "You are an ERP intake assistant for a construction/renovation company that coordinates external workshops and subcontractors.",
+            "Your job is to help a manager capture one client project intake as clearly as possible.",
             "Memory isolation rules:",
             "- Use only the current proposal fields, facts, memory summary, and transcript below.",
             "- Never use customer, payment, workshop, or project facts from another chat.",
@@ -1058,10 +1059,10 @@ def build_intake_chat_prompt(
             "- Never write role labels such as Manager:, User:, Assistant:, Human:, System:, ??????:, ????????:, or ???????:.",
             "- Never continue the conversation by inventing what the manager/user might say next.",
             "- Never create fake future turns, approvals, confirmations, or self-dialogue.",
-            "- Ask concise follow-up questions when scope, dates, site details, payment details, workshops, or staffing needs are missing.",
+            "- Ask concise follow-up questions when scope, dates, site details, payment details, workshop assignment, or access constraints are missing.",
             "- When the project scope is still unknown, ask only about work areas and required work types first.",
-            "- Do not ask about payment, staffing, workshops, or structural details in the same reply while the basic scope is still unknown, unless the manager already mentioned those topics.",
-            "- After work areas and work types are known, continue with the next missing group such as payments, workshops, staffing, or access constraints.",
+            "- Do not ask about payment, workshops, or structural details in the same reply while the basic scope is still unknown, unless the manager already mentioned those topics.",
+            "- After work areas and work types are known, continue with the next missing group such as payments, workshop assignment, or access constraints.",
             "- If the manager corrects a site or work package, acknowledge the correction and update that item directly.",
             "- Use plain business language.",
             "- Do not answer with vague generic summaries such as 'details are necessary', 'quality will be ensured', or 'provide more details if needed'.",
@@ -1125,12 +1126,12 @@ def build_proposal_prompt(messages: list[ProposalMessage], proposal: Proposal | 
                 "requiredSkills": ["string"],
                 "requiredCertifications": ["string"],
                 "estimatedHours": "number|null",
-                "recommendedHeadcount": "number|null",
-                "selectedInternalHeadcount": "number|null",
+                "recommendedHeadcount": "null",
+                "selectedInternalHeadcount": "null",
                 "assignedWorkshopName": "string|null",
                 "workshopCoveredSkills": ["string"],
-                "coverageType": "internal_only|mixed_with_workshop|workshop_only|null",
-                "resourceStrategy": "internal|external|mixed|null",
+                "coverageType": "workshop_only|null",
+                "resourceStrategy": "external|null",
             }
         ],
         "requiredSkills": ["string"],
@@ -1164,7 +1165,7 @@ def build_proposal_prompt(messages: list[ProposalMessage], proposal: Proposal | 
                 "notes": "string|null",
             }
         ],
-        "staffingPlan": "object|null",
+        "staffingPlan": "null",
     }
     language_mode = _conversation_language_mode(messages)
     language_rules = [
@@ -1200,13 +1201,13 @@ def build_proposal_prompt(messages: list[ProposalMessage], proposal: Proposal | 
             "The sum of proposedSites[].estimatedHours should match the top-level estimatedHours whenever possible.",
             "Classify contractor-provided workshops carefully: physical work areas become proposedSites/work packages; external teams or subcontractors become externalWorkshops.",
             "If deposits, advance payments, installments, paid amounts, or due payments are mentioned, include them in paymentDrafts.",
-            "Leave proposedSites[].recommendedHeadcount and proposedSites[].selectedInternalHeadcount null; internal employee planning is not part of this prototype flow.",
+            "Always leave proposedSites[].recommendedHeadcount and proposedSites[].selectedInternalHeadcount null; internal employee planning is not part of this prototype flow.",
             "If the manager mentions worker counts, treat them only as context notes unless they refer to workshop capacity; do not create internal employee requirements.",
             "Identify the required workshop trades for each site and set assignedWorkshopName/workshopCoveredSkills only when the manager names a workshop.",
-            "Suggest resourceStrategy per site when enough scope is known.",
+            "Use resourceStrategy=external when enough scope is known.",
             "Each proposed site must have its own requiredSkills subset. Do not copy the full project skill list into every site unless the transcript explicitly says the same scope applies to all sites.",
             "When a site is handled by a known external workshop or subcontractor, set proposedSites[].assignedWorkshopName, proposedSites[].workshopCoveredSkills, and proposedSites[].coverageType accordingly.",
-            "Use coverageType=workshop_only for sites handled entirely by a workshop. Use coverageType=mixed_with_workshop only if the manager explicitly says multiple workshops/parties split the scope. Do not use internal_only for new workshop-only proposals.",
+            "Use coverageType=workshop_only for all sites in this prototype. If the manager did not name a workshop, leave assignedWorkshopName null and write 'workshop to be selected' / 'needs workshop assignment' in notes.",
             "Do not place workshop coverage only at the top level. Store workshop/site relationships inside the matching proposedSites[] item whenever the transcript makes the relationship clear.",
             "Use the hidden construction checklist below to enrich orderDescription, proposedSites[].notes, and requiredSkills.",
             "Never invent checklist details. If a critical construction detail is unknown, write it as to be confirmed in notes/orderDescription.",
@@ -1514,33 +1515,21 @@ def _enrich_extracted_sites_from_transcript(
         if (not site.requiredSkills or (len(extracted.proposedSites) > 1 and site.requiredSkills == global_required_skills)) and site_specific_skills:
             site.requiredSkills = site_specific_skills
 
-        if internal_only:
-            site.coverageType = "internal_only"
-        elif assigned_workshop and no_internal:
-            site.coverageType = "workshop_only"
-            site.selectedInternalHeadcount = 0
-        elif assigned_workshop and (still_need_internal or internal_needed_skills):
-            site.coverageType = "mixed_with_workshop"
-        elif assigned_workshop and not site.coverageType:
-            site.coverageType = "mixed_with_workshop"
-
         # Workshop-only pivot: do not convert manager wording into internal employee requirements.
         site.recommendedHeadcount = None
         site.selectedInternalHeadcount = None
-        site.coverageType = "workshop_only" if assigned_workshop else (site.coverageType or "workshop_only")
+        site.coverageType = "workshop_only"
+        site.resourceStrategy = "external"
 
         if assigned_workshop:
             workshop_skills = _dedupe_strings(workshop_confirmed_skills + workshop_specialties)
-            if site.coverageType == "mixed_with_workshop":
-                workshop_skills = _dedupe_strings(skill for skill in workshop_skills + inferred_skills if skill not in internal_needed_skills)
-            elif not workshop_skills:
+            if not workshop_skills:
                 workshop_skills = _dedupe_strings(inferred_skills)
-            if site.coverageType == "workshop_only" and not workshop_skills:
+            if not workshop_skills:
                 workshop_skills = _dedupe_strings(site.requiredSkills or inferred_skills or global_required_skills)
             site.workshopCoveredSkills = workshop_skills
 
-        if site.coverageType == "workshop_only":
-            site.selectedInternalHeadcount = None
+        site.selectedInternalHeadcount = None
 
     return extracted
 

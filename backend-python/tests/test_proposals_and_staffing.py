@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import unittest
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 from pathlib import Path
 import sys
@@ -14,10 +14,11 @@ from sqlalchemy.orm import Session, sessionmaker
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from app.database import Base
-from app.models import Customer, CustomerWorkshop, Employee, EmployeeAvailabilityBlock, EmployeeSkill, Order, PaymentRecord, ProjectIssue, ProjectProgressUpdate, ProjectTask, Proposal, ProposalFact, ProposalMessage, Site, Workshop, WorkshopSiteAssignment
-from app.schemas import ProjectIssuePayload, ProjectTaskPayload, ProposalDraftPayload, WorkshopSiteAssignmentPayload
-from app.routers.core import create_order_workshop_assignment, create_project_issue, create_project_task, update_project_issue, update_project_task, update_workshop_assignment, _tracking_response
+from app.models import Customer, CustomerWorkshop, Employee, EmployeeAvailabilityBlock, EmployeeSkill, Order, PaymentRecord, ProjectIssue, ProjectProgressUpdate, ProjectSiteBaseline, ProjectTask, Proposal, ProposalFact, ProposalMessage, Site, Workshop, WorkshopSiteAssignment
+from app.schemas import ProjectIssuePayload, ProjectSiteBaselinePayload, ProjectTaskPayload, ProposalDraftPayload, WorkshopSiteAssignmentPayload
+from app.routers.core import analyze_order_tracking, create_order_workshop_assignment, create_project_issue, create_project_task, suggest_order_tracking_baseline, update_order_site_tracking_baseline, update_project_issue, update_project_task, update_workshop_assignment, _tracking_response
 from app.services.proposal_documents import _arabic_visual_text, build_proposal_pdf
+from app.services.tracking_ai import analyze_tracking, build_tracking_analysis_context
 from app.services.proposals import (
     ExtractedProposal,
     apply_proposal_update,
@@ -363,6 +364,157 @@ class ProposalAndStaffingTests(unittest.TestCase):
         self.assertEqual(site_card["progressPercent"], 50)
         self.assertIn("progress_status_mismatch", warning_types)
 
+    def test_tracking_baseline_suggestion_creates_draft_plans(self) -> None:
+        order, site, other_site, _workshop_a, _workshop_b = self._workshop_order_fixture()
+        order.start_date = datetime(2026, 6, 1, tzinfo=timezone.utc)
+        order.end_date = datetime(2026, 6, 10, tzinfo=timezone.utc)
+        self.db.commit()
+
+        result = suggest_order_tracking_baseline(order.id, db=self.db)
+        site_card = next(card for card in result["siteCards"] if card["siteId"] == site.id)
+        other_card = next(card for card in result["siteCards"] if card["siteId"] == other_site.id)
+
+        self.assertEqual(site_card["baselineStatus"], "draft")
+        self.assertEqual(other_card["baselineStatus"], "draft")
+        self.assertIsNotNone(site_card["baselineStartDate"])
+        self.assertIsNotNone(site_card["baselineEndDate"])
+        self.assertIsNone(site_card["plannedProgressPercent"])
+        self.assertIsNone(site_card["progressDeltaPercent"])
+        self.assertEqual(site_card["delayStatus"], "unknown")
+
+    def test_tracking_workshop_assignment_without_baseline_warns_missing_baseline(self) -> None:
+        order, site, _other_site, workshop_a, _workshop_b = self._workshop_order_fixture()
+        create_order_workshop_assignment(
+            order.id,
+            self._assignment_payload(
+                site,
+                workshop_a,
+                datetime(2026, 6, 1, tzinfo=timezone.utc),
+                datetime(2026, 6, 5, tzinfo=timezone.utc),
+            ),
+            self.db,
+        )
+
+        result = _tracking_response(self.db, order.id)
+        site_card = next(card for card in result["siteCards"] if card["siteId"] == site.id)
+        warning_types = {warning["type"] for warning in site_card["scheduleWarnings"]}
+
+        self.assertIn("baseline_missing", warning_types)
+
+    def test_tracking_weighted_progress_and_delay_prediction(self) -> None:
+        order, site, _other_site, _workshop_a, _workshop_b = self._workshop_order_fixture()
+        now = datetime.now(timezone.utc)
+        self.db.add(
+            ProjectSiteBaseline(
+                order_id=order.id,
+                site_id=site.id,
+                planned_start_date=now - timedelta(days=10),
+                planned_end_date=now - timedelta(days=1),
+                baseline_status="confirmed",
+                source="manual",
+            )
+        )
+        self.db.add_all(
+            [
+                ProjectTask(order_id=order.id, site_id=site.id, task_name="Remove old tiles", status="completed", weight_percent=Decimal("40")),
+                ProjectTask(order_id=order.id, site_id=site.id, task_name="Install new tiles", status="in_progress", weight_percent=Decimal("60"), progress_percent=50),
+            ]
+        )
+        self.db.commit()
+
+        result = _tracking_response(self.db, order.id)
+        site_card = next(card for card in result["siteCards"] if card["siteId"] == site.id)
+        warning_types = {warning["type"] for warning in site_card["scheduleWarnings"]}
+
+        self.assertEqual(site_card["actualProgressPercent"], 70)
+        self.assertEqual(site_card["progressPercent"], 70)
+        self.assertEqual(site_card["baselineStatus"], "confirmed")
+        self.assertIn(site_card["delayStatus"], {"watch", "delayed"})
+        self.assertIn("behind_schedule", warning_types)
+
+    def test_tracking_task_weights_missing_warning_and_even_fallback(self) -> None:
+        order, site, _other_site, _workshop_a, _workshop_b = self._workshop_order_fixture()
+        self.db.add_all(
+            [
+                ProjectTask(order_id=order.id, site_id=site.id, task_name="Task A", status="completed"),
+                ProjectTask(order_id=order.id, site_id=site.id, task_name="Task B", status="not_started"),
+            ]
+        )
+        self.db.commit()
+
+        result = _tracking_response(self.db, order.id)
+        site_card = next(card for card in result["siteCards"] if card["siteId"] == site.id)
+        warning_types = {warning["type"] for warning in site_card["scheduleWarnings"]}
+
+        self.assertEqual(site_card["actualProgressPercent"], 50)
+        self.assertIn("task_weights_missing", warning_types)
+
+    def test_tracking_baseline_update_confirms_manager_dates(self) -> None:
+        order, site, _other_site, _workshop_a, _workshop_b = self._workshop_order_fixture()
+        payload = ProjectSiteBaselinePayload(
+            plannedStartDate=datetime(2026, 6, 1, tzinfo=timezone.utc),
+            plannedEndDate=datetime(2026, 6, 5, tzinfo=timezone.utc),
+            baselineStatus="confirmed",
+            source="manual",
+            notes="Approved baseline",
+        )
+
+        result = update_order_site_tracking_baseline(order.id, site.id, payload, db=self.db)
+        site_card = next(card for card in result["siteCards"] if card["siteId"] == site.id)
+
+        self.assertEqual(site_card["baselineStatus"], "confirmed")
+        self.assertEqual(site_card["baselinePlan"]["notes"], "Approved baseline")
+
+    def test_tracking_analysis_context_includes_rule_warnings(self) -> None:
+        order, site, _other_site, _workshop_a, _workshop_b = self._workshop_order_fixture()
+        create_project_task(
+            order.id,
+            ProjectTaskPayload(siteId=site.id, taskName="Prepare surface", status="not_started"),
+            self.db,
+        )
+
+        tracking = _tracking_response(self.db, order.id)
+        context = build_tracking_analysis_context(tracking)
+        warning_types = {warning["type"] for warning in context["dashboard"]["warnings"]}
+
+        self.assertEqual(context["order"]["title"], order.title)
+        self.assertIn("no_workshop_assigned", warning_types)
+        self.assertEqual(context["sites"][0]["siteName"], site.site_name)
+
+    def test_tracking_analysis_uses_ai_json_when_available(self) -> None:
+        order, site, _other_site, _workshop_a, _workshop_b = self._workshop_order_fixture()
+        create_project_task(order.id, ProjectTaskPayload(siteId=site.id, taskName="Prepare surface"), self.db)
+        tracking = _tracking_response(self.db, order.id)
+        ai_json = """{
+          "healthStatus": "watch",
+          "summary": "Project needs workshop assignment.",
+          "risks": [{"title":"No workshop","severity":"medium","siteName":"Kitchen","reason":"No workshop assigned"}],
+          "delays": [],
+          "missingInformation": ["Workshop assignment"],
+          "recommendedActions": [{"priority":"medium","siteName":"Kitchen","action":"Assign workshop"}],
+          "assumptions": ["Photo metadata only"]
+        }"""
+
+        with patch("app.services.tracking_ai.generate_text", return_value=ai_json):
+            result = analyze_tracking(tracking, locale="en")
+
+        self.assertEqual(result["provider"], "ai")
+        self.assertEqual(result["healthStatus"], "watch")
+        self.assertEqual(result["summary"], "Project needs workshop assignment.")
+        self.assertTrue(result["sourceWarnings"])
+
+    def test_tracking_analysis_endpoint_falls_back_when_ai_fails(self) -> None:
+        order, site, _other_site, _workshop_a, _workshop_b = self._workshop_order_fixture()
+        create_project_task(order.id, ProjectTaskPayload(siteId=site.id, taskName="Prepare surface"), self.db)
+
+        with patch("app.services.tracking_ai.generate_text", side_effect=HTTPException(status_code=502, detail="quota")):
+            result = analyze_order_tracking(order.id, locale="ar", db=self.db)
+
+        self.assertEqual(result["provider"], "rule_fallback")
+        self.assertIn(result["healthStatus"], {"watch", "at_risk", "blocked"})
+        self.assertTrue(result["recommendedActions"])
+        self.assertEqual(result["aiError"], "quota")
+
     def test_workshop_assignment_update_ignores_itself_for_overlap_check(self) -> None:
         order, site, _other_site, workshop_a, _workshop_b = self._workshop_order_fixture()
         created = create_order_workshop_assignment(
@@ -545,7 +697,8 @@ class ProposalAndStaffingTests(unittest.TestCase):
         self.assertIn("Do not ask for any detail the manager already stated", prompt)
         self.assertIn("ask only for the missing part", prompt)
         self.assertIn("When the project scope is still unknown", prompt)
-        self.assertIn("Do not ask about payment, staffing, workshops, or structural details", prompt)
+        self.assertIn("Do not ask about payment, workshops, or structural details", prompt)
+        self.assertNotIn("staffing needs", prompt)
         self.assertIn("repeat it exactly and ask only for the missing payment fields", prompt)
         self.assertIn("Never change numbers, amounts, currencies", prompt)
         self.assertIn("never add placeholder or example phone numbers", prompt)

@@ -35,7 +35,7 @@ def build_timesheet_pdf(data: dict) -> bytes:
                 ],
                 [
                     "",
-                    Paragraph("Z&M Deco Bremen", normal),
+                    Paragraph("Omran", normal),
                 ],
             ],
             colWidths=[125 * mm, 50 * mm],
@@ -153,7 +153,7 @@ def build_timesheet_docx(data: dict) -> bytes:
         run = top.cell(0, 1).paragraphs[0].add_run()
         run.add_picture(str(logo), width=Inches(1.0))
     top.cell(0, 1).paragraphs[0].alignment = WD_ALIGN_PARAGRAPH.RIGHT
-    p = top.cell(0, 1).add_paragraph("Z&M Deco Bremen")
+    p = top.cell(0, 1).add_paragraph("Omran")
     p.alignment = WD_ALIGN_PARAGRAPH.RIGHT
     p.runs[0].font.size = Pt(10)
 

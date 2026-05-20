@@ -114,6 +114,26 @@ def _ensure_workshop_assignment_columns() -> None:
             conn.execute(text(statement))
 
 
+def _ensure_project_task_columns() -> None:
+    inspector = inspect(engine)
+    if "ProjectTask" not in inspector.get_table_names():
+        return
+
+    column_names = {column["name"] for column in inspector.get_columns("ProjectTask")}
+    statements: list[str] = []
+    if "weightPercent" not in column_names:
+        statements.append('ALTER TABLE "ProjectTask" ADD COLUMN "weightPercent" NUMERIC(6, 2)')
+    if "progressPercent" not in column_names:
+        statements.append('ALTER TABLE "ProjectTask" ADD COLUMN "progressPercent" INTEGER')
+
+    if not statements:
+        return
+
+    with engine.begin() as conn:
+        for statement in statements:
+            conn.execute(text(statement))
+
+
 def init_db() -> None:
     from . import models  # noqa: F401
 
@@ -122,6 +142,7 @@ def init_db() -> None:
     _ensure_ai_intake_columns()
     _ensure_workshop_columns()
     _ensure_workshop_assignment_columns()
+    _ensure_project_task_columns()
 
 
 def get_db() -> Generator[Session, None, None]:

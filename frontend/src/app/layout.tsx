@@ -5,7 +5,7 @@ import { AppHeader } from './ui/AppHeader';
 import { AppProviders } from './ui/AppProviders';
 
 export const metadata = {
-  title: 'Z&M Bremen ',
+  title: 'Omran ',
 };
 
 export default function RootLayout({ children }: { children: ReactNode }) {
