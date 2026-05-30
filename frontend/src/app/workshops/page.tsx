@@ -135,7 +135,21 @@ export default function WorkshopsPage() {
   }
 
   return (
-    <div className="card">
+    <div className="entity-page workshops-page">
+      <section className="entity-hero card">
+        <div className="entity-hero-copy">
+          <div className="entity-kicker">Partners</div>
+          <h1>Workshop Partners</h1>
+          <p>Manage trusted subcontractor workshops, trade coverage, and availability status.</p>
+        </div>
+        <div className="entity-hero-stats">
+            <div className="entity-stat"><strong>{items.length}</strong><span>Workshops</span></div>
+            <div className="entity-stat"><strong>{items.filter((item) => item.availabilityStatus !== 'not_available').length}</strong><span>Available</span></div>
+            <div className="entity-stat"><strong>{items.filter((item) => item.isActive).length}</strong><span>Active</span></div>
+        </div>
+      </section>
+
+      <div className="card entity-panel">
       <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12, flexWrap: 'wrap' }}>
         <div>
           <h2>Workshop Partners</h2>
@@ -234,6 +248,7 @@ export default function WorkshopsPage() {
           {loading && <tr><td colSpan={5} className="muted">Loading...</td></tr>}
         </tbody>
       </table>
+      </div>
     </div>
   );
 }

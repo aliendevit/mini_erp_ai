@@ -1,9 +1,15 @@
 'use client';
 
-import type { ReactNode } from 'react';
+import { useEffect, useState, type ReactNode } from 'react';
 
 import { LocaleProvider } from '../../lib/i18n';
 
 export function AppProviders({ children }: { children: ReactNode }) {
-  return <LocaleProvider>{children}</LocaleProvider>;
+  const [mounted, setMounted] = useState(false);
+
+  useEffect(() => {
+    setMounted(true);
+  }, []);
+
+  return <LocaleProvider>{mounted ? children : <div className="app-client-placeholder" suppressHydrationWarning />}</LocaleProvider>;
 }

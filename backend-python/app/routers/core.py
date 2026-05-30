@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 from math import ceil
@@ -27,6 +28,8 @@ from ..models import (
     PaymentRecord,
     ProjectIssue,
     ProjectMaterialLog,
+    ProjectMonitoringAlert,
+    ProjectMonitoringReport,
     ProjectProgressPhoto,
     ProjectProgressUpdate,
     ProjectSiteBaseline,
@@ -47,6 +50,7 @@ from ..schemas import (
     PaymentRecordPayload,
     ProjectIssuePayload,
     ProjectMaterialLogPayload,
+    ProjectMonitoringAlertUpdatePayload,
     ProjectProgressUpdatePayload,
     ProjectSiteBaselinePayload,
     ProjectTaskPayload,
@@ -81,6 +85,8 @@ from ..utils import (
     progress_update_payload,
     project_issue_payload,
     project_material_log_payload,
+    project_monitoring_alert_payload,
+    project_monitoring_report_payload,
     project_site_baseline_payload,
     project_task_payload,
     parse_ymd_to_utc_start,
@@ -458,6 +464,69 @@ def _actual_site_progress(site_tasks: list[ProjectTask], latest_site_update: Pro
     return max(0, min(100, round((progress / total_weight) * 100))), weights_missing
 
 
+def _actual_site_progress_detail(
+    site_tasks: list[ProjectTask],
+    latest_site_update: ProjectProgressUpdate | None,
+    site_issues: list[ProjectIssue],
+    site_materials: list[ProjectMaterialLog],
+    now: datetime,
+) -> dict:
+    progress, weights_missing = _actual_site_progress(site_tasks, latest_site_update)
+    signals: list[str] = []
+    confidence = "low"
+    source = "none"
+
+    if site_tasks:
+        source = "weighted_tasks"
+        confidence = "medium" if weights_missing else "high"
+        completed_count = len([task for task in site_tasks if task.status in {"completed", "done"}])
+        in_progress_count = len([task for task in site_tasks if task.status == "in_progress"])
+        signals.append(f"{completed_count} completed task(s), {in_progress_count} in progress task(s).")
+        signals.append(
+            "Task weights were missing, so equal/remaining distribution was used."
+            if weights_missing
+            else "Explicit task weights were used for actual progress."
+        )
+    elif latest_site_update and latest_site_update.progress_percent is not None:
+        source = "manual_update"
+        confidence = "medium"
+        signals.append("No site tasks exist, so the latest manual progress update was used.")
+    else:
+        signals.append("No task progress or manual progress update is available yet.")
+
+    if latest_site_update and latest_site_update.update_date:
+        update_date = _comparison_datetime(latest_site_update.update_date)
+        current = _comparison_datetime(now)
+        if update_date and current:
+            age_days = max(0, (current - update_date).days)
+            signals.append(f"Latest progress update is {age_days} day(s) old.")
+            if age_days > 7 and confidence == "high":
+                confidence = "medium"
+            elif age_days > 7 and confidence == "medium":
+                confidence = "low"
+
+    open_blockers = [issue for issue in site_issues if issue.status in {"open", "in_progress"}]
+    high_blockers = [issue for issue in open_blockers if issue.severity == "high"]
+    if high_blockers:
+        signals.append(f"{len(high_blockers)} high severity open issue(s) may affect progress reliability.")
+        if confidence == "high":
+            confidence = "medium"
+    elif open_blockers:
+        signals.append(f"{len(open_blockers)} open issue(s) are still active.")
+
+    needed_materials = [material for material in site_materials if material.status in {"needed", "ordered"}]
+    if needed_materials:
+        signals.append(f"{len(needed_materials)} material item(s) are still needed or ordered.")
+
+    return {
+        "actualProgressPercent": progress,
+        "taskWeightsMissing": weights_missing,
+        "progressSource": source,
+        "progressConfidence": confidence,
+        "progressSignals": signals,
+    }
+
+
 def _baseline_plan_payload(item: ProjectSiteBaseline | None) -> dict | None:
     return project_site_baseline_payload(item)
 
@@ -543,7 +612,9 @@ def _tracking_response(db: Session, order_id: str) -> dict:
         site_materials = [item for item in materials if item.site_id == site.id]
         site_issues = [item for item in issues if item.site_id == site.id and item.status in open_issue_statuses]
         latest_site_update = site_updates[0] if site_updates else None
-        actual_progress_percent, task_weights_missing = _actual_site_progress(site_tasks, latest_site_update)
+        progress_detail = _actual_site_progress_detail(site_tasks, latest_site_update, site_issues, site_materials, now)
+        actual_progress_percent = int(progress_detail["actualProgressPercent"])
+        task_weights_missing = bool(progress_detail["taskWeightsMissing"])
         progress_percent = actual_progress_percent
         current_status = latest_site_update.status if latest_site_update else "not_started"
         baseline_plan = site.baseline_plan
@@ -619,6 +690,9 @@ def _tracking_response(db: Session, order_id: str) -> dict:
                 "currentStatus": current_status,
                 "progressPercent": progress_percent,
                 "actualProgressPercent": actual_progress_percent,
+                "progressSource": progress_detail["progressSource"],
+                "progressConfidence": progress_detail["progressConfidence"],
+                "progressSignals": progress_detail["progressSignals"],
                 "plannedProgressPercent": planned_progress_percent,
                 "progressDeltaPercent": progress_delta_percent,
                 "baselinePlan": _baseline_plan_payload(baseline_plan),
@@ -680,6 +754,123 @@ def _tracking_response(db: Session, order_id: str) -> dict:
     }
 
 
+def _warning_alert_key(warning: dict) -> tuple[str | None, str, str]:
+    return (
+        warning.get("siteId"),
+        str(warning.get("type") or ""),
+        str(warning.get("message") or ""),
+    )
+
+
+def _sync_monitoring_alerts(db: Session, order_id: str, warnings: list[dict]) -> list[ProjectMonitoringAlert]:
+    all_existing = db.scalars(
+        select(ProjectMonitoringAlert)
+        .options(joinedload(ProjectMonitoringAlert.site))
+        .where(ProjectMonitoringAlert.order_id == order_id)
+    ).all()
+    open_existing = [item for item in all_existing if item.status == "open"]
+    existing_keys = {_warning_alert_key({"siteId": item.site_id, "type": item.alert_type, "message": item.message}) for item in all_existing}
+    created: list[ProjectMonitoringAlert] = []
+    for warning in warnings:
+        key = _warning_alert_key(warning)
+        if key in existing_keys:
+            continue
+        alert = ProjectMonitoringAlert(
+            order_id=order_id,
+            site_id=warning.get("siteId"),
+            alert_type=str(warning.get("type") or "tracking_warning"),
+            severity=str(warning.get("severity") or "medium"),
+            status="open",
+            message=str(warning.get("message") or warning.get("type") or "Tracking warning"),
+            recommended_action=warning.get("recommendedAction"),
+            source="tracking_rule",
+        )
+        db.add(alert)
+        created.append(alert)
+        existing_keys.add(key)
+    if created:
+        db.flush()
+        for alert in created:
+            db.refresh(alert)
+    return sorted([*open_existing, *created], key=lambda item: item.created_at or datetime.min, reverse=True)
+
+
+def _save_monitoring_report(db: Session, order_id: str, analysis: dict, warnings: list[dict]) -> ProjectMonitoringReport:
+    report = ProjectMonitoringReport(
+        order_id=order_id,
+        provider=str(analysis.get("provider") or "unknown"),
+        health_status=str(analysis.get("healthStatus") or "watch"),
+        summary=str(analysis.get("summary") or ""),
+        analysis_json=json_dumps(analysis),
+        warnings_json=json_dumps(warnings),
+    )
+    db.add(report)
+    db.flush()
+    db.refresh(report)
+    return report
+
+
+_TRADE_DURATION_DAYS = {
+    "demolition": 1,
+    "waterproofing": 2,
+    "insulation": 2,
+    "plumbing": 2,
+    "electrical": 2,
+    "flooring": 3,
+    "tiles": 3,
+    "painting": 2,
+    "carpentry": 2,
+    "gypsum": 2,
+    "finishing": 1,
+}
+
+
+def _safe_json_list(value: str | None) -> list:
+    if not value:
+        return []
+    try:
+        parsed = json.loads(value)
+    except json.JSONDecodeError:
+        return []
+    return parsed if isinstance(parsed, list) else []
+
+
+def _site_trade_keywords(site: Site) -> list[str]:
+    text_parts = [site.site_name or "", site.notes or ""]
+    text_parts.extend(task.task_name or "" for task in getattr(site, "tracking_tasks", []) or [])
+    text_parts.extend(material.material_name or "" for material in getattr(site, "material_logs", []) or [])
+    text_parts.extend(str(skill) for assignment in site.workshop_assignments for skill in _safe_json_list(assignment.covered_skills_json) if skill)
+    text = " ".join(text_parts).lower()
+    mapping = [
+        ("demolition", ("remove", "demolition", "hدم", "ازالة", "إزالة")),
+        ("waterproofing", ("waterproof", "moisture", "abdichtung", "عزل", "تسرب")),
+        ("insulation", ("insulation", "dämm", "عازل")),
+        ("plumbing", ("plumbing", "sanitary", "wasser", "pipes", "مياه", "صحية", "سباكة")),
+        ("electrical", ("electric", "electrical", "strom", "كهرب")),
+        ("flooring", ("floor", "tile", "tiles", "fliesen", "ceramic", "سيراميك", "بلاط", "ارض")),
+        ("painting", ("paint", "painting", "maler", "دهان", "معجون")),
+        ("carpentry", ("carpentry", "wood", "cabinet", "نجارة", "خزائن", "رفوف")),
+        ("gypsum", ("drywall", "gypsum", "trockenbau", "جبس")),
+    ]
+    trades = [trade for trade, keywords in mapping if any(keyword in text for keyword in keywords)]
+    return trades or ["finishing"]
+
+
+def _site_trade_sequence(trades: list[str]) -> list[str]:
+    priority = ["demolition", "plumbing", "electrical", "waterproofing", "insulation", "gypsum", "flooring", "tiles", "carpentry", "painting", "finishing"]
+    return [trade for trade in priority if trade in set(trades)]
+
+
+def _baseline_note_for_site(site: Site, start: datetime, end: datetime) -> str:
+    sequence = _site_trade_sequence(_site_trade_keywords(site))
+    trade_text = " -> ".join(sequence)
+    return (
+        "Draft baseline suggested from order dates, workshop schedule, site tasks, and trade complexity. "
+        f"Suggested trade sequence: {trade_text}. "
+        f"Planned window: {start.date().isoformat()} to {end.date().isoformat()}. Manager confirmation required."
+    )
+
+
 def _suggest_site_baseline_dates(order: Order, sites: list[Site], site: Site, index: int, now: datetime) -> tuple[datetime, datetime]:
     dated_assignments = [
         item
@@ -699,7 +890,9 @@ def _suggest_site_baseline_dates(order: Order, sites: list[Site], site: Site, in
         end = start
 
     total_days = max(1, (end - start).days + 1)
-    slot_days = max(1, ceil(total_days / max(1, len(sites))))
+    trades = _site_trade_keywords(site)
+    complexity_days = max(1, min(10, sum(_TRADE_DURATION_DAYS.get(trade, 1) for trade in trades)))
+    slot_days = max(complexity_days, ceil(total_days / max(1, len(sites))))
     site_start = start + timedelta(days=min(index * slot_days, total_days - 1))
     site_end = end if index == len(sites) - 1 else min(end, site_start + timedelta(days=slot_days - 1))
     return site_start.replace(tzinfo=timezone.utc), site_end.replace(tzinfo=timezone.utc)
@@ -1302,7 +1495,7 @@ def suggest_order_tracking_baseline(order_id: str, db: Session = Depends(get_db)
             planned_end=planned_end,
             status="draft",
             source="ai_suggested",
-            notes="Draft baseline suggested from order dates and workshop schedule.",
+            notes=_baseline_note_for_site(site, planned_start, planned_end),
         )
     db.commit()
     return _tracking_response(db, order_id)
@@ -1337,7 +1530,72 @@ def analyze_order_tracking(order_id: str, locale: str = Query(default="en"), db:
     if not db.get(Order, order_id):
         raise not_found()
     tracking = _tracking_response(db, order_id)
-    return analyze_tracking(tracking, locale=locale)
+    analysis = analyze_tracking(tracking, locale=locale)
+    warnings = list((tracking.get("dashboard") or {}).get("warnings") or [])
+    alerts = _sync_monitoring_alerts(db, order_id, warnings)
+    report = _save_monitoring_report(db, order_id, analysis, warnings)
+    db.commit()
+    db.refresh(report)
+    return {
+        **analysis,
+        "reportId": report.id,
+        "alerts": [project_monitoring_alert_payload(alert) for alert in alerts],
+    }
+
+
+@router.get("/orders/{order_id}/tracking/monitoring-history")
+def list_order_monitoring_history(order_id: str, db: Session = Depends(get_db)) -> dict:
+    if not db.get(Order, order_id):
+        raise not_found()
+    reports = db.scalars(
+        select(ProjectMonitoringReport)
+        .where(ProjectMonitoringReport.order_id == order_id)
+        .order_by(ProjectMonitoringReport.created_at.desc())
+    ).all()
+    return {"items": [project_monitoring_report_payload(report) for report in reports]}
+
+
+@router.get("/orders/{order_id}/tracking/alerts")
+def list_order_monitoring_alerts(
+    order_id: str,
+    status: str | None = Query(default=None),
+    syncCurrent: bool = Query(default=True),
+    db: Session = Depends(get_db),
+) -> dict:
+    if not db.get(Order, order_id):
+        raise not_found()
+    if syncCurrent:
+        tracking = _tracking_response(db, order_id)
+        _sync_monitoring_alerts(db, order_id, list((tracking.get("dashboard") or {}).get("warnings") or []))
+        db.commit()
+    stmt = (
+        select(ProjectMonitoringAlert)
+        .options(joinedload(ProjectMonitoringAlert.site))
+        .where(ProjectMonitoringAlert.order_id == order_id)
+        .order_by(ProjectMonitoringAlert.created_at.desc())
+    )
+    if status:
+        stmt = stmt.where(ProjectMonitoringAlert.status == status)
+    alerts = db.scalars(stmt).all()
+    return {"items": [project_monitoring_alert_payload(alert) for alert in alerts]}
+
+
+@router.patch("/orders/{order_id}/tracking/alerts/{alert_id}")
+def update_order_monitoring_alert(
+    order_id: str,
+    alert_id: str,
+    payload: ProjectMonitoringAlertUpdatePayload,
+    db: Session = Depends(get_db),
+) -> dict:
+    alert = db.get(ProjectMonitoringAlert, alert_id)
+    if not alert or alert.order_id != order_id:
+        raise not_found()
+    alert.status = payload.status
+    alert.resolution_note = _normalize_optional_text(payload.resolutionNote)
+    alert.resolved_at = datetime.now(timezone.utc) if payload.status in {"resolved", "dismissed"} else None
+    db.commit()
+    db.refresh(alert)
+    return project_monitoring_alert_payload(alert)
 
 
 @router.post("/orders/{order_id}/progress-updates", status_code=201)

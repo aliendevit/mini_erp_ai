@@ -99,7 +99,21 @@ export default function SitesPage() {
   }
 
   return (
-    <div className="card">
+    <div className="entity-page sites-page">
+      <section className="entity-hero card">
+        <div className="entity-hero-copy">
+          <div className="entity-kicker">Work Areas</div>
+          <h1>{m.sitesPage.heading}</h1>
+          <p>Organize project locations and connect each site back to its active order.</p>
+        </div>
+        <div className="entity-hero-stats">
+            <div className="entity-stat"><strong>{items.length}</strong><span>{m.nav.sites}</span></div>
+            <div className="entity-stat"><strong>{items.filter((item) => item.isActive).length}</strong><span>{m.common.status}</span></div>
+            <div className="entity-stat"><strong>{orders.length}</strong><span>{m.nav.orders}</span></div>
+        </div>
+      </section>
+
+      <div className="card entity-panel">
       <h2>{m.sitesPage.heading}</h2>
       <div className="muted">{m.sitesPage.description}</div>
 
@@ -186,6 +200,7 @@ export default function SitesPage() {
 
       <div className="spacer" />
       <div className="muted">{m.sitesPage.deleteHint}</div>
+      </div>
     </div>
   );
 }

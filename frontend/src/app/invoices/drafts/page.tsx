@@ -43,7 +43,21 @@ export default function DraftsPage() {
   }, [query]);
 
   return (
-    <div className="card">
+    <div className="entity-page drafts-page">
+      <section className="entity-hero card">
+        <div className="entity-hero-copy">
+          <div className="entity-kicker">Draft Center</div>
+          <h1>{m.invoiceDraftsPage.heading}</h1>
+          <p>Group draft invoice work, review billable totals, and merge into final invoices.</p>
+        </div>
+        <div className="entity-hero-stats">
+            <div className="entity-stat"><strong>{groups.length}</strong><span>{m.common.group}</span></div>
+            <div className="entity-stat"><strong>{groups.reduce((sum, group) => sum + group.invoiceCount, 0)}</strong><span>{m.invoiceDraftsPage.draftCount}</span></div>
+            <div className="entity-stat"><strong>{groups.reduce((sum, group) => sum + group.totalHours, 0).toFixed(1)}</strong><span>{m.common.hours}</span></div>
+        </div>
+      </section>
+
+      <div className="card entity-panel">
       <h2>{m.invoiceDraftsPage.heading}</h2>
 
       <div className="row">
@@ -115,6 +129,7 @@ export default function DraftsPage() {
 
       <div className="spacer" />
       <div className="muted">{m.invoiceDraftsPage.mergeHint}</div>
+      </div>
     </div>
   );
 }

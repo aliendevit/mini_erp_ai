@@ -61,7 +61,21 @@ export default function InvoicesPage() {
   }
 
   return (
-    <div className="card">
+    <div className="entity-page invoices-page">
+      <section className="entity-hero card">
+        <div className="entity-hero-copy">
+          <div className="entity-kicker">Billing</div>
+          <h1>{m.invoicesPage.heading}</h1>
+          <p>Review invoice status, filter by period, and open billing documents quickly.</p>
+        </div>
+        <div className="entity-hero-stats">
+            <div className="entity-stat"><strong>{items.length}</strong><span>{m.nav.invoices}</span></div>
+            <div className="entity-stat"><strong>{items.filter((item) => item.status === 'draft').length}</strong><span>{m.statuses.invoice.draft}</span></div>
+            <div className="entity-stat"><strong>{items.filter((item) => item.status === 'paid').length}</strong><span>{m.statuses.invoice.paid}</span></div>
+        </div>
+      </section>
+
+      <div className="card entity-panel">
       <h2>{m.invoicesPage.heading}</h2>
 
       <div className="row">
@@ -140,6 +154,7 @@ export default function InvoicesPage() {
 
       <div className="spacer" />
       <div className="muted">{m.invoicesPage.deleteHint}</div>
+      </div>
     </div>
   );
 }

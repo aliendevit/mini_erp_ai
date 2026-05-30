@@ -25,6 +25,8 @@ from .models import (
     PaymentRecord,
     ProjectIssue,
     ProjectMaterialLog,
+    ProjectMonitoringAlert,
+    ProjectMonitoringReport,
     ProjectProgressPhoto,
     ProjectProgressUpdate,
     ProjectSiteBaseline,
@@ -613,6 +615,42 @@ def project_material_log_payload(material: ProjectMaterialLog) -> dict[str, Any]
     }
     if material.site:
         data["site"] = site_payload(material.site)
+    return jsonable_encoder(data)
+
+
+def project_monitoring_report_payload(report: ProjectMonitoringReport) -> dict[str, Any]:
+    return jsonable_encoder(
+        {
+            "id": report.id,
+            "orderId": report.order_id,
+            "provider": report.provider,
+            "healthStatus": report.health_status,
+            "summary": report.summary,
+            "analysis": json_loads(report.analysis_json, {}),
+            "warnings": json_loads(report.warnings_json, []),
+            "createdAt": report.created_at,
+        }
+    )
+
+
+def project_monitoring_alert_payload(alert: ProjectMonitoringAlert) -> dict[str, Any]:
+    data: dict[str, Any] = {
+        "id": alert.id,
+        "orderId": alert.order_id,
+        "siteId": alert.site_id,
+        "alertType": alert.alert_type,
+        "severity": alert.severity,
+        "status": alert.status,
+        "message": alert.message,
+        "recommendedAction": alert.recommended_action,
+        "source": alert.source,
+        "resolutionNote": alert.resolution_note,
+        "createdAt": alert.created_at,
+        "updatedAt": alert.updated_at,
+        "resolvedAt": alert.resolved_at,
+    }
+    if alert.site:
+        data["site"] = {"id": alert.site.id, "siteName": alert.site.site_name}
     return jsonable_encoder(data)
 
 
