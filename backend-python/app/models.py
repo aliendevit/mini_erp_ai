@@ -173,6 +173,12 @@ class Order(Base):
     site_baselines: Mapped[list["ProjectSiteBaseline"]] = relationship(
         back_populates="order", cascade="all, delete-orphan"
     )
+    monitoring_reports: Mapped[list["ProjectMonitoringReport"]] = relationship(
+        back_populates="order", cascade="all, delete-orphan"
+    )
+    monitoring_alerts: Mapped[list["ProjectMonitoringAlert"]] = relationship(
+        back_populates="order", cascade="all, delete-orphan"
+    )
 
 
 class Site(Base):
@@ -204,6 +210,7 @@ class Site(Base):
     baseline_plan: Mapped["ProjectSiteBaseline | None"] = relationship(
         back_populates="site", cascade="all, delete-orphan", uselist=False
     )
+    monitoring_alerts: Mapped[list["ProjectMonitoringAlert"]] = relationship(back_populates="site")
 
 
 class ProjectSiteBaseline(Base):
@@ -466,6 +473,49 @@ class ProjectMaterialLog(Base):
 
     order: Mapped[Order] = relationship(back_populates="material_logs")
     site: Mapped[Site | None] = relationship(back_populates="material_logs")
+
+
+class ProjectMonitoringReport(Base):
+    __tablename__ = "ProjectMonitoringReport"
+    __table_args__ = (Index("ProjectMonitoringReport_orderId_idx", "orderId"),)
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid4()))
+    order_id: Mapped[str] = mapped_column("orderId", String(36), ForeignKey("Order.id"), nullable=False)
+    provider: Mapped[str] = mapped_column(String, nullable=False, default="ai", server_default="ai")
+    health_status: Mapped[str] = mapped_column("healthStatus", String, nullable=False, default="watch", server_default="watch")
+    summary: Mapped[str | None] = mapped_column(Text)
+    analysis_json: Mapped[str | None] = mapped_column("analysisJson", Text)
+    warnings_json: Mapped[str | None] = mapped_column("warningsJson", Text)
+    created_at: Mapped[datetime] = mapped_column("createdAt", DateTime(timezone=True), server_default=func.now())
+
+    order: Mapped[Order] = relationship(back_populates="monitoring_reports")
+
+
+class ProjectMonitoringAlert(Base):
+    __tablename__ = "ProjectMonitoringAlert"
+    __table_args__ = (
+        Index("ProjectMonitoringAlert_orderId_idx", "orderId"),
+        Index("ProjectMonitoringAlert_siteId_idx", "siteId"),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid4()))
+    order_id: Mapped[str] = mapped_column("orderId", String(36), ForeignKey("Order.id"), nullable=False)
+    site_id: Mapped[str | None] = mapped_column("siteId", String(36), ForeignKey("Site.id"))
+    alert_type: Mapped[str] = mapped_column("alertType", String, nullable=False)
+    severity: Mapped[str] = mapped_column(String, nullable=False, default="medium", server_default="medium")
+    status: Mapped[str] = mapped_column(String, nullable=False, default="open", server_default="open")
+    message: Mapped[str] = mapped_column(Text, nullable=False)
+    recommended_action: Mapped[str | None] = mapped_column("recommendedAction", Text)
+    source: Mapped[str] = mapped_column(String, nullable=False, default="tracking_rule", server_default="tracking_rule")
+    resolution_note: Mapped[str | None] = mapped_column("resolutionNote", Text)
+    created_at: Mapped[datetime] = mapped_column("createdAt", DateTime(timezone=True), server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(
+        "updatedAt", DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
+    )
+    resolved_at: Mapped[datetime | None] = mapped_column("resolvedAt", DateTime(timezone=True))
+
+    order: Mapped[Order] = relationship(back_populates="monitoring_alerts")
+    site: Mapped[Site | None] = relationship(back_populates="monitoring_alerts")
 
 
 class Invoice(Base):

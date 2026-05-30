@@ -14,9 +14,9 @@ from sqlalchemy.orm import Session, sessionmaker
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from app.database import Base
-from app.models import Customer, CustomerWorkshop, Employee, EmployeeAvailabilityBlock, EmployeeSkill, Order, PaymentRecord, ProjectIssue, ProjectProgressUpdate, ProjectSiteBaseline, ProjectTask, Proposal, ProposalFact, ProposalMessage, Site, Workshop, WorkshopSiteAssignment
-from app.schemas import ProjectIssuePayload, ProjectSiteBaselinePayload, ProjectTaskPayload, ProposalDraftPayload, WorkshopSiteAssignmentPayload
-from app.routers.core import analyze_order_tracking, create_order_workshop_assignment, create_project_issue, create_project_task, suggest_order_tracking_baseline, update_order_site_tracking_baseline, update_project_issue, update_project_task, update_workshop_assignment, _tracking_response
+from app.models import Customer, CustomerWorkshop, Employee, EmployeeAvailabilityBlock, EmployeeSkill, Order, PaymentRecord, ProjectIssue, ProjectMonitoringAlert, ProjectMonitoringReport, ProjectProgressUpdate, ProjectSiteBaseline, ProjectTask, Proposal, ProposalFact, ProposalMessage, Site, Workshop, WorkshopSiteAssignment
+from app.schemas import ProjectIssuePayload, ProjectMonitoringAlertUpdatePayload, ProjectSiteBaselinePayload, ProjectTaskPayload, ProposalDraftPayload, WorkshopSiteAssignmentPayload
+from app.routers.core import analyze_order_tracking, create_order_workshop_assignment, create_project_issue, create_project_task, list_order_monitoring_alerts, list_order_monitoring_history, suggest_order_tracking_baseline, update_order_monitoring_alert, update_order_site_tracking_baseline, update_project_issue, update_project_task, update_workshop_assignment, _tracking_response
 from app.services.proposal_documents import _arabic_visual_text, build_proposal_pdf
 from app.services.tracking_ai import analyze_tracking, build_tracking_analysis_context
 from app.services.proposals import (
@@ -514,6 +514,54 @@ class ProposalAndStaffingTests(unittest.TestCase):
         self.assertIn(result["healthStatus"], {"watch", "at_risk", "blocked"})
         self.assertTrue(result["recommendedActions"])
         self.assertEqual(result["aiError"], "quota")
+
+        reports = list_order_monitoring_history(order.id, db=self.db)["items"]
+        alerts = list_order_monitoring_alerts(order.id, status="open", db=self.db)["items"]
+        self.assertEqual(self.db.query(ProjectMonitoringReport).count(), 1)
+        self.assertTrue(reports)
+        self.assertTrue(alerts)
+        self.assertEqual(result["reportId"], reports[0]["id"])
+
+    def test_tracking_analysis_deduplicates_and_resolves_alerts(self) -> None:
+        order, site, _other_site, _workshop_a, _workshop_b = self._workshop_order_fixture()
+        create_project_task(order.id, ProjectTaskPayload(siteId=site.id, taskName="Prepare surface"), self.db)
+
+        with patch("app.services.tracking_ai.generate_text", side_effect=HTTPException(status_code=502, detail="quota")):
+            analyze_order_tracking(order.id, locale="en", db=self.db)
+            analyze_order_tracking(order.id, locale="en", db=self.db)
+
+        open_alerts = list_order_monitoring_alerts(order.id, status="open", db=self.db)["items"]
+        self.assertEqual(self.db.query(ProjectMonitoringReport).count(), 2)
+        self.assertEqual(self.db.query(ProjectMonitoringAlert).count(), len(open_alerts))
+        self.assertTrue(open_alerts)
+
+        updated = update_order_monitoring_alert(
+            order.id,
+            open_alerts[0]["id"],
+            ProjectMonitoringAlertUpdatePayload(status="resolved", resolutionNote="Checked by manager"),
+            db=self.db,
+        )
+        self.assertEqual(updated["status"], "resolved")
+        self.assertIsNotNone(updated["resolvedAt"])
+
+    def test_tracking_progress_confidence_and_baseline_trade_notes(self) -> None:
+        order, site, _other_site, _workshop_a, _workshop_b = self._workshop_order_fixture()
+        create_project_task(
+            order.id,
+            ProjectTaskPayload(siteId=site.id, taskName="Apply waterproofing and install tiles", status="not_started"),
+            self.db,
+        )
+
+        result = _tracking_response(self.db, order.id)
+        site_card = next(card for card in result["siteCards"] if card["siteId"] == site.id)
+        self.assertEqual(site_card["progressSource"], "weighted_tasks")
+        self.assertEqual(site_card["progressConfidence"], "medium")
+        self.assertTrue(site_card["progressSignals"])
+
+        baseline_result = suggest_order_tracking_baseline(order.id, db=self.db)
+        baseline_card = next(card for card in baseline_result["siteCards"] if card["siteId"] == site.id)
+        self.assertEqual(baseline_card["baselineStatus"], "draft")
+        self.assertIn("Suggested trade sequence", baseline_card["baselinePlan"]["notes"])
 
     def test_workshop_assignment_update_ignores_itself_for_overlap_check(self) -> None:
         order, site, _other_site, workshop_a, _workshop_b = self._workshop_order_fixture()

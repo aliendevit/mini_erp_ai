@@ -113,7 +113,21 @@ export default function OrdersPage() {
   }
 
   return (
-    <div className="card">
+    <div className="entity-page orders-page">
+      <section className="entity-hero card">
+        <div className="entity-hero-copy">
+          <div className="entity-kicker">Execution</div>
+          <h1>{m.ordersPage.heading}</h1>
+          <p>Create orders, open detailed project views, and connect tracking with workshop execution.</p>
+        </div>
+        <div className="entity-hero-stats">
+            <div className="entity-stat"><strong>{items.length}</strong><span>{m.nav.orders}</span></div>
+            <div className="entity-stat"><strong>{items.filter((item) => item.status === 'open').length}</strong><span>{m.statuses.order.open}</span></div>
+            <div className="entity-stat"><strong>{customers.length}</strong><span>{m.nav.customers}</span></div>
+        </div>
+      </section>
+
+      <div className="card entity-panel">
       <h2>{m.ordersPage.heading}</h2>
 
       <div className="row">
@@ -201,6 +215,7 @@ export default function OrdersPage() {
 
       <div className="spacer" />
       <div className="muted">{m.ordersPage.deleteHint}</div>
+      </div>
     </div>
   );
 }

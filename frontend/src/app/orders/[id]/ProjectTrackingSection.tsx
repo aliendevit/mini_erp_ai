@@ -211,6 +211,64 @@ const STATUS_STYLES: Record<string, { color: string; background: string; border:
   past: { color: '#64748b', background: 'rgba(100,116,139,.12)', border: 'rgba(100,116,139,.35)' },
 };
 
+function clampPercent(value: number | null | undefined) {
+  if (value === null || value === undefined || Number.isNaN(Number(value))) return null;
+  return Math.max(0, Math.min(100, Number(value)));
+}
+
+function formatProgressPercent(value: number | null | undefined, none: string) {
+  const percent = clampPercent(value);
+  return percent === null ? none : `${Math.round(percent)}%`;
+}
+
+function progressDeltaTone(value: number | null | undefined) {
+  if (value === null || value === undefined || Number.isNaN(Number(value))) return 'neutral';
+  if (value < -15) return 'danger';
+  if (value < -5) return 'warning';
+  return 'good';
+}
+
+function ProgressChart({
+  title,
+  actual,
+  planned,
+  delta,
+  labels,
+  none,
+  compact = false,
+}: {
+  title: string;
+  actual?: number | null;
+  planned?: number | null;
+  delta?: number | null;
+  labels: Labels;
+  none: string;
+  compact?: boolean;
+}) {
+  const actualPercent = clampPercent(actual);
+  const plannedPercent = clampPercent(planned);
+  const deltaTone = progressDeltaTone(delta);
+
+  return (
+    <div className={`progress-chart ${compact ? 'compact' : ''} progress-chart-${deltaTone}`}>
+      <div className="progress-chart-header">
+        <div>
+          <strong>{title}</strong>
+          <span>{labels.actualProgress}: {formatProgressPercent(actualPercent, none)}</span>
+        </div>
+        <div className="progress-chart-value">{formatProgressPercent(actualPercent, none)}</div>
+      </div>
+      <div className="progress-chart-track" aria-label={title}>
+        {plannedPercent !== null && <div className="progress-chart-planned" style={{ width: `${plannedPercent}%` }} />}
+        <div className="progress-chart-actual" style={{ width: `${actualPercent ?? 0}%` }} />
+      </div>
+      <div className="progress-chart-footer">
+        <span>{labels.plannedProgress}: {formatProgressPercent(plannedPercent, none)}</span>
+        <span>{labels.progressDelta}: {delta === null || delta === undefined ? none : `${delta > 0 ? '+' : ''}${Math.round(delta)}%`}</span>
+      </div>
+    </div>
+  );
+}
 function displayLabel(value: string | null | undefined, labels: Labels, none: string) {
   if (!value) return none;
   const key = value.trim().toLowerCase();
@@ -497,8 +555,8 @@ export default function ProjectTrackingSection({ orderId }: { orderId: string })
   }
 
   return (
-    <div className="card">
-      <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12, flexWrap: 'wrap' }}>
+    <div className="card tracking-page">
+      <div className="tracking-hero">
         <div>
           <h3>{x.heading}</h3>
           <div className="muted">{x.description}</div>
@@ -520,7 +578,7 @@ export default function ProjectTrackingSection({ orderId }: { orderId: string })
       </div>
 
       <div className="spacer" />
-      <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+      <div className="tracking-tabs">
         {tabKeys.map((tab) => <button key={tab} className={`btn ${activeTab === tab ? 'primary' : ''}`} onClick={() => setActiveTab(tab)}>{x.tabs[tab]}</button>)}
       </div>
 
@@ -554,7 +612,7 @@ export default function ProjectTrackingSection({ orderId }: { orderId: string })
 
           <div style={{ display: 'grid', gap: 12 }}>
             {siteCards.map((site) => (
-              <div key={site.siteId} className="card">
+              <div key={site.siteId} className="card tracking-site-card">
                 <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12, flexWrap: 'wrap' }}>
                   <div>
                     <div style={{ fontWeight: 800 }}>{site.siteName}</div>
@@ -563,12 +621,16 @@ export default function ProjectTrackingSection({ orderId }: { orderId: string })
                   <StatusBadge value={site.currentStatus} labels={labels} none={x.none} />
                 </div>
                 <div className="spacer" />
-                <div style={{ height: 10, background: 'rgba(148,163,184,.25)', borderRadius: 999, overflow: 'hidden' }}>
-                  <div style={{ width: `${site.progressPercent}%`, height: '100%', background: '#2563eb' }} />
-                </div>
-                <div className="muted" style={{ marginTop: 6 }}>{site.progressPercent}% {labels.complete}</div>
-                <div className="muted" style={{ marginTop: 6 }}>
-                  {labels.plannedProgress}: {site.plannedProgressPercent === null || site.plannedProgressPercent === undefined ? x.none : `${site.plannedProgressPercent}%`} | {labels.actualProgress}: {site.actualProgressPercent ?? site.progressPercent}% | {labels.delayStatus}: {displayLabel(site.delayStatus, labels, x.none)}
+                <ProgressChart
+                  title={labels.weightedProgress || labels.progress || labels.complete}
+                  actual={site.actualProgressPercent ?? site.progressPercent}
+                  planned={site.plannedProgressPercent}
+                  delta={site.progressDeltaPercent}
+                  labels={labels}
+                  none={x.none}
+                />
+                <div className="muted" style={{ marginTop: 8 }}>
+                  {labels.delayStatus}: {displayLabel(site.delayStatus, labels, x.none)}
                 </div>
                 <div className="spacer" />
                 <div className="row">
@@ -614,7 +676,7 @@ export default function ProjectTrackingSection({ orderId }: { orderId: string })
           {siteCards.map((site) => {
             const form = baselineForms[site.siteId] || {};
             return (
-              <div key={`baseline-${site.siteId}`} className="card">
+              <div key={`baseline-${site.siteId}`} className="card tracking-baseline-card">
                 <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12, flexWrap: 'wrap', alignItems: 'center' }}>
                   <div>
                     <div style={{ fontWeight: 800 }}>{site.siteName}</div>
@@ -629,12 +691,20 @@ export default function ProjectTrackingSection({ orderId }: { orderId: string })
                   <Field label={labels.notes}><input value={form.notes || ''} onChange={(event) => setBaselineForms({ ...baselineForms, [site.siteId]: { ...form, notes: event.target.value } })} /></Field>
                 </div>
                 <div className="spacer" />
+                <ProgressChart
+                  title={labels.baseline}
+                  actual={site.actualProgressPercent ?? site.progressPercent}
+                  planned={site.plannedProgressPercent}
+                  delta={site.progressDeltaPercent}
+                  labels={labels}
+                  none={x.none}
+                  compact
+                />
+                <div className="spacer" />
                 <div className="row">
-                  <div><label>{labels.plannedProgress}</label><div>{site.plannedProgressPercent === null || site.plannedProgressPercent === undefined ? x.none : `${site.plannedProgressPercent}%`}</div></div>
-                  <div><label>{labels.actualProgress}</label><div>{site.actualProgressPercent ?? site.progressPercent}%</div></div>
-                  <div><label>{labels.progressDelta}</label><div>{site.progressDeltaPercent === null || site.progressDeltaPercent === undefined ? x.none : `${site.progressDeltaPercent}%`}</div></div>
                   <div><label>{labels.predictedFinish}</label><div>{shortDate(site.predictedFinishDate, x.none)}</div></div>
                   <div><label>{labels.delayDays}</label><div>{site.delayDays === null || site.delayDays === undefined ? x.none : site.delayDays}</div></div>
+                  <div><label>{labels.delayStatus}</label><div>{displayLabel(site.delayStatus, labels, x.none)}</div></div>
                 </div>
                 <div className="spacer" />
                 <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
@@ -898,7 +968,7 @@ function WorkshopScheduleList({ assignments, labels, none }: { assignments: Work
 
 function MetricCard({ title, subtitle, value, accent = '#334155' }: { title: string; subtitle: string; value: ReactNode; accent?: string }) {
   return (
-    <div className="card" style={{ borderColor: 'rgba(148,163,184,.28)', background: 'linear-gradient(135deg, rgba(15,23,42,.03), rgba(148,163,184,.05))' }}>
+    <div className="card tracking-metric-card">
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 8 }}>
         <div><div style={{ fontSize: 12, fontWeight: 800, letterSpacing: .4, textTransform: 'uppercase', color: '#64748b' }}>{title}</div><div className="muted" style={{ marginTop: 4 }}>{subtitle}</div></div>
         <span style={{ width: 10, height: 10, borderRadius: 999, background: accent, marginTop: 3 }} />
@@ -926,7 +996,7 @@ function TrackingSiteSelect({ value, sites, onChange, labelText, generalText }: 
 }
 
 function TrackingFormCard({ title, children }: { title: string; children: ReactNode }) {
-  return <div className="card" style={{ borderColor: 'rgba(37,99,235,.35)' }}><strong>{title}</strong><div className="spacer" />{children}</div>;
+  return <div className="card tracking-form-card"><strong>{title}</strong><div className="spacer" />{children}</div>;
 }
 
 function PhotoInputBlock({ form, setForm, labels, none, selectedPhotos, setPhotos, photoInputKey, selectedPhotosLabel }: { form: FormState; setForm: (form: FormState) => void; labels: Labels; none: string; selectedPhotos: File[]; setPhotos: (files: FileList | null) => void; photoInputKey: number; selectedPhotosLabel: string }) {
@@ -941,9 +1011,9 @@ function PhotoInputBlock({ form, setForm, labels, none, selectedPhotos, setPhoto
 
 function PhotoGrid({ photos, labels, none }: { photos: TrackingPhoto[]; labels: Labels; none: string }) {
   return (
-    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(140px, 1fr))', gap: 10 }}>
+    <div className="tracking-photo-grid">
       {photos.map((photo) => (
-        <a key={photo.id} href={photoSrc(photo)} target="_blank" rel="noreferrer" className="card" style={{ padding: 8 }}>
+        <a key={photo.id} href={photoSrc(photo)} target="_blank" rel="noreferrer" className="card tracking-photo-card">
           <img src={photoSrc(photo)} alt={photo.caption || photo.originalFilename || labels.projectPhoto} style={{ width: '100%', height: 110, objectFit: 'cover', borderRadius: 8 }} />
           <div className="muted" style={{ marginTop: 6 }}>{displayLabel(photo.tag, labels, none)}</div>
           {photo.caption && <div>{photo.caption}</div>}
@@ -955,13 +1025,13 @@ function PhotoGrid({ photos, labels, none }: { photos: TrackingPhoto[]; labels: 
 
 function TrackingTable({ headers, rows, emptyLabel }: { headers: string[]; rows: ReactNode[][]; emptyLabel: string }) {
   return (
-    <table className="table">
+    <div className="tracking-table-wrap"><table className="table tracking-table">
       <thead><tr>{headers.map((header) => <th key={header}>{header}</th>)}</tr></thead>
       <tbody>
         {rows.map((row, index) => <tr key={index}>{row.map((cell, cellIndex) => <td key={`${index}-${cellIndex}`}>{cell}</td>)}</tr>)}
         {rows.length === 0 && <tr><td colSpan={headers.length} className="muted">{emptyLabel}</td></tr>}
       </tbody>
-    </table>
+    </table></div>
   );
 }
 
@@ -976,3 +1046,5 @@ function SelectedPhotoPreview({ files, labelText }: { files: File[]; labelText: 
     </div>
   );
 }
+
+

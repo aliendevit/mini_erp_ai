@@ -188,6 +188,11 @@ class ProjectMaterialLogPayload(BaseModel):
     notes: str | None = None
 
 
+class ProjectMonitoringAlertUpdatePayload(BaseModel):
+    status: Literal["open", "resolved", "dismissed"]
+    resolutionNote: str | None = None
+
+
 class InvoiceUpdatePayload(BaseModel):
     status: Literal["draft", "final", "sent", "paid", "canceled"] | None = None
     issueDate: datetime | date | None = None

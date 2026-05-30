@@ -88,7 +88,21 @@ export default function CustomersPage() {
   }
 
   return (
-    <div className="card">
+    <div className="entity-page customers-page">
+      <section className="entity-hero card">
+        <div className="entity-hero-copy">
+          <div className="entity-kicker">CRM</div>
+          <h1>{m.customersPage.heading}</h1>
+          <p>Manage customer profiles, contact details, and billing-ready business information.</p>
+        </div>
+        <div className="entity-hero-stats">
+            <div className="entity-stat"><strong>{items.length}</strong><span>{m.nav.customers}</span></div>
+            <div className="entity-stat"><strong>{items.filter((item) => item.contactEmail || item.contactPhone).length}</strong><span>{m.common.contact}</span></div>
+            <div className="entity-stat"><strong>{editingId ? 'Edit' : 'New'}</strong><span>{m.common.status}</span></div>
+        </div>
+      </section>
+
+      <div className="card entity-panel">
       <h2>{m.customersPage.heading}</h2>
 
       <div className="row">
@@ -189,6 +203,7 @@ export default function CustomersPage() {
           )}
         </tbody>
       </table>
+      </div>
     </div>
   );
 }

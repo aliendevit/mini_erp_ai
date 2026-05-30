@@ -74,6 +74,10 @@ def _site_context(site: dict[str, Any]) -> dict[str, Any]:
         "predictedFinishDate": site.get("predictedFinishDate"),
         "delayDays": site.get("delayDays"),
         "delayStatus": site.get("delayStatus"),
+        "progressSource": site.get("progressSource"),
+        "progressConfidence": site.get("progressConfidence"),
+        "progressSignals": site.get("progressSignals") or [],
+        "baselineNotes": (site.get("baselinePlan") or {}).get("notes"),
         "lastUpdateDate": site.get("lastUpdateDate"),
         "openBlockerCount": len(_as_list(site.get("openBlockers"))),
         "latestPhotoCount": len(_as_list(site.get("latestPhotos"))),
@@ -161,8 +165,11 @@ def _build_prompt(context: dict[str, Any], locale: str) -> str:
             f"Answer in {language}.",
             "Use only the JSON tracking context. Do not invent progress, dates, materials, workshops, photos, or issues.",
             "Planned progress, actual progress, progress delta, predicted finish, and delay days are backend-calculated values; explain them but do not recalculate or change them.",
+            "Explain progress confidence and progress signals in clear business language. If confidence is low, say exactly what data is missing.",
+            "When baseline notes include a trade sequence, use it to explain planning quality and the next practical step.",
             "Rule-based warnings are the source of truth. Prioritize them in risks and recommended actions.",
             "Photo data is metadata only. Do not claim visual inspection or image analysis.",
+            "Write concise manager-facing language: current situation, business impact, and next action. Avoid generic phrases.",
             "Return exactly one JSON object with this schema:",
             '{"healthStatus":"healthy|watch|at_risk|blocked","summary":"string","risks":[{"title":"string","severity":"low|medium|high","siteName":"string|null","reason":"string"}],"delays":[{"siteName":"string|null","reason":"string","impact":"string"}],"missingInformation":["string"],"recommendedActions":[{"priority":"low|medium|high","siteName":"string|null","action":"string"}],"assumptions":["string"]}',
             "Tracking context:",
@@ -220,6 +227,8 @@ def _fallback_analysis(context: dict[str, Any], locale: str, provider: str = "ru
         missing.append("Workshop start/end dates are missing for at least one site.")
     if any(warning.get("type") == "no_workshop_assigned" for warning in warnings):
         missing.append("At least one active site has tracking work without an assigned workshop.")
+    if any(site.get("progressConfidence") == "low" for site in _as_list(context.get("sites"))):
+        missing.append("At least one site has low progress confidence because task progress or recent manual updates are missing.")
     return {
         "provider": provider,
         "healthStatus": health,

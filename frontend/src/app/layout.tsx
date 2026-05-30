@@ -3,6 +3,7 @@ import type { ReactNode } from 'react';
 
 import { AppHeader } from './ui/AppHeader';
 import { AppProviders } from './ui/AppProviders';
+import { MobileBottomNav } from './ui/MobileBottomNav';
 
 export const metadata = {
   title: 'Omran ',
@@ -48,9 +49,10 @@ export default function RootLayout({ children }: { children: ReactNode }) {
       </head>
       <body>
         <AppProviders>
-          <div className="container">
+          <div className="container app-shell">
             <AppHeader />
-            {children}
+            <main className="app-main">{children}</main>
+            <MobileBottomNav />
           </div>
         </AppProviders>
       </body>

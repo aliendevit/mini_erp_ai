@@ -1,7 +1,8 @@
-﻿'use client';
+'use client';
 
 import Link from 'next/link';
 import { useEffect, useMemo, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { API_BASE, apiGet, apiJson } from '../../lib/api';
 import { type BrowserSpeechRecognition } from '../../lib/browser-speech';
 import { type NativeAudioRecordingSession, isNativeAudioRecordingSupported, startNativeAudioRecording } from '../../lib/native-audio-recorder';
@@ -213,6 +214,8 @@ type ProposalDraft = {
   messages?: ProposalMessage[];
 };
 
+const SELECTED_INTAKE_STORAGE_KEY = 'ai_intake_selected_id';
+
 const emptyDraft: Partial<ProposalDraft> = {
   status: 'intake',
   customerCompanyName: '',
@@ -243,6 +246,48 @@ const emptyDraft: Partial<ProposalDraft> = {
   staffingPlan: null,
 };
 
+
+type IconName =
+  | 'plus'
+  | 'send'
+  | 'mic'
+  | 'stop'
+  | 'x'
+  | 'file'
+  | 'save'
+  | 'trash'
+  | 'sparkles'
+  | 'wrench'
+  | 'check'
+  | 'info'
+  | 'bill';
+
+const ICON_PATHS: Record<IconName, string[]> = {
+  plus: ['M12 5v14', 'M5 12h14'],
+  send: ['M22 2 11 13', 'M22 2 15 22 11 13 2 9 22 2'],
+  mic: ['M12 14a3 3 0 0 0 3-3V5a3 3 0 0 0-6 0v6a3 3 0 0 0 3 3Z', 'M19 10v1a7 7 0 0 1-14 0v-1', 'M12 18v4', 'M8 22h8'],
+  stop: ['M7 7h10v10H7z'],
+  x: ['M18 6 6 18', 'M6 6l12 12'],
+  file: ['M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z', 'M14 2v6h6', 'M8 13h8', 'M8 17h6'],
+  save: ['M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2Z', 'M17 21v-8H7v8', 'M7 3v5h8'],
+  trash: ['M3 6h18', 'M8 6V4h8v2', 'M19 6l-1 14H6L5 6', 'M10 11v6', 'M14 11v6'],
+  sparkles: ['M12 3l1.7 4.8L18 10l-4.3 2.2L12 17l-1.7-4.8L6 10l4.3-2.2L12 3Z', 'M19 3v4', 'M17 5h4', 'M5 17v4', 'M3 19h4'],
+  wrench: ['M14.7 6.3a4 4 0 0 0-5.4 5.4L3 18l3 3 6.3-6.3a4 4 0 0 0 5.4-5.4l-3 3-3-3 3-3Z'],
+  check: ['M20 6 9 17l-5-5'],
+  info: ['M12 22a10 10 0 1 0 0-20 10 10 0 0 0 0 20Z', 'M12 16v-4', 'M12 8h.01'],
+  bill: ['M6 2h12v20l-3-2-3 2-3-2-3 2V2Z', 'M9 7h6', 'M9 11h6', 'M9 15h4'],
+};
+
+function Icon({ name }: { name: IconName }) {
+  return (
+    <svg className="icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+      {ICON_PATHS[name].map((path) => (
+        <path key={path} d={path} />
+      ))}
+    </svg>
+  );
+}
+
 const MAX_RECORDING_MS = 90_000;
 const SHOW_AI_FACTS = process.env.NEXT_PUBLIC_SHOW_AI_FACTS === 'true';
 
@@ -270,14 +315,49 @@ function extraLabels(locale: string) {
       suggestedFor: "\u0645\u0642\u062a\u0631\u062d\u0629 \u0644\u0640",
       relation: "\u0627\u0644\u0639\u0644\u0627\u0642\u0629",
       workshopOptions: "\u0627\u0642\u062a\u0631\u0627\u062d\u0627\u062a \u0627\u0644\u0648\u0631\u0634\u0627\u062a / \u0627\u0644\u0641\u0631\u0642 \u0627\u0644\u062e\u0627\u0631\u062c\u064a\u0629",
+      workshopReviewTitle: "\u0645\u0631\u0627\u062c\u0639\u0629 \u062a\u0646\u0641\u064a\u0630 \u0627\u0644\u0648\u0631\u0634",
+      workshopReviewDescription: "\u0631\u0627\u062c\u0639 \u0627\u0644\u0645\u0647\u0646 \u0627\u0644\u0645\u0637\u0644\u0648\u0628\u0629 \u0648\u0627\u0644\u0648\u0631\u0634 \u0627\u0644\u0645\u0639\u062a\u0645\u062f\u0629 \u0648\u0627\u0644\u0642\u0631\u0627\u0631\u0627\u062a \u0627\u0644\u0646\u0627\u0642\u0635\u0629 \u0644\u0643\u0644 \u0645\u0648\u0642\u0639. \u0647\u0630\u0627 \u0627\u0644\u062a\u062f\u0641\u0642 \u064a\u0639\u062a\u0645\u062f \u0639\u0644\u0649 \u0627\u0644\u0648\u0631\u0634 \u0641\u0642\u0637.",
+      reviewWorkshopsButton: "\u0645\u0631\u0627\u062c\u0639\u0629 \u0627\u0644\u0648\u0631\u0634",
+      workshopReviewRunning: "\u062c\u0627\u0631\u064a \u0645\u0631\u0627\u062c\u0639\u0629 \u0645\u0647\u0646 \u0627\u0644\u0645\u0648\u0627\u0642\u0639 \u0648\u062a\u063a\u0637\u064a\u0629 \u0627\u0644\u0648\u0631\u0634...",
+      workshopReviewDone: "\u0645\u0631\u0627\u062c\u0639\u0629 \u0627\u0644\u0648\u0631\u0634 \u062c\u0627\u0647\u0632\u0629. \u062a\u062d\u0642\u0642 \u0645\u0646 \u0627\u0644\u062a\u0639\u064a\u064a\u0646\u0627\u062a \u0627\u0644\u0646\u0627\u0642\u0635\u0629 \u0642\u0628\u0644 \u0627\u0644\u062a\u0623\u0643\u064a\u062f.",
+      workshopReviewError: "\u062a\u0639\u0630\u0631\u062a \u0645\u0631\u0627\u062c\u0639\u0629 \u0627\u0644\u0648\u0631\u0634.",
+      noWorkshopAssignedWarning: "\u0644\u0645 \u064a\u062a\u0645 \u062a\u0639\u064a\u064a\u0646 \u0648\u0631\u0634\u0629 \u0628\u0639\u062f.",
+      workshopAssignedForSite: "\u062a\u0645 \u062a\u0639\u064a\u064a\u0646 \u0648\u0631\u0634\u0629 \u0644\u0647\u0630\u0627 \u0627\u0644\u0645\u0648\u0642\u0639.",
+      workshopNeeded: "\u062a\u062d\u062a\u0627\u062c \u0648\u0631\u0634\u0629 / \u0633\u064a\u062a\u0645 \u0627\u062e\u062a\u064a\u0627\u0631\u0647\u0627",
+      explainWorkshopDecision: "\u0634\u0631\u062d \u0642\u0631\u0627\u0631 \u0627\u0644\u0648\u0631\u0634\u0629",
+      availableLabel: "\u0645\u062a\u0627\u062d\u0629",
+      workflowTitle: "\u0627\u0633\u062a\u0642\u0628\u0627\u0644 \u0627\u0644\u0645\u0634\u0631\u0648\u0639 \u0628\u0627\u0644\u0630\u0643\u0627\u0621 \u0627\u0644\u0627\u0635\u0637\u0646\u0627\u0639\u064a",
+      workflowSubtitle: "\u0627\u0643\u062a\u0628 \u0627\u0644\u062a\u0641\u0627\u0635\u064a\u0644 \u0628\u0634\u0643\u0644 \u0637\u0628\u064a\u0639\u064a\u060c \u0648\u0627\u0644\u0635\u0641\u062d\u0629 \u062a\u0642\u0633\u0645\u0647\u0627 \u0625\u0644\u0649 \u0639\u0631\u0636 \u0642\u0627\u0628\u0644 \u0644\u0644\u0645\u0631\u0627\u062c\u0639\u0629.",
+      stepChat: "\u0627\u0644\u0645\u062d\u0627\u062f\u062b\u0629",
+      stepChatDesc: "\u0627\u062c\u0645\u0639 \u062a\u0641\u0627\u0635\u064a\u0644 \u0627\u0644\u0645\u0634\u0631\u0648\u0639",
+      stepProposal: "\u0645\u0633\u0648\u062f\u0629 \u0627\u0644\u0639\u0631\u0636",
+      stepProposalDesc: "\u0631\u0627\u062c\u0639 \u0627\u0644\u0645\u0648\u0627\u0642\u0639 \u0648\u0627\u0644\u062f\u0641\u0639\u0627\u062a",
+      stepWorkshops: "\u0627\u0644\u0648\u0631\u0634",
+      stepWorkshopsDesc: "\u062d\u062f\u062f \u0627\u0644\u0648\u0631\u0634\u0629 \u0644\u0643\u0644 \u0645\u0648\u0642\u0639",
+      stepConfirm: "\u0627\u0644\u062a\u0623\u0643\u064a\u062f",
+      stepConfirmDesc: "\u062d\u0648\u0651\u0644\u0647\u0627 \u0625\u0644\u0649 \u0637\u0644\u0628",
+      quickExamplesTitle: "\u0623\u0645\u062b\u0644\u0629 \u0633\u0631\u064a\u0639\u0629 \u0644\u0644\u0628\u062f\u0621",
+      quickExamplesDesc: "\u0627\u062e\u062a\u0631 \u0645\u062b\u0627\u0644\u0627\u064b \u0644\u062a\u0639\u0628\u0626\u0629 \u0645\u0631\u0628\u0639 \u0627\u0644\u0645\u062d\u0627\u062f\u062b\u0629.",
+      exampleProjectBasics: "\u0639\u0646\u062f\u064a \u0645\u0634\u0631\u0648\u0639 \u062a\u0631\u0645\u064a\u0645 \u0644\u0634\u0631\u0643\u0629 \u0627\u0644\u0639\u0645\u0631\u0627\u0646 \u0627\u0644\u062d\u062f\u064a\u062b \u0641\u064a \u062f\u0645\u0634\u0642\u060c \u062d\u064a \u0627\u0644\u0645\u0627\u0644\u0643\u064a\u060c \u0628\u0646\u0627\u0621 \u0631\u0642\u0645 \u0661\u0665. \u0627\u0644\u0645\u0633\u0624\u0648\u0644 \u0623\u062d\u0645\u062f \u0645\u0646\u0635\u0648\u0631\u060c \u0647\u0627\u062a\u0641 \u0660\u0669\u0663\u0663\u0664\u0664\u0665\u0665\u0666\u0666\u060c \u0648\u0627\u0644\u0628\u0631\u064a\u062f ahmad@example.com. \u0627\u0644\u062a\u0646\u0641\u064a\u0630 \u0645\u0646 10-06-2026 \u0625\u0644\u0649 25-06-2026.",
+      exampleScope: "\u0627\u0644\u0645\u0637\u0628\u062e \u064a\u062d\u062a\u0627\u062c \u0625\u0632\u0627\u0644\u0629 \u0628\u0644\u0627\u0637 \u0648\u062a\u0631\u0643\u064a\u0628 \u0633\u064a\u0631\u0627\u0645\u064a\u0643 \u0642\u064a\u0627\u0633 \u0666\u0660 \u0641\u064a \u0666\u0660\u060c \u0648\u0625\u0635\u0644\u0627\u062d \u062a\u0645\u062f\u064a\u062f\u0627\u062a \u0627\u0644\u0645\u064a\u0627\u0647\u060c \u0648\u062a\u0631\u0645\u064a\u0645 \u062e\u0632\u0627\u0626\u0646 \u062e\u0634\u0628\u064a\u0629. \u0627\u0644\u062d\u0645\u0627\u0645 \u064a\u062d\u062a\u0627\u062c \u0639\u0632\u0644 \u0645\u0627\u0626\u064a \u0648\u062a\u0628\u062f\u064a\u0644 \u0645\u063a\u0633\u0644\u0629 \u0648\u062e\u0644\u0627\u0637 \u062f\u0634. \u063a\u0631\u0641\u0629 \u0627\u0644\u062c\u0644\u0648\u0633 \u062a\u062d\u062a\u0627\u062c \u062f\u0647\u0627\u0646 \u062f\u0627\u062e\u0644\u064a \u0645\u0639 \u0645\u0639\u062c\u0648\u0646 \u0643\u0627\u0645\u0644 \u0648\u0637\u0628\u0642\u062a\u064a\u0646.",
+      examplePaymentWorkshop: "\u0627\u0644\u0639\u0631\u0628\u0648\u0646 2000 \u062f\u0648\u0644\u0627\u0631 \u0646\u0642\u062f\u0627\u064b \u0628\u062a\u0627\u0631\u064a\u062e \u0628\u062f\u0627\u064a\u0629 \u0627\u0644\u0645\u0634\u0631\u0648\u0639\u060c \u0648\u0627\u0644\u0628\u0627\u0642\u064a 7000 \u062f\u0648\u0644\u0627\u0631 \u0644\u0627\u062d\u0642\u0627\u064b. \u0648\u0631\u0634\u0629 \u0627\u0644\u0634\u0627\u0645 \u0644\u0644\u0628\u0644\u0627\u0637 \u0648\u0627\u0644\u0639\u0632\u0644 \u0633\u062a\u063a\u0637\u064a \u0627\u0644\u0628\u0644\u0627\u0637 \u0648\u0627\u0644\u0639\u0632\u0644\u060c \u0648\u0646\u062d\u062a\u0627\u062c \u0627\u062e\u062a\u064a\u0627\u0631 \u0648\u0631\u0634\u0629 \u062f\u0647\u0627\u0646 \u0645\u0646\u0627\u0633\u0628\u0629.",
+      useExample: "\u0627\u0633\u062a\u062e\u062f\u0645 \u0627\u0644\u0645\u062b\u0627\u0644",
+      projectSnapshot: "\u0645\u0644\u062e\u0635 \u0633\u0631\u064a\u0639",
+      conversationMessages: "\u0631\u0633\u0627\u0626\u0644 \u0627\u0644\u0645\u062d\u0627\u062f\u062b\u0629",
+      sitesCount: "\u0639\u062f\u062f \u0627\u0644\u0645\u0648\u0627\u0642\u0639",
+      missingWorkshops: "\u0648\u0631\u0634 \u063a\u064a\u0631 \u0645\u062d\u062f\u062f\u0629",
+      paymentsCount: "\u0627\u0644\u062f\u0641\u0639\u0627\u062a",
+      readyHint: "\u0643\u0644\u0645\u0627 \u0623\u0635\u0628\u062d\u062a \u0627\u0644\u0628\u064a\u0627\u0646\u0627\u062a \u0643\u0627\u0645\u0644\u0629\u060c \u064a\u0645\u0643\u0646\u0643 \u0625\u0646\u0634\u0627\u0621 \u0627\u0644\u0639\u0631\u0636 \u0648\u0645\u0631\u0627\u062c\u0639\u0629 \u0627\u0644\u0648\u0631\u0634.",
+      voiceDiagnostics: "\u062a\u0634\u062e\u064a\u0635 \u0627\u0644\u0635\u0648\u062a",
+      importantOnly: "\u062a\u062f\u0641\u0642 \u0645\u0628\u0633\u0637",
       proposalGeneratingButton: "\u062c\u0627\u0631\u064a \u0625\u0646\u0634\u0627\u0621 \u0627\u0644\u0639\u0631\u0636...",
       proposalGenerating: "\u062c\u0627\u0631\u064a \u062a\u062d\u0644\u064a\u0644 \u0627\u0644\u0645\u062d\u0627\u062f\u062b\u0629 \u0648\u0625\u0646\u0634\u0627\u0621 \u0627\u0644\u0639\u0631\u0636. \u0642\u062f \u064a\u0633\u062a\u063a\u0631\u0642 \u0647\u0630\u0627 \u0628\u0636\u0639 \u062b\u0648\u0627\u0646\u064d.",
       proposalGenerated: "\u062a\u0645 \u0625\u0646\u0634\u0627\u0621 \u0627\u0644\u0639\u0631\u0636. \u064a\u0645\u0643\u0646\u0643 \u0645\u0631\u0627\u062c\u0639\u062a\u0647 \u0648\u062a\u0639\u062f\u064a\u0644\u0647 \u0627\u0644\u0622\u0646.",
       proposalGenerationFailed: "\u0641\u0634\u0644 \u0625\u0646\u0634\u0627\u0621 \u0627\u0644\u0639\u0631\u0636. \u062a\u062d\u0642\u0642 \u0645\u0646 \u0627\u0644\u0631\u0633\u0627\u0644\u0629 \u0648\u062d\u0627\u0648\u0644 \u0645\u0631\u0629 \u0623\u062e\u0631\u0649.",
       recommendationCalculatingButton: "\u062c\u0627\u0631\u064a \u062d\u0633\u0627\u0628 \u0627\u0644\u0627\u0642\u062a\u0631\u0627\u062d\u0627\u062a...",
-      recommendationCalculating: "\u062c\u0627\u0631\u064a \u062d\u0633\u0627\u0628 \u0627\u0644\u0627\u0642\u062a\u0631\u0627\u062d\u0627\u062a \u0648\u0645\u0631\u0627\u062c\u0639\u0629 \u0627\u0644\u0645\u0647\u0627\u0631\u0627\u062a \u0648\u0627\u0644\u0633\u0639\u0629.",
-      recommendationCalculated: "\u062a\u0645 \u062d\u0633\u0627\u0628 \u0627\u0642\u062a\u0631\u0627\u062d\u0627\u062a \u0627\u0644\u0645\u0648\u0638\u0641\u064a\u0646. \u0631\u0627\u062c\u0639 \u0627\u0644\u0628\u0637\u0627\u0642\u0627\u062a \u0644\u0627\u062e\u062a\u064a\u0627\u0631 \u0627\u0644\u0641\u0631\u064a\u0642 \u0627\u0644\u0646\u0647\u0627\u0626\u064a.",
-      recommendationCalculationFailed: "\u0641\u0634\u0644 \u062d\u0633\u0627\u0628 \u0627\u0642\u062a\u0631\u0627\u062d\u0627\u062a \u0627\u0644\u0645\u0648\u0638\u0641\u064a\u0646. \u062a\u062d\u0642\u0642 \u0645\u0646 \u0627\u0644\u0628\u064a\u0627\u0646\u0627\u062a \u0648\u062d\u0627\u0648\u0644 \u0645\u0631\u0629 \u0623\u062e\u0631\u0649.",
+      recommendationCalculating: "\u062c\u0627\u0631\u064a \u0645\u0631\u0627\u062c\u0639\u0629 \u0627\u0644\u0648\u0631\u0634 \u0648\u0627\u0644\u062a\u062e\u0635\u0635\u0627\u062a \u0627\u0644\u0645\u062a\u0627\u062d\u0629.",
+      recommendationCalculated: "\u062a\u0645\u062a \u0645\u0631\u0627\u062c\u0639\u0629 \u0627\u0644\u0648\u0631\u0634. \u0631\u0627\u062c\u0639 \u0627\u0644\u0628\u0637\u0627\u0642\u0627\u062a \u0648\u062d\u062f\u062f \u0627\u0644\u0648\u0631\u0634\u0629 \u0627\u0644\u0645\u0646\u0627\u0633\u0628\u0629 \u0644\u0643\u0644 \u0645\u0648\u0642\u0639.",
+      recommendationCalculationFailed: "\u062a\u0639\u0630\u0631\u062a \u0645\u0631\u0627\u062c\u0639\u0629 \u0627\u0644\u0648\u0631\u0634. \u062a\u062d\u0642\u0642 \u0645\u0646 \u0627\u0644\u0628\u064a\u0627\u0646\u0627\u062a \u0648\u062d\u0627\u0648\u0644 \u0645\u0631\u0629 \u0623\u062e\u0631\u0649.",
       proposalProgressSteps: [
         "\u062c\u0627\u0631\u064a \u062a\u062d\u0644\u064a\u0644 \u0627\u0644\u0645\u062d\u0627\u062f\u062b\u0629...",
         "\u062c\u0627\u0631\u064a \u0627\u0633\u062a\u062e\u0631\u0627\u062c \u0627\u0644\u062d\u0642\u0627\u0626\u0642 \u0648\u062a\u0648\u0632\u064a\u0639 \u0627\u0644\u0645\u0648\u0627\u0642\u0639...",
@@ -285,10 +365,15 @@ function extraLabels(locale: string) {
       ],
       recommendationProgressSteps: [
         "\u062c\u0627\u0631\u064a \u0645\u0631\u0627\u062c\u0639\u0629 \u0645\u062a\u0637\u0644\u0628\u0627\u062a \u0643\u0644 \u0645\u0648\u0642\u0639...",
-        "\u062c\u0627\u0631\u064a \u0645\u0642\u0627\u0631\u0646\u0629 \u0627\u0644\u0645\u0647\u0627\u0631\u0627\u062a \u0648\u0627\u0644\u0633\u0639\u0629 \u0627\u0644\u0645\u062a\u0627\u062d\u0629...",
-        "\u062c\u0627\u0631\u064a \u0625\u0639\u062f\u0627\u062f \u0627\u0644\u0641\u0631\u064a\u0642 \u0627\u0644\u0645\u0642\u062a\u0631\u062d \u0644\u0643\u0644 \u0645\u0648\u0642\u0639..."
+        "\u062c\u0627\u0631\u064a \u0645\u0642\u0627\u0631\u0646\u0629 \u0627\u0644\u0645\u0647\u0646 \u0627\u0644\u0645\u0637\u0644\u0648\u0628\u0629 \u0645\u0639 \u0627\u0644\u0648\u0631\u0634 \u0627\u0644\u0645\u062a\u0627\u062d\u0629...",
+        "\u062c\u0627\u0631\u064a \u0625\u0639\u062f\u0627\u062f \u0627\u0642\u062a\u0631\u0627\u062d\u0627\u062a \u0627\u0644\u0648\u0631\u0634 \u0644\u0643\u0644 \u0645\u0648\u0642\u0639..."
       ],
       hiddenMemoryClear: "\u062d\u0630\u0641 \u0627\u0644\u0645\u062d\u0627\u062f\u062b\u0629 \u064a\u0645\u0633\u062d \u0647\u0630\u0647 \u0627\u0644\u0645\u062d\u0627\u062f\u062b\u0629 \u0641\u0642\u0637.",
+      messageHistory: "\u0633\u062c\u0644 \u0627\u0644\u0645\u062d\u0627\u062f\u062b\u0629",
+      collapseHistory: "\u0637\u064a \u0627\u0644\u0633\u062c\u0644",
+      expandHistory: "\u0639\u0631\u0636 \u0627\u0644\u0633\u062c\u0644",
+      historyCollapsed: "\u062a\u0645 \u0637\u064a \u0633\u062c\u0644 \u0627\u0644\u0645\u062d\u0627\u062f\u062b\u0629. \u064a\u0645\u0643\u0646\u0643 \u0641\u062a\u062d\u0647 \u0639\u0646\u062f \u0627\u0644\u062d\u0627\u062c\u0629.",
+      latestMessage: "\u0622\u062e\u0631 \u0631\u0633\u0627\u0644\u0629",
       staffingCoverage: "\u062a\u063a\u0637\u064a\u0629 \u0627\u0644\u062a\u0646\u0641\u064a\u0630",
       internalOnly: "\u0648\u0631\u0634\u0629 \u063a\u064a\u0631 \u0645\u062d\u062f\u062f\u0629",
       mixedWithWorkshop: "\u062a\u0648\u0632\u064a\u0639 \u0639\u0644\u0649 \u0623\u0643\u062b\u0631 \u0645\u0646 \u0648\u0631\u0634\u0629",
@@ -296,18 +381,18 @@ function extraLabels(locale: string) {
       assignedWorkshop: "\u0627\u0644\u0648\u0631\u0634\u0629 \u0627\u0644\u0645\u0639\u062a\u0645\u062f\u0629",
       noWorkshop: "\u0628\u062f\u0648\u0646 \u0648\u0631\u0634\u0629",
       workshopCoveredSkills: "\u0627\u0644\u0645\u0647\u0627\u0631\u0627\u062a \u0627\u0644\u062a\u064a \u062a\u063a\u0637\u064a\u0647\u0627 \u0627\u0644\u0648\u0631\u0634\u0629",
-      internalSkillsRemaining: "\u0627\u0644\u0645\u0647\u0646 \u0627\u0644\u0645\u0637\u0644\u0648\u0628\u0629",
+      internalSkillsRemaining: "\u0627\u0644\u0645\u0647\u0646 \u0627\u0644\u0645\u0637\u0644\u0648\u0628\u0629 / \u063a\u064a\u0631 \u0627\u0644\u0645\u063a\u0637\u0627\u0629",
       aiRecommendedCount: "\u0645\u0631\u0627\u062c\u0639\u0629 \u0627\u0644\u0648\u0631\u0634",
       selectedInternalCount: "\u0627\u0644\u062a\u0646\u0641\u064a\u0630 \u0639\u0628\u0631 \u0627\u0644\u0648\u0631\u0634",
-      selectedTeam: "\u0627\u0644\u0641\u0631\u064a\u0642 \u0627\u0644\u0645\u062e\u062a\u0627\u0631",
+      selectedTeam: "\u0627\u0644\u0648\u0631\u0634\u0629 \u0627\u0644\u0645\u062e\u062a\u0627\u0631\u0629",
       changeEmployees: "\u062a\u0639\u062f\u064a\u0644 \u0627\u0644\u0648\u0631\u0634\u0629",
       hideEmployees: "\u0625\u062e\u0641\u0627\u0621 \u062a\u0641\u0627\u0635\u064a\u0644 \u0627\u0644\u0648\u0631\u0634\u0629",
-      noSelectedEmployees: "\u0644\u0627 \u064a\u0648\u062c\u062f \u0627\u062e\u062a\u064a\u0627\u0631 \u0645\u0648\u0638\u0641\u064a\u0646 \u062f\u0627\u062e\u0644\u064a\u064a\u0646 \u0641\u064a \u0647\u0630\u0627 \u0627\u0644\u062a\u062f\u0641\u0642.",
+      noSelectedEmployees: "\u0647\u0630\u0627 \u0627\u0644\u062a\u062f\u0641\u0642 \u064a\u0639\u062a\u0645\u062f \u0639\u0644\u0649 \u0627\u0644\u0648\u0631\u0634 \u0641\u0642\u0637.",
       noInternalEmployeesNeeded: "\u0627\u0644\u062a\u0646\u0641\u064a\u0630 \u0639\u0628\u0631 \u0627\u0644\u0648\u0631\u0634 \u0641\u0642\u0637.",
       staffingCardDesc: "\u0627\u062e\u062a\u0631 \u0627\u0644\u0648\u0631\u0634\u0629 \u0648\u062d\u062f\u062f \u0627\u0644\u0645\u0647\u0646 \u0627\u0644\u062a\u064a \u062a\u063a\u0637\u064a\u0647\u0627.",
       workshopSuggestionsCompact: "\u0627\u0642\u062a\u0631\u0627\u062d\u0627\u062a \u0627\u0644\u0648\u0631\u0634 \u0644\u0647\u0630\u0647 \u0627\u0644\u0645\u0648\u0642\u0639",
       alternativeEmployees: "\u0648\u0631\u0634 \u0628\u062f\u064a\u0644\u0629",
-      explainRecommendation: "\u0644\u0645\u0627\u0630\u0627 \u0647\u0630\u0627 \u0627\u0644\u0639\u062f\u062f\u061f",
+      explainRecommendation: "\u0644\u0645\u0627\u0630\u0627 \u0647\u0630\u0647 \u0627\u0644\u0648\u0631\u0634\u0629\u061f",
       explainingRecommendationButton: "\u062c\u0627\u0631\u064a \u062a\u062d\u0644\u064a\u0644 \u0627\u0644\u0633\u0628\u0628...",
       explanationTitle: "\u0634\u0631\u062d \u0642\u0631\u0627\u0631 \u0627\u0644\u0648\u0631\u0634\u0629",
       explanationStreaming: "\u062c\u0627\u0631\u064a \u062a\u0648\u0644\u064a\u062f \u0634\u0631\u062d \u0627\u0644\u0642\u0631\u0627\u0631...",
@@ -338,14 +423,49 @@ function extraLabels(locale: string) {
       suggestedFor: 'Suggested for',
       relation: 'Relationship',
       workshopOptions: 'Workshop / external team suggestions',
+      workshopReviewTitle: 'Workshop execution review',
+      workshopReviewDescription: 'Review required trades, assigned workshops, and missing workshop decisions per site. This flow uses workshop partners only.',
+      reviewWorkshopsButton: 'Review workshops',
+      workshopReviewRunning: 'Reviewing site trades and workshop coverage...',
+      workshopReviewDone: 'Workshop review is ready. Check missing assignments before confirming.',
+      workshopReviewError: 'Workshop review could not be calculated.',
+      noWorkshopAssignedWarning: 'No workshop is assigned yet.',
+      workshopAssignedForSite: 'Workshop assigned for this site.',
+      workshopNeeded: 'Workshop needed / to be selected',
+      explainWorkshopDecision: 'Explain workshop decision',
+      availableLabel: 'available',
+      workflowTitle: 'AI Project Intake',
+      workflowSubtitle: 'Start with a short conversation, then review the proposal and workshops before converting it to an order.',
+      stepChat: 'Chat',
+      stepChatDesc: 'Capture project details',
+      stepProposal: 'Proposal Draft',
+      stepProposalDesc: 'Generate and review data',
+      stepWorkshops: 'Workshops',
+      stepWorkshopsDesc: 'Assign partner per site',
+      stepConfirm: 'Confirm',
+      stepConfirmDesc: 'Convert to order',
+      quickExamplesTitle: 'Quick start examples',
+      quickExamplesDesc: 'Use an example or write naturally.',
+      exampleProjectBasics: 'I have a renovation project for Modern Building Company in Damascus, Al-Malki, building 15. Contact is Ahmad Mansour, phone 0933445566, email ahmad@example.com. Work starts 2026-06-10 and ends around 2026-06-25.',
+      exampleScope: 'The kitchen needs old tile removal, new 60x60 ceramic tiles, and plumbing repair. The bathroom needs waterproofing and replacement of sink and shower mixer. The living room needs interior paint with full putty and two coats.',
+      examplePaymentWorkshop: 'Payment is cash. Deposit is 2000 USD at project start, remaining amount is 7000 USD. Al-Sham Tile and Waterproofing Workshop covers tiles and waterproofing, and we need a painting workshop for the living room.',
+      useExample: 'Use example',
+      projectSnapshot: 'Project snapshot',
+      conversationMessages: 'Conversation messages',
+      sitesCount: 'Sites',
+      missingWorkshops: 'Missing workshops',
+      paymentsCount: 'Payments',
+      readyHint: 'When the information is complete, generate the proposal draft and review workshops.',
+      voiceDiagnostics: 'Voice diagnostics',
+      importantOnly: 'Important only',
       proposalGeneratingButton: 'Generating proposal...',
       proposalGenerating: 'Analyzing the conversation and generating the proposal. This can take a few seconds.',
       proposalGenerated: 'Proposal generated. You can review and edit it now.',
       proposalGenerationFailed: 'Proposal generation failed. Check the error and try again.',
       recommendationCalculatingButton: 'Calculating suggestions...',
-      recommendationCalculating: 'Calculating employee suggestions and reviewing skills and capacity.',
-      recommendationCalculated: 'Employee suggestions are ready. Review the site cards and adjust the final team if needed.',
-      recommendationCalculationFailed: 'Employee suggestions could not be calculated. Check the data and try again.',
+      recommendationCalculating: 'Reviewing workshop suggestions and trade coverage.',
+      recommendationCalculated: 'Workshop review is ready. Review the site cards and assign the right workshop if needed.',
+      recommendationCalculationFailed: 'Workshop review could not be calculated. Check the data and try again.',
       proposalProgressSteps: [
         'Analyzing the conversation...',
         'Extracting project facts and sites...',
@@ -353,10 +473,15 @@ function extraLabels(locale: string) {
       ],
       recommendationProgressSteps: [
         'Reviewing each site requirement...',
-        'Comparing skills, certifications, and capacity...',
-        'Preparing the suggested team for each site...'
+        'Matching required trades with available workshops...',
+        'Preparing workshop suggestions for each site...'
       ],
       hiddenMemoryClear: 'Clearing removes only the current conversation.',
+      messageHistory: 'Message history',
+      collapseHistory: 'Collapse history',
+      expandHistory: 'Show history',
+      historyCollapsed: 'Message history is collapsed. Open it when you need to review the context.',
+      latestMessage: 'Latest message',
       staffingCoverage: 'Execution coverage',
       internalOnly: 'Workshop needed',
       mixedWithWorkshop: 'Split between workshops',
@@ -364,18 +489,18 @@ function extraLabels(locale: string) {
       assignedWorkshop: 'Assigned workshop',
       noWorkshop: 'No workshop',
       workshopCoveredSkills: 'Workshop-covered skills',
-      internalSkillsRemaining: 'Remaining internal skills',
-      aiRecommendedCount: 'AI-recommended internal count',
-      selectedInternalCount: 'Internal count disabled',
-      selectedTeam: 'Selected team',
-      changeEmployees: 'Change employees',
-      hideEmployees: 'Hide employee list',
+      internalSkillsRemaining: 'Required / uncovered trades',
+      aiRecommendedCount: 'Workshop review',
+      selectedInternalCount: 'Workshop execution',
+      selectedTeam: 'Selected workshop',
+      changeEmployees: 'Change workshop',
+      hideEmployees: 'Hide workshop details',
       noSelectedEmployees: 'Workshop-only execution workflow.',
       noInternalEmployeesNeeded: 'Workshop-only execution selected.',
       staffingCardDesc: 'Choose the workshop partner and confirm which trades it covers.',
       workshopSuggestionsCompact: 'Workshop suggestions for this site',
-      alternativeEmployees: 'Alternatives and excluded employees',
-      explainRecommendation: 'Why this count?',
+      alternativeEmployees: 'Alternative workshops',
+      explainRecommendation: 'Why this workshop?',
       explainingRecommendationButton: 'Explaining recommendation...',
       explanationTitle: 'Workshop decision explanation',
       explanationStreaming: 'Generating the decision explanation...',
@@ -405,6 +530,41 @@ function extraLabels(locale: string) {
     suggestedFor: 'Vorgeschlagen fuer',
     relation: 'Beziehung',
     workshopOptions: 'Workshop-/Teamvorschlaege',
+    workshopReviewTitle: 'Workshop-Ausfuehrung pruefen',
+    workshopReviewDescription: 'Pruefe benoetigte Gewerke, zugeordnete Workshops und offene Workshop-Entscheidungen je Baustelle. Dieser Ablauf nutzt nur Workshop-Partner.',
+    reviewWorkshopsButton: 'Workshops pruefen',
+    workshopReviewRunning: 'Baustellengewerke und Workshop-Abdeckung werden geprueft...',
+    workshopReviewDone: 'Workshop-Pruefung ist bereit. Offene Zuordnungen vor der Bestaetigung pruefen.',
+    workshopReviewError: 'Workshop-Pruefung konnte nicht berechnet werden.',
+    noWorkshopAssignedWarning: 'Noch kein Workshop zugeordnet.',
+    workshopAssignedForSite: 'Workshop fuer diese Baustelle zugeordnet.',
+    workshopNeeded: 'Workshop offen / auszuwaehlen',
+    explainWorkshopDecision: 'Workshop-Entscheidung erklaeren',
+    availableLabel: 'verfuegbar',
+    workflowTitle: 'KI-Projektaufnahme',
+    workflowSubtitle: 'Starte mit einer kurzen Unterhaltung, pruefe danach Vorschlag und Workshops und wandle ihn in einen Auftrag um.',
+    stepChat: 'Chat',
+    stepChatDesc: 'Projektdaten erfassen',
+    stepProposal: 'Vorschlagsentwurf',
+    stepProposalDesc: 'Daten erzeugen und pruefen',
+    stepWorkshops: 'Workshops',
+    stepWorkshopsDesc: 'Partner je Baustelle zuordnen',
+    stepConfirm: 'Bestaetigen',
+    stepConfirmDesc: 'In Auftrag umwandeln',
+    quickExamplesTitle: 'Schnellstart-Beispiele',
+    quickExamplesDesc: 'Beispiel nutzen oder frei schreiben.',
+    exampleProjectBasics: 'Ich habe ein Sanierungsprojekt fuer Modern Building Company in Damascus, Al-Malki, Gebaeude 15. Kontakt ist Ahmad Mansour, Telefon 0933445566, E-Mail ahmad@example.com. Start 2026-06-10, Ende ca. 2026-06-25.',
+    exampleScope: 'Die Kueche braucht Fliesenabbruch, neue Keramikfliesen 60x60 und Sanitaer-Reparatur. Das Bad braucht Abdichtung und Austausch von Waschbecken und Duschmischer. Das Wohnzimmer braucht Innenanstrich mit Spachtel und zwei Schichten.',
+    examplePaymentWorkshop: 'Zahlung bar. Anzahlung 2000 USD zum Projektstart, Restbetrag 7000 USD. Al-Sham Tile and Waterproofing Workshop uebernimmt Fliesen und Abdichtung, fuer das Wohnzimmer brauchen wir einen Maler-Workshop.',
+    useExample: 'Beispiel nutzen',
+    projectSnapshot: 'Projektueberblick',
+    conversationMessages: 'Chat-Nachrichten',
+    sitesCount: 'Baustellen',
+    missingWorkshops: 'Offene Workshops',
+    paymentsCount: 'Zahlungen',
+    readyHint: 'Wenn die Informationen komplett sind, Vorschlagsentwurf erzeugen und Workshops pruefen.',
+    voiceDiagnostics: 'Sprachdiagnose',
+    importantOnly: 'Nur Wichtiges',
     proposalGeneratingButton: 'Vorschlag wird erzeugt...',
     proposalGenerating: 'Konversation wird analysiert und der Vorschlag wird erzeugt. Das kann einige Sekunden dauern.',
     proposalGenerated: 'Vorschlag wurde erzeugt. Du kannst ihn jetzt pruefen und bearbeiten.',
@@ -420,10 +580,15 @@ function extraLabels(locale: string) {
     ],
     recommendationProgressSteps: [
       'Anforderungen je Baustelle werden geprueft...',
-      'Skills, Zertifikate und Kapazitaet werden verglichen...',
-      'Vorgeschlagenes Team je Baustelle wird vorbereitet...'
+      'Benoetigte Gewerke werden mit verfuegbaren Workshops abgeglichen...',
+      'Workshop-Vorschlaege je Baustelle werden vorbereitet...'
     ],
     hiddenMemoryClear: 'Loeschen entfernt nur die aktuelle Konversation.',
+    messageHistory: 'Nachrichtenverlauf',
+    collapseHistory: 'Verlauf einklappen',
+    expandHistory: 'Verlauf anzeigen',
+    historyCollapsed: 'Der Nachrichtenverlauf ist eingeklappt. Oeffne ihn bei Bedarf zur Kontextpruefung.',
+    latestMessage: 'Letzte Nachricht',
     staffingCoverage: 'Abdeckungsmodus',
     internalOnly: 'Workshop offen',
     mixedWithWorkshop: 'Auf mehrere Workshops aufgeteilt',
@@ -431,18 +596,18 @@ function extraLabels(locale: string) {
     assignedWorkshop: 'Zugeordneter Workshop',
     noWorkshop: 'Kein Workshop',
     workshopCoveredSkills: 'Vom Workshop abgedeckte Skills',
-    internalSkillsRemaining: 'Verbleibende interne Skills',
+    internalSkillsRemaining: 'Benoetigte / offene Gewerke',
     aiRecommendedCount: 'Workshop-Pruefung',
-    selectedInternalCount: 'Interne Anzahl deaktiviert',
-    selectedTeam: 'Ausgewaehltes Team',
+    selectedInternalCount: 'Workshop-Ausfuehrung',
+    selectedTeam: 'Ausgewaehlter Workshop',
     changeEmployees: 'Workshop anpassen',
     hideEmployees: 'Workshopdetails ausblenden',
-    noSelectedEmployees: 'Keine interne Mitarbeiterauswahl in diesem Ablauf.',
+    noSelectedEmployees: 'Dieser Ablauf nutzt nur Workshops.',
     noInternalEmployeesNeeded: 'Ausfuehrung ueber Workshops.',
     staffingCardDesc: 'Workshop-Partner waehlen und abgedeckte Gewerke festlegen.',
     workshopSuggestionsCompact: 'Workshop-Vorschlaege fuer diese Baustelle',
     alternativeEmployees: 'Alternative Workshops',
-    explainRecommendation: 'Warum diese Anzahl?',
+    explainRecommendation: 'Warum dieser Workshop?',
     explainingRecommendationButton: 'Erklaerung wird erstellt...',
     explanationTitle: 'Erklaerung der Workshop-Entscheidung',
     explanationStreaming: 'Entscheidungserklaerung wird erzeugt...',
@@ -512,6 +677,34 @@ function normalizeDraftValue(value: Partial<ProposalDraft> | ProposalDraft): Par
     knownCustomerWorkshops: value.knownCustomerWorkshops || [],
     staffingPlan: value.staffingPlan || null,
   };
+}
+
+function hasDraftContent(draft: Partial<ProposalDraft> | ProposalDraft): boolean {
+  return Boolean(
+    draft.orderTitle ||
+      draft.customerCompanyName ||
+      draft.summary ||
+      draft.orderDescription ||
+      (draft.proposedSites || []).length > 0 ||
+      (draft.paymentDrafts || []).length > 0 ||
+      (draft.externalWorkshops || []).length > 0 ||
+      (draft.messages || []).length > 0
+  );
+}
+
+function getStoredSelectedIntakeId(): string {
+  try {
+    return window.localStorage.getItem(SELECTED_INTAKE_STORAGE_KEY) || '';
+  } catch {
+    return '';
+  }
+}
+
+function storeSelectedIntakeId(id: string) {
+  try {
+    if (id) window.localStorage.setItem(SELECTED_INTAKE_STORAGE_KEY, id);
+    else window.localStorage.removeItem(SELECTED_INTAKE_STORAGE_KEY);
+  } catch {}
 }
 
 function normalizeRecommendations(value: unknown): RecommendationPayload | null {
@@ -590,17 +783,18 @@ export default function AIIntakePage() {
   const [selectedId, setSelectedId] = useState<string>('');
   const [draft, setDraft] = useState<Partial<ProposalDraft>>(emptyDraft);
   const [messages, setMessages] = useState<ProposalMessage[]>([]);
+  const [historyCollapsed, setHistoryCollapsed] = useState(false);
+  const [intakeListCollapsed, setIntakeListCollapsed] = useState(false);
   const [recommendations, setRecommendations] = useState<RecommendationPayload | null>(null);
   const [chatInput, setChatInput] = useState('');
   const [busy, setBusy] = useState(false);
   const [streaming, setStreaming] = useState(false);
+  const [streamingAssistantId, setStreamingAssistantId] = useState<string | null>(null);
   const [proposalGenerationStatus, setProposalGenerationStatus] = useState<'idle' | 'running' | 'done' | 'error'>('idle');
   const [recommendationStatus, setRecommendationStatus] = useState<'idle' | 'running' | 'done' | 'error'>('idle');
   const [proposalProgressStep, setProposalProgressStep] = useState(0);
   const [recommendationProgressStep, setRecommendationProgressStep] = useState(0);
   const [chatError, setChatError] = useState('');
-  const [siteSelections, setSiteSelections] = useState<Record<number, string[]>>({});
-  const [expandedEmployeeSites, setExpandedEmployeeSites] = useState<Record<number, boolean>>({});
   const [existingCustomerId, setExistingCustomerId] = useState('');
   const [lastResult, setLastResult] = useState<{ orderId?: string; customerId?: string } | null>(null);
   const [voiceNotice, setVoiceNotice] = useState('');
@@ -626,9 +820,16 @@ export default function AIIntakePage() {
   const [explanationText, setExplanationText] = useState('');
   const [explanationStatus, setExplanationStatus] = useState<'idle' | 'running' | 'done' | 'error'>('idle');
   const [explanationError, setExplanationError] = useState('');
+  const [portalReady, setPortalReady] = useState(false);
+  const [isMobileLayout, setIsMobileLayout] = useState(false);
   const supportsVoice = supportsNativeRecording || supportsWavRecording;
   const interactionLocked = busy || streaming || recording || transcribing || explanationStatus === 'running';
   const notMentioned = m.aiIntakePage.notMentioned;
+
+  useEffect(() => {
+    document.body.classList.add('ai-intake-page-active');
+    return () => document.body.classList.remove('ai-intake-page-active');
+  }, []);
 
   async function loadLists(preferredId?: string) {
     const [intakeRows, customerRows] = await Promise.all([
@@ -637,7 +838,16 @@ export default function AIIntakePage() {
     ]);
     setIntakes(intakeRows);
     setCustomers(customerRows);
-    const nextId = preferredId || selectedId || intakeRows[0]?.id || '';
+    const storedId = getStoredSelectedIntakeId();
+    const rowIds = new Set(intakeRows.map((item) => item.id));
+    const firstWithContent = intakeRows.find((item) => hasDraftContent(item));
+    const nextId =
+      (preferredId && rowIds.has(preferredId) ? preferredId : '') ||
+      (selectedId && rowIds.has(selectedId) ? selectedId : '') ||
+      (storedId && rowIds.has(storedId) ? storedId : '') ||
+      firstWithContent?.id ||
+      intakeRows[0]?.id ||
+      '';
     if (nextId) {
       await loadIntake(nextId);
     } else {
@@ -648,8 +858,10 @@ export default function AIIntakePage() {
       setExplanationError('');
       setExplanationStatus('idle');
       setSelectedId('');
+      storeSelectedIntakeId('');
       setDraft(normalizeDraftValue({}));
       setMessages([]);
+      setHistoryCollapsed(false);
       setRecommendations(null);
       setExistingCustomerId('');
     }
@@ -666,15 +878,15 @@ export default function AIIntakePage() {
     setExplanationError('');
     setExplanationStatus('idle');
     setSelectedId(id);
+    storeSelectedIntakeId(id);
     setDraft(normalizeDraftValue({
       ...intake,
       currency: intake.currency || 'EUR',
     }));
     setMessages(intake.messages || []);
+    setHistoryCollapsed(false);
     const nextRecommendations = normalizeRecommendations(intake.recommendedTeam);
     setRecommendations(nextRecommendations);
-    setSiteSelections({});
-    setExpandedEmployeeSites({});
     setExistingCustomerId(intake.convertedCustomerId || '');
     setLastResult(
       intake.convertedOrderId ? { orderId: intake.convertedOrderId, customerId: intake.convertedCustomerId || undefined } : null
@@ -684,6 +896,19 @@ export default function AIIntakePage() {
   useEffect(() => {
     loadLists().catch((error) => alert(error.message));
     // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  useEffect(() => {
+    setPortalReady(true);
+  }, []);
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const query = window.matchMedia('(max-width: 760px)');
+    const update = () => setIsMobileLayout(query.matches);
+    update();
+    query.addEventListener('change', update);
+    return () => query.removeEventListener('change', update);
   }, []);
 
   useEffect(() => {
@@ -761,17 +986,6 @@ export default function AIIntakePage() {
       return changed ? { ...current, proposedSites: nextSites } : current;
     });
 
-    setSiteSelections((current) => {
-      let changed = false;
-      const next = { ...current };
-      for (const site of recommendations.sites) {
-        if (!next[site.siteIndex] || next[site.siteIndex].length === 0) {
-          next[site.siteIndex] = [...(site.autoSelectedEmployeeIds || [])];
-          changed = true;
-        }
-      }
-      return changed ? next : current;
-    });
   }, [recommendations]);
 
   const siteCount = useMemo(() => (draft.proposedSites || []).length, [draft.proposedSites]);
@@ -1146,8 +1360,6 @@ export default function AIIntakePage() {
       setDraft(normalizeDraftValue(updated));
       setMessages(updated.messages || []);
       setRecommendations(normalizeRecommendations(updated.recommendedTeam));
-      setSiteSelections({});
-      setExpandedEmployeeSites({});
       setRecommendationStatus('idle');
       setProposalGenerationStatus('idle');
       closeRecommendationExplanation();
@@ -1199,8 +1411,6 @@ export default function AIIntakePage() {
       setDraft(normalizeDraftValue(updated));
       setMessages(updated.messages || messages);
       setRecommendations(null);
-      setSiteSelections({});
-      setExpandedEmployeeSites({});
       setRecommendationStatus('idle');
       setProposalGenerationStatus('idle');
       closeRecommendationExplanation();
@@ -1220,8 +1430,6 @@ export default function AIIntakePage() {
       clearVoiceFeedback();
       replaceRecordingPreview(null);
       setRecommendations(null);
-      setSiteSelections({});
-      setExpandedEmployeeSites({});
       setRecommendationStatus('idle');
       setProposalGenerationStatus('idle');
       closeRecommendationExplanation();
@@ -1329,6 +1537,7 @@ export default function AIIntakePage() {
     ]);
     setChatInput('');
     setStreaming(true);
+    setStreamingAssistantId(assistantId);
 
     try {
       const res = await fetch(`${API_BASE}/ai/intakes/${intakeId}/messages/stream`, {
@@ -1369,6 +1578,7 @@ export default function AIIntakePage() {
       await loadIntake(intakeId).catch(() => undefined);
     } finally {
       setStreaming(false);
+      setStreamingAssistantId(null);
     }
   }
 
@@ -1405,8 +1615,6 @@ export default function AIIntakePage() {
       );
       setDraft(normalizeDraftValue(response.proposal));
       setRecommendations(normalizeRecommendations(response.recommendations));
-      setSiteSelections({});
-      setExpandedEmployeeSites({});
       setRecommendationStatus('done');
     } catch (error: any) {
       setRecommendationStatus('error');
@@ -1526,24 +1734,6 @@ export default function AIIntakePage() {
       ...current,
       proposedSites: (current.proposedSites || []).filter((_, itemIndex) => itemIndex !== index),
     }));
-    setSiteSelections((current) => {
-      const next: Record<number, string[]> = {};
-      Object.entries(current).forEach(([key, value]) => {
-        const numericKey = Number(key);
-        if (numericKey < index) next[numericKey] = value;
-        if (numericKey > index) next[numericKey - 1] = value;
-      });
-      return next;
-    });
-    setExpandedEmployeeSites((current) => {
-      const next: Record<number, boolean> = {};
-      Object.entries(current).forEach(([key, value]) => {
-        const numericKey = Number(key);
-        if (numericKey < index) next[numericKey] = value;
-        if (numericKey > index) next[numericKey - 1] = value;
-      });
-      return next;
-    });
   }
 
 
@@ -1626,30 +1816,6 @@ export default function AIIntakePage() {
     }
   }
 
-  function autoSelectEmployeesForSite(siteIndex: number, headcount: number | null | undefined) {
-    const nextCount = Math.max(0, Number(headcount || 0));
-    const siteRecommendation = recommendationSiteMap.get(siteIndex);
-    const nextSelection = nextCount > 0 ? (siteRecommendation?.recommendations || []).slice(0, nextCount).map((employee) => employee.employeeId) : [];
-    setSiteSelections((current) => ({ ...current, [siteIndex]: nextSelection }));
-    updateSite(siteIndex, { selectedInternalHeadcount: nextCount });
-  }
-
-  function toggleEmployee(siteIndex: number, employeeId: string) {
-    let nextSelection: string[] = [];
-    setSiteSelections((current) => {
-      const currentSelection = current[siteIndex] || [];
-      const exists = currentSelection.includes(employeeId);
-      nextSelection = exists
-        ? currentSelection.filter((value) => value !== employeeId)
-        : [...currentSelection, employeeId];
-      return {
-        ...current,
-        [siteIndex]: nextSelection,
-      };
-    });
-    updateSite(siteIndex, { selectedInternalHeadcount: nextSelection.length });
-  }
-
   function workshopOptionsForSite(siteIndex: number): WorkshopRecommendation[] {
     const suggestionMap = new Map<string, WorkshopRecommendation>();
     const recommendationSite = recommendationSiteMap.get(siteIndex);
@@ -1712,53 +1878,136 @@ export default function AIIntakePage() {
     updateSite(siteIndex, { coverageType, selectedInternalHeadcount: 0 });
   }
 
-  function selectedEmployeesForSite(site: RecommendationSite): RecommendationEmployee[] {
-    const selectedIds = siteSelections[site.siteIndex] || [];
-    return selectedIds
-      .map((employeeId) => site.recommendations.find((employee) => employee.employeeId === employeeId) || null)
-      .filter((employee): employee is RecommendationEmployee => Boolean(employee));
-  }
+  const siteTotal = (draft.proposedSites || []).length;
+  const missingWorkshopCount = (draft.proposedSites || []).filter((site) => !(site.assignedWorkshopName || '').trim()).length;
+  const paymentDraftCount = (draft.paymentDrafts || []).length;
+  const hasProposalDraft = Boolean(draft.orderTitle || draft.customerCompanyName || siteTotal > 0);
+  const workflowSteps = [
+    {
+      label: x.stepChat,
+      description: x.stepChatDesc,
+      state: messages.length > 0 ? 'done' : 'active',
+    },
+    {
+      label: x.stepProposal,
+      description: x.stepProposalDesc,
+      state: hasProposalDraft ? 'done' : messages.length > 0 ? 'active' : 'idle',
+    },
+    {
+      label: x.stepWorkshops,
+      description: x.stepWorkshopsDesc,
+      state: recommendationStatus === 'done' || (missingWorkshopCount === 0 && siteTotal > 0) ? 'done' : hasProposalDraft ? 'active' : 'idle',
+    },
+    {
+      label: x.stepConfirm,
+      description: x.stepConfirmDesc,
+      state: lastResult?.orderId ? 'done' : recommendationStatus === 'done' ? 'active' : 'idle',
+    },
+  ];
+  const quickExamples = [x.exampleProjectBasics, x.exampleScope, x.examplePaymentWorkshop];
+  const selectedIntake = intakes.find((item) => item.id === selectedId);
 
-  function toggleEmployeeList(siteIndex: number) {
-    setExpandedEmployeeSites((current) => ({ ...current, [siteIndex]: !current[siteIndex] }));
-  }
+  const intakeSidebar = (
+<div className="card ai-intake-sidebar">
+    <div className="ai-intake-sidebar-header">
+      <div>
+        <h2>{m.aiIntakePage.intake}</h2>
+        <div className="muted">{m.aiIntakePage.flow}</div>
+      </div>
+      <div className="ai-intake-sidebar-actions">
+        <button
+          className="btn with-icon"
+          onClick={() => setIntakeListCollapsed((current) => !current)}
+          disabled={intakes.length === 0}
+        >
+          <Icon name={intakeListCollapsed ? 'info' : 'x'} />
+          {intakeListCollapsed ? x.expandHistory : x.collapseHistory}
+        </button>
+        <button className="btn primary with-icon" onClick={createIntake} disabled={interactionLocked}>
+          <Icon name="plus" />
+          {m.common.createNew}
+        </button>
+      </div>
+    </div>
+    <div className="spacer" />
+    {intakeListCollapsed ? (
+      <div className="ai-intake-list-collapsed">
+        <strong>{x.historyCollapsed}</strong>
+        <div className="muted">
+          {selectedIntake?.orderTitle || selectedIntake?.customerCompanyName || m.aiIntakePage.unnamed}
+        </div>
+        <div className="muted">{intakes.length} {x.conversationMessages}</div>
+      </div>
+    ) : (
+      <div className="ai-intake-list">
+        {intakes.map((item) => (
+          <button
+            key={item.id}
+            className="btn ai-intake-list-item"
+            style={{
+              borderColor: item.id === selectedId ? 'rgba(125,180,255,0.7)' : undefined,
+            }}
+            onClick={() => loadIntake(item.id).catch((error) => alert(error.message))}
+            disabled={interactionLocked}
+          >
+            <div style={{ fontWeight: 700 }}>{item.orderTitle || m.aiIntakePage.unnamed}</div>
+            <div className="muted">{item.customerCompanyName || m.aiIntakePage.noCustomer}</div>
+            <div className="muted">
+              {m.common.status}: {item.status}
+            </div>
+          </button>
+        ))}
+        {intakes.length === 0 && <div className="muted">{m.aiIntakePage.noIntakes}</div>}
+      </div>
+    )}
+      </div>
+  );
 
   return (
-    <div className="grid" style={{ gridTemplateColumns: '280px 1fr', alignItems: 'start' }}>
-      <div className="card">
-        <div style={{ display: 'flex', justifyContent: 'space-between', gap: 8, alignItems: 'center' }}>
-          <h2>{m.aiIntakePage.intake}</h2>
-          <button className="btn primary" onClick={createIntake} disabled={interactionLocked}>
-            {m.common.createNew}
-          </button>
-        </div>
-        <div className="spacer" />
-        <div className="muted">{m.aiIntakePage.flow}</div>
-        <div className="spacer" />
-        <div style={{ display: 'grid', gap: 8 }}>
-          {intakes.map((item) => (
-            <button
-              key={item.id}
-              className="btn"
-              style={{
-                textAlign: 'left',
-                borderColor: item.id === selectedId ? 'rgba(125,180,255,0.7)' : undefined,
-              }}
-              onClick={() => loadIntake(item.id).catch((error) => alert(error.message))}
-              disabled={interactionLocked}
-            >
-              <div style={{ fontWeight: 700 }}>{item.orderTitle || m.aiIntakePage.unnamed}</div>
-              <div className="muted">{item.customerCompanyName || m.aiIntakePage.noCustomer}</div>
-              <div className="muted">
-                {m.common.status}: {item.status}
-              </div>
-            </button>
-          ))}
-          {intakes.length === 0 && <div className="muted">{m.aiIntakePage.noIntakes}</div>}
-        </div>
-      </div>
+    <>
+      {portalReady && !isMobileLayout && createPortal(intakeSidebar, document.body)}
 
-      <div style={{ display: 'grid', gap: 12 }}>
+      <div className="ai-intake-shell">
+        {isMobileLayout && intakeSidebar}
+        <div className="ai-intake-main">
+        <section className="card ai-intake-hero">
+          <div>
+            <div className="eyebrow">{x.importantOnly}</div>
+            <h1>{x.workflowTitle}</h1>
+            <p>{x.workflowSubtitle}</p>
+          </div>
+          <div className="ai-intake-steps">
+            {workflowSteps.map((step, index) => (
+              <div key={step.label} className={`ai-intake-step ${step.state}`}>
+                <span>{index + 1}</span>
+                <div>
+                  <strong>{step.label}</strong>
+                  <small>{step.description}</small>
+                </div>
+              </div>
+            ))}
+          </div>
+          <div className="ai-intake-snapshot">
+            <div>
+              <label>{x.conversationMessages}</label>
+              <strong>{messages.length}</strong>
+            </div>
+            <div>
+              <label>{x.sitesCount}</label>
+              <strong>{siteTotal}</strong>
+            </div>
+            <div>
+              <label>{x.missingWorkshops}</label>
+              <strong>{missingWorkshopCount}</strong>
+            </div>
+            <div>
+              <label>{x.paymentsCount}</label>
+              <strong>{paymentDraftCount}</strong>
+            </div>
+          </div>
+          <div className="muted">{x.readyHint}</div>
+        </section>
+
         <div className="card">
           <div style={{ display: 'flex', justifyContent: 'space-between', gap: 8, flexWrap: 'wrap' }}>
             <div>
@@ -1766,16 +2015,20 @@ export default function AIIntakePage() {
               <div className="muted">{m.aiIntakePage.conversationDesc}</div>
             </div>
             <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-              <button className="btn" onClick={generateProposal} disabled={!selectedId || interactionLocked}>
+              <button className="btn with-icon" onClick={generateProposal} disabled={!selectedId || interactionLocked}>
+                <Icon name="sparkles" />
                 {proposalGenerationStatus === 'running' ? x.proposalGeneratingButton : m.aiIntakePage.generateProposal}
               </button>
-              <button className="btn" onClick={saveDraft} disabled={!selectedId || interactionLocked}>
+              <button className="btn with-icon" onClick={saveDraft} disabled={!selectedId || interactionLocked}>
+                <Icon name="save" />
                 {m.aiIntakePage.saveDraft}
               </button>
-              <button className="btn" onClick={clearMessages} disabled={!selectedId || interactionLocked}>
+              <button className="btn with-icon" onClick={clearMessages} disabled={!selectedId || interactionLocked}>
+                <Icon name="trash" />
                 {m.aiIntakePage.clearConversation}
               </button>
-              <button className="btn danger" onClick={clearAllFields} disabled={!selectedId || interactionLocked}>
+              <button className="btn danger with-icon" onClick={clearAllFields} disabled={!selectedId || interactionLocked}>
+                <Icon name="x" />
                 {m.aiIntakePage.clearAllFields}
               </button>
             </div>
@@ -1804,47 +2057,118 @@ export default function AIIntakePage() {
           )}
 
           <div className="spacer" />
-          <div style={{ display: 'grid', gap: 8, maxHeight: 320, overflowY: 'auto' }}>
-            {messages.map((message) => (
-              <div
-                key={message.id}
-                className="card"
-                style={{
-                  background: message.role === 'assistant' ? 'rgba(125,180,255,0.08)' : 'transparent',
-                }}
-              >
-                <div style={{ fontWeight: 700 }}>
-                  {message.role === 'assistant' ? m.aiIntakePage.assistant : m.aiIntakePage.manager}
-                </div>
-                <div style={{ whiteSpace: 'pre-wrap' }}>{message.content}</div>
+          {messages.length === 0 && (
+            <div className="ai-quick-prompts">
+              <div>
+                <strong>{x.quickExamplesTitle}</strong>
+                <div className="muted">{x.quickExamplesDesc}</div>
               </div>
-            ))}
-            {messages.length === 0 && <div className="muted">{m.aiIntakePage.noConversation}</div>}
+              <div className="ai-quick-prompt-grid">
+                {quickExamples.map((example, index) => (
+                  <button
+                    key={index}
+                    type="button"
+                    className="ai-quick-prompt"
+                    onClick={() => setChatInput(example)}
+                    disabled={interactionLocked}
+                  >
+                    <span>{x.useExample}</span>
+                    <p>{example}</p>
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
+
+          <div className="spacer" />
+          <div className="ai-chat-history-box">
+            <div className="ai-chat-history-header">
+              <div>
+                <strong>{x.messageHistory}</strong>
+                <div className="muted">{messages.length} {x.conversationMessages}</div>
+              </div>
+              <button
+                className="btn with-icon"
+                onClick={() => setHistoryCollapsed((current) => !current)}
+                disabled={messages.length === 0}
+              >
+                <Icon name={historyCollapsed ? 'info' : 'x'} />
+                {historyCollapsed ? x.expandHistory : x.collapseHistory}
+              </button>
+            </div>
+            {historyCollapsed ? (
+              <div className="ai-chat-history-collapsed">
+                <strong>{x.historyCollapsed}</strong>
+                {messages.length > 0 && (
+                  <div className="muted">
+                    {x.latestMessage}: {messages[messages.length - 1]?.content.slice(0, 140)}
+                    {(messages[messages.length - 1]?.content.length || 0) > 140 ? '...' : ''}
+                  </div>
+                )}
+              </div>
+            ) : (
+              <div className="ai-chat-thread">
+                {messages.map((message) => (
+                  <div
+                    key={message.id}
+                    className={`ai-chat-message ${message.role}`}
+                  >
+                    <div className="ai-chat-role">
+                      {message.role === 'assistant' ? m.aiIntakePage.assistant : m.aiIntakePage.manager}
+                    </div>
+                    {message.content ? (
+                    <div style={{ whiteSpace: 'pre-wrap' }}>{message.content}</div>
+                  ) : streaming && streamingAssistantId === message.id ? (
+                    <div className="ai-writing-indicator" aria-live="polite">
+                      <span />
+                      <span />
+                      <span />
+                      <em>{m.aiIntakePage.streaming}</em>
+                    </div>
+                  ) : (
+                    <div style={{ whiteSpace: 'pre-wrap' }}>{message.content}</div>
+                  )}
+                  </div>
+                ))}
+                {messages.length === 0 && <div className="muted">{m.aiIntakePage.noConversation}</div>}
+              </div>
+            )}
           </div>
 
           <div className="spacer" />
-          <textarea
-            value={chatInput}
-            onChange={(event) => {
-              setChatInput(event.target.value);
-              if (voiceNotice) setVoiceNotice('');
-            }}
-            placeholder={m.aiIntakePage.messagePlaceholder}
-          />
+          <div className="ai-chat-composer">
+            <textarea
+              value={chatInput}
+              onChange={(event) => {
+                setChatInput(event.target.value);
+                if (voiceNotice) setVoiceNotice('');
+              }}
+              placeholder={m.aiIntakePage.messagePlaceholder}
+            />
+            <div className="ai-chat-composer-actions">
+              <button className="btn primary with-icon" onClick={sendMessage} disabled={interactionLocked || !chatInput.trim()}>
+                <Icon name="send" />
+                {streaming ? m.aiIntakePage.streaming : m.aiIntakePage.sendMessage}
+              </button>
+            </div>
+          </div>
           <div className="spacer" />
           {voiceSupportChecked ? (
             supportsVoice ? (
               <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
                 {!recording ? (
-                  <button className="btn" onClick={startRecording} disabled={interactionLocked}>
+                  <button className="btn with-icon" onClick={startRecording} disabled={interactionLocked}>
+                    <Icon name="mic" />
                     {m.aiIntakePage.voiceStart}
                   </button>
                 ) : (
                   <>
-                    <button className="btn" onClick={() => void stopRecording()} disabled={transcribing}>
+                    <button className="btn with-icon" onClick={() => void stopRecording()} disabled={transcribing}>
+                      <Icon name="stop" />
                       {m.aiIntakePage.voiceStop}
                     </button>
-                    <button className="btn" onClick={() => void cancelRecording()} disabled={transcribing}>
+                    <button className="btn with-icon" onClick={() => void cancelRecording()} disabled={transcribing}>
+                      <Icon name="x" />
                       {m.aiIntakePage.voiceCancel}
                     </button>
                     <span className="muted">
@@ -1883,8 +2207,8 @@ export default function AIIntakePage() {
           {voiceDebug && (
             <>
               <div className="spacer" />
-              <div className="card" style={{ display: 'grid', gap: 6, borderColor: 'rgba(96,165,250,0.35)' }}>
-                <div style={{ fontWeight: 700 }}>Voice Debug</div>
+              <details className="ai-debug-panel">
+                <summary>{x.voiceDiagnostics}</summary>
                 <div className="muted">mode: {formatVoiceDebugValue(voiceDebug.mode)}</div>
                 <div className="muted">mimeType: {formatVoiceDebugValue(voiceDebug.mimeType)}</div>
                 <div className="muted">durationMs: {formatVoiceDebugValue(voiceDebug.durationMs)}</div>
@@ -1894,7 +2218,7 @@ export default function AIIntakePage() {
                 <div className="muted">detectedLanguage: {formatVoiceDebugValue(voiceDebug.detectedLanguage)}</div>
                 <div className="muted" style={{ whiteSpace: 'pre-wrap' }}>details: {formatVoiceDebugValue(voiceDebug.debugText)}</div>
                 <div className="muted" style={{ whiteSpace: 'pre-wrap' }}>lastError: {formatVoiceDebugValue(voiceDebug.lastError)}</div>
-              </div>
+              </details>
             </>
           )}
           {chatError && (
@@ -1905,10 +2229,6 @@ export default function AIIntakePage() {
               </div>
             </>
           )}
-          <div className="spacer" />
-          <button className="btn primary" onClick={sendMessage} disabled={interactionLocked || !chatInput.trim()}>
-            {streaming ? m.aiIntakePage.streaming : m.aiIntakePage.sendMessage}
-          </button>
           <div className="spacer" />
           <div className="muted">{x.hiddenMemoryClear}</div>
         </div>
@@ -1936,14 +2256,15 @@ export default function AIIntakePage() {
           </div>
         )}
 
-        <div className="card">
-          <div style={{ display: 'flex', justifyContent: 'space-between', gap: 8, flexWrap: 'wrap' }}>
+        <div className="card ai-proposal-card">
+          <div className="ai-section-header">
             <div>
               <h2>{m.aiIntakePage.proposal}</h2>
               <div className="muted">{m.aiIntakePage.proposalDesc}</div>
             </div>
             <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
-              <button className="btn" onClick={exportProposalPdf} disabled={!selectedId || interactionLocked}>
+              <button className="btn with-icon" onClick={exportProposalPdf} disabled={!selectedId || interactionLocked}>
+                <Icon name="file" />
                 {m.aiIntakePage.exportProposalPdf}
               </button>
               <div className="muted">
@@ -2078,19 +2399,20 @@ export default function AIIntakePage() {
           </div>
 
           <div className="spacer" />
-          <div style={{ display: 'flex', justifyContent: 'space-between', gap: 8, flexWrap: 'wrap' }}>
+          <div className="ai-section-header compact">
             <h2>{m.common.sites}</h2>
-            <button className="btn" onClick={addSite}>{m.aiIntakePage.addSite}</button>
+            <button className="btn with-icon" onClick={addSite}><Icon name="plus" />{m.aiIntakePage.addSite}</button>
           </div>
           <div className="spacer" />
           <div style={{ display: 'grid', gap: 12 }}>
             {(draft.proposedSites || []).map((site, index) => (
-              <div key={`${site.siteName}-${index}`} className="card">
-                <div style={{ display: 'flex', justifyContent: 'space-between', gap: 8, flexWrap: 'wrap' }}>
-                  <div style={{ fontWeight: 700 }}>
-                    {m.aiIntakePage.siteLabel} {index + 1}
+              <div key={`${site.siteName}-${index}`} className="card ai-form-card ai-site-card">
+                <div className="ai-form-card-header">
+                  <div>
+                    <strong>{m.aiIntakePage.siteLabel} {index + 1}</strong>
+                    <div className="muted">{site.siteName || notMentioned}</div>
                   </div>
-                  <button className="btn danger" onClick={() => removeSite(index)}>{m.common.remove}</button>
+                  <button className="btn danger with-icon" onClick={() => removeSite(index)}><Icon name="trash" />{m.common.remove}</button>
                 </div>
                 <div className="spacer" />
                 <div className="row">
@@ -2207,17 +2529,20 @@ export default function AIIntakePage() {
           </div>
 
           <div className="spacer" />
-          <div style={{ display: 'flex', justifyContent: 'space-between', gap: 8, flexWrap: 'wrap' }}>
+          <div className="ai-section-header compact">
             <h2>{x.externalWorkshops}</h2>
-            <button className="btn" onClick={addExternalWorkshop}>{x.addWorkshop}</button>
+            <button className="btn with-icon" onClick={addExternalWorkshop}><Icon name="wrench" />{x.addWorkshop}</button>
           </div>
           <div className="spacer" />
           <div style={{ display: 'grid', gap: 12 }}>
             {(draft.externalWorkshops || []).map((workshop, index) => (
-              <div key={`${workshop.name}-${index}`} className="card">
-                <div style={{ display: 'flex', justifyContent: 'space-between', gap: 8, flexWrap: 'wrap' }}>
-                  <strong>{workshop.name || `${x.externalWorkshops} ${index + 1}`}</strong>
-                  <button className="btn danger" onClick={() => removeExternalWorkshop(index)}>{m.common.remove}</button>
+              <div key={`${workshop.name}-${index}`} className="card ai-form-card ai-workshop-card">
+                <div className="ai-form-card-header">
+                  <div>
+                    <strong>{workshop.name || `${x.externalWorkshops} ${index + 1}`}</strong>
+                    <div className="muted">{listText(workshop.specialties) || notMentioned}</div>
+                  </div>
+                  <button className="btn danger with-icon" onClick={() => removeExternalWorkshop(index)}><Icon name="trash" />{m.common.remove}</button>
                 </div>
                 <div className="spacer" />
                 <div className="row">
@@ -2267,17 +2592,20 @@ export default function AIIntakePage() {
           </div>
 
           <div className="spacer" />
-          <div style={{ display: 'flex', justifyContent: 'space-between', gap: 8, flexWrap: 'wrap' }}>
+          <div className="ai-section-header compact">
             <h2>{x.paymentDrafts}</h2>
-            <button className="btn" onClick={addPaymentDraft}>{x.addPayment}</button>
+            <button className="btn with-icon" onClick={addPaymentDraft}><Icon name="bill" />{x.addPayment}</button>
           </div>
           <div className="spacer" />
           <div style={{ display: 'grid', gap: 12 }}>
             {(draft.paymentDrafts || []).map((payment, index) => (
-              <div key={`${payment.type}-${index}`} className="card">
-                <div style={{ display: 'flex', justifyContent: 'space-between', gap: 8, flexWrap: 'wrap' }}>
-                  <strong>{x.paymentDrafts} {index + 1}</strong>
-                  <button className="btn danger" onClick={() => removePaymentDraft(index)}>{m.common.remove}</button>
+              <div key={`${payment.type}-${index}`} className="card ai-form-card ai-payment-card">
+                <div className="ai-form-card-header">
+                  <div>
+                    <strong>{x.paymentDrafts} {index + 1}</strong>
+                    <div className="muted">{payment.amount ? `${payment.amount} ${payment.currency || draft.currency || 'EUR'}` : notMentioned}</div>
+                  </div>
+                  <button className="btn danger with-icon" onClick={() => removePaymentDraft(index)}><Icon name="trash" />{m.common.remove}</button>
                 </div>
                 <div className="spacer" />
                 <div className="row">
@@ -2340,11 +2668,12 @@ export default function AIIntakePage() {
         <div className="card">
           <div style={{ display: 'flex', justifyContent: 'space-between', gap: 8, flexWrap: 'wrap' }}>
             <div>
-              <h2>Workshop execution review</h2>
-              <div className="muted">Review required trades, assigned workshops, and missing workshop decisions per site. This flow uses workshop partners only.</div>
+              <h2>{x.workshopReviewTitle}</h2>
+              <div className="muted">{x.workshopReviewDescription}</div>
             </div>
-            <button className="btn primary" onClick={recommendAssignments} disabled={!selectedId || interactionLocked}>
-              {recommendationStatus === 'running' ? x.recommendationCalculatingButton : 'Review workshops'}
+            <button className="btn primary with-icon" onClick={recommendAssignments} disabled={!selectedId || interactionLocked}>
+              <Icon name="wrench" />
+              {recommendationStatus === 'running' ? x.recommendationCalculatingButton : x.reviewWorkshopsButton}
             </button>
           </div>
 
@@ -2363,9 +2692,9 @@ export default function AIIntakePage() {
                         : 'rgba(96,165,250,0.45)',
                 }}
               >
-                {recommendationStatus === 'running' && 'Reviewing site trades and workshop coverage...'}
-                {recommendationStatus === 'done' && 'Workshop review is ready. Check missing assignments before confirming.'}
-                {recommendationStatus === 'error' && 'Workshop review could not be calculated.'}
+                {recommendationStatus === 'running' && x.workshopReviewRunning}
+                {recommendationStatus === 'done' && x.workshopReviewDone}
+                {recommendationStatus === 'error' && x.workshopReviewError}
               </div>
             </>
           )}
@@ -2379,8 +2708,8 @@ export default function AIIntakePage() {
               requiredSkills: site.requiredSkills || [],
               workshopRecommendations: [],
               coverageType: site.assignedWorkshopName ? 'workshop_only' : 'workshop_only',
-              staffingWarning: !site.assignedWorkshopName ? 'No workshop is assigned yet.' : null,
-              coverageNote: site.assignedWorkshopName ? 'Workshop assigned for this site.' : 'Workshop needed / to be selected.',
+              staffingWarning: !site.assignedWorkshopName ? x.noWorkshopAssignedWarning : null,
+              coverageNote: site.assignedWorkshopName ? x.workshopAssignedForSite : x.workshopNeeded,
             }))).map((site) => {
               const siteDraft = normalizeProposalSite((draft.proposedSites || [])[site.siteIndex]);
               const workshopOptions = workshopOptionsForSite(site.siteIndex);
@@ -2388,20 +2717,21 @@ export default function AIIntakePage() {
               const coverageType = normalizeCoverageType(siteDraft.coverageType || site.coverageType, siteDraft.assignedWorkshopName);
 
               return (
-                <div key={site.siteIndex} className="card">
-                  <div style={{ display: 'flex', justifyContent: 'space-between', gap: 8, flexWrap: 'wrap' }}>
+                <div key={site.siteIndex} className="card ai-form-card ai-recommendation-card">
+                  <div className="ai-form-card-header">
                     <div>
-                      <div style={{ fontWeight: 700 }}>{site.siteName}</div>
+                      <strong>{site.siteName}</strong>
                       <div className="muted">{m.common.hours}: {site.estimatedHours || siteDraft.estimatedHours || notMentioned}</div>
                     </div>
                     <button
-                      className="btn"
+                      className="btn with-icon"
                       onClick={() => explainRecommendation(site.siteIndex, site.siteName)}
                       disabled={explanationStatus === 'running' && explanationSite?.siteIndex === site.siteIndex}
                     >
                       {explanationStatus === 'running' && explanationSite?.siteIndex === site.siteIndex
                         ? x.explainingRecommendationButton
-                        : 'Explain workshop decision'}
+                        : x.explainWorkshopDecision}
+                      <Icon name="info" />
                     </button>
                   </div>
 
@@ -2417,7 +2747,7 @@ export default function AIIntakePage() {
                         value={siteDraft.assignedWorkshopName || ''}
                         onChange={(event) => updateAssignedWorkshop(site.siteIndex, event.target.value)}
                       >
-                        <option value="">Workshop needed / to be selected</option>
+                        <option value="">{x.workshopNeeded}</option>
                         {workshopOptions.map((workshop, index) => (
                           <option key={`${workshop.kind}-${workshop.workshopId || workshop.draftIndex || index}`} value={workshop.name}>
                             {workshop.name}{workshop.matchedSkills.length ? ` (${listText(workshop.matchedSkills)})` : ''}
@@ -2452,7 +2782,7 @@ export default function AIIntakePage() {
                         <div style={{ fontWeight: 700 }}>{x.workshopSuggestionsCompact}</div>
                         <div className="muted" style={{ whiteSpace: 'pre-wrap' }}>
                           {workshopOptions
-                            .map((workshop) => `${workshop.name}${workshop.matchedSkills.length ? ` (${listText(workshop.matchedSkills)})` : ''}${workshop.availabilityStatus === 'available' ? ' - available' : ''}`)
+                            .map((workshop) => `${workshop.name}${workshop.matchedSkills.length ? ` (${listText(workshop.matchedSkills)})` : ''}${workshop.availabilityStatus === 'available' ? ` - ${x.availableLabel}` : ''}`)
                             .join(' | ')}
                         </div>
                       </div>
@@ -2509,7 +2839,8 @@ export default function AIIntakePage() {
             </div>
           </div>
           <div className="spacer" />
-          <button className="btn primary" onClick={confirmProposal} disabled={!selectedId || interactionLocked}>
+          <button className="btn primary with-icon" onClick={confirmProposal} disabled={!selectedId || interactionLocked}>
+            <Icon name="check" />
             {m.aiIntakePage.confirm}
           </button>
           {lastResult?.orderId && (
@@ -2544,7 +2875,8 @@ export default function AIIntakePage() {
                 <div style={{ fontWeight: 700 }}>{x.explanationTitle}</div>
                 <div className="muted">{explanationSite.siteName}</div>
               </div>
-              <button className="btn" onClick={closeRecommendationExplanation} disabled={explanationStatus === 'running'}>
+              <button className="btn with-icon" onClick={closeRecommendationExplanation} disabled={explanationStatus === 'running'}>
+                <Icon name="x" />
                 {x.closeExplanation}
               </button>
             </div>
@@ -2570,7 +2902,8 @@ export default function AIIntakePage() {
           </div>
         </div>
       )}
-    </div>
+      </div>
+    </>
   );
 }
 
