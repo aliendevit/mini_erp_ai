@@ -1,15 +1,15 @@
-'use client';
+﻿'use client';
 
 import { useEffect, useRef, useState } from 'react';
 
 import type { Locale } from '../../lib/i18n-config';
 import { useI18n } from '../../lib/i18n';
 
-type Theme = 'dark' | 'light';
+type Theme = 'dark' | 'light' | 'construction';
 
 const THEME_STORAGE_KEY = 'sa_theme';
 const LOCALES: Locale[] = ['de', 'en', 'ar'];
-const APP_VERSION = 'Prototype v1.0';
+const APP_VERSION = 'v1.0.0.0';
 
 const LOCALE_NAMES: Record<Locale, string> = {
   de: 'Deutsch',
@@ -17,10 +17,16 @@ const LOCALE_NAMES: Record<Locale, string> = {
   ar: '\u0627\u0644\u0639\u0631\u0628\u064a\u0629',
 };
 
+const THEME_DETAILS: Record<Theme, { tone: string; description: string }> = {
+  dark: { tone: '01', description: 'Default UI' },
+  construction: { tone: '02', description: 'Warm site UI' },
+  light: { tone: '03', description: 'Bright UI' },
+};
+
 function getInitialTheme(): Theme {
   try {
     const saved = window.localStorage.getItem(THEME_STORAGE_KEY) as Theme | null;
-    if (saved === 'dark' || saved === 'light') return saved;
+    if (saved === 'dark' || saved === 'light' || saved === 'construction') return saved;
     const prefersLight = window.matchMedia && window.matchMedia('(prefers-color-scheme: light)').matches;
     return prefersLight ? 'light' : 'dark';
   } catch {
@@ -94,7 +100,10 @@ export function AppSettingsMenu() {
       {open && (
         <div className="settings-menu-panel" role="menu">
           <div className="settings-menu-header">
-            <strong>System settings</strong>
+            <div>
+              <strong>System settings</strong>
+              <small>Appearance, language, and version</small>
+            </div>
             <span>{APP_VERSION}</span>
           </div>
           <div className="settings-menu-section">
@@ -119,22 +128,31 @@ export function AppSettingsMenu() {
             <div className="settings-menu-title">{messages.theme.switchTitle}</div>
             <div className="settings-menu-options" aria-label={messages.theme.switchTitle}>
               <button
-                className={mounted && theme === 'light' ? 'active' : undefined}
-                type="button"
-                onClick={() => selectTheme('light')}
-                role="menuitem"
-              >
-                <span>{messages.theme.light}</span>
-                <small>Bright UI</small>
-              </button>
-              <button
                 className={mounted && theme === 'dark' ? 'active' : undefined}
                 type="button"
                 onClick={() => selectTheme('dark')}
                 role="menuitem"
               >
-                <span>{messages.theme.dark}</span>
-                <small>Low-light UI</small>
+                <span><em>{THEME_DETAILS.dark.tone}</em>{messages.theme.original}</span>
+                <small>{THEME_DETAILS.dark.description}</small>
+              </button>
+              <button
+                className={mounted && theme === 'construction' ? 'active' : undefined}
+                type="button"
+                onClick={() => selectTheme('construction')}
+                role="menuitem"
+              >
+                <span><em>{THEME_DETAILS.construction.tone}</em>{messages.theme.construction}</span>
+                <small>{THEME_DETAILS.construction.description}</small>
+              </button>
+              <button
+                className={mounted && theme === 'light' ? 'active' : undefined}
+                type="button"
+                onClick={() => selectTheme('light')}
+                role="menuitem"
+              >
+                <span><em>{THEME_DETAILS.light.tone}</em>{messages.theme.light}</span>
+                <small>{THEME_DETAILS.light.description}</small>
               </button>
             </div>
           </div>
@@ -147,3 +165,4 @@ export function AppSettingsMenu() {
     </div>
   );
 }
+

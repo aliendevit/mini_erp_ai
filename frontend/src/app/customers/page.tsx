@@ -4,6 +4,7 @@ import { useEffect, useState } from 'react';
 
 import { useI18n } from '../../lib/i18n';
 import { apiGet, apiJson } from '../../lib/api';
+import { getPageSlice, ListPager } from '../ui/ListPager';
 
 type Customer = {
   id: string;
@@ -18,6 +19,8 @@ type Customer = {
   contactEmail?: string | null;
   notes?: string | null;
 };
+
+const LIST_PAGE_SIZE = 12;
 
 const empty: Partial<Customer> = {
   companyName: '',
@@ -37,6 +40,7 @@ export default function CustomersPage() {
   const [items, setItems] = useState<Customer[]>([]);
   const [form, setForm] = useState<Partial<Customer>>(empty);
   const [editingId, setEditingId] = useState<string | null>(null);
+  const [page, setPage] = useState(1);
   const [loading, setLoading] = useState(false);
 
   async function load() {
@@ -86,6 +90,8 @@ export default function CustomersPage() {
       alert(error.message);
     }
   }
+
+  const pagedItems = getPageSlice(items, page, LIST_PAGE_SIZE);
 
   return (
     <div className="entity-page customers-page">
@@ -183,7 +189,7 @@ export default function CustomersPage() {
           </tr>
         </thead>
         <tbody>
-          {items.map((customer) => (
+          {pagedItems.map((customer) => (
             <tr key={customer.id}>
               <td>{customer.companyName}</td>
               <td>{[customer.zipCode, customer.city].filter(Boolean).join(' ') || m.common.none}</td>
@@ -203,6 +209,7 @@ export default function CustomersPage() {
           )}
         </tbody>
       </table>
+      <ListPager page={page} total={items.length} pageSize={LIST_PAGE_SIZE} onPageChange={setPage} />
       </div>
     </div>
   );

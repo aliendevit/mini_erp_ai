@@ -4236,3 +4236,480 @@ html[dir='rtl'] .settings-menu-panel {
     direction: rtl;
   }
 }
+
+/* Construction warm theme: inspired by the brown/orange project mockup. */
+html[data-theme="construction"] {
+  --bg: #140d09;
+  --card: #21150f;
+  --text: #fff0dc;
+  --muted: #c4a58b;
+  --border: rgba(255, 169, 105, 0.20);
+  --link: #ff9b52;
+  --btnBg: rgba(255, 126, 38, 0.10);
+  --btnBgHover: rgba(255, 126, 38, 0.18);
+  --accent: #ff8a3d;
+  --accent-strong: #f05a18;
+  --accent-soft: rgba(255, 138, 61, 0.16);
+  --success: #f6b17a;
+  --warning: #ffb84d;
+  --danger: #ff5f45;
+  --shadow-soft: 0 22px 58px rgba(12, 6, 3, 0.46);
+  --shadow-card: 0 16px 36px rgba(10, 5, 2, 0.34);
+}
+
+html[data-theme="construction"] body {
+  background:
+    radial-gradient(circle at 14% -8%, rgba(255, 138, 61, 0.20), transparent 32%),
+    radial-gradient(circle at 88% 2%, rgba(244, 171, 120, 0.12), transparent 30%),
+    linear-gradient(180deg, #20120d 0%, #140d09 58%, #0f0907 100%);
+}
+
+html[data-theme="construction"] .app-header,
+html[data-theme="construction"] .settings-menu-panel,
+html[data-theme="construction"] .mobile-bottom-nav-shell,
+html[data-theme="construction"] .mobile-more-sheet {
+  border-color: rgba(255, 169, 105, 0.22);
+  background:
+    linear-gradient(135deg, rgba(43, 26, 17, 0.94), rgba(26, 16, 11, 0.92)),
+    var(--card);
+  box-shadow: 0 18px 48px rgba(10, 5, 2, 0.35);
+}
+
+html[data-theme="construction"] .card,
+html[data-theme="construction"] .entity-panel,
+html[data-theme="construction"] .tracking-site-card,
+html[data-theme="construction"] .tracking-baseline-card,
+html[data-theme="construction"] .tracking-form-card,
+html[data-theme="construction"] .monitoring-panel,
+html[data-theme="construction"] .monitoring-analysis-panel,
+html[data-theme="construction"] .monitoring-site-card,
+html[data-theme="construction"] .ai-form-card,
+html[data-theme="construction"] .ai-chat-history-box,
+html[data-theme="construction"] .ai-intake-sidebar {
+  border-color: rgba(255, 169, 105, 0.18) !important;
+  background:
+    linear-gradient(180deg, rgba(255, 138, 61, 0.045), rgba(255, 138, 61, 0.012)),
+    var(--card) !important;
+  box-shadow: var(--shadow-card);
+}
+
+html[data-theme="construction"] .dashboard-hero,
+html[data-theme="construction"] .entity-hero,
+html[data-theme="construction"] .ai-intake-hero,
+html[data-theme="construction"] .monitoring-picker-hero-simple,
+html[data-theme="construction"] .tracking-hero,
+html[data-theme="construction"] .monitoring-hero {
+  color: var(--text);
+  border-color: rgba(255, 169, 105, 0.24);
+  background:
+    radial-gradient(circle at 14% 16%, rgba(255, 138, 61, 0.20), transparent 30%),
+    radial-gradient(circle at 86% 8%, rgba(246, 177, 122, 0.12), transparent 32%),
+    linear-gradient(135deg, #2b1a11 0%, #1b100c 100%) !important;
+}
+
+html[data-theme="construction"] .dashboard-hero p,
+html[data-theme="construction"] .entity-hero p,
+html[data-theme="construction"] .ai-intake-hero p,
+html[data-theme="construction"] .monitoring-picker-hero-copy p,
+html[data-theme="construction"] .monitoring-hero p {
+  color: #d9bea8;
+}
+
+html[data-theme="construction"] .brand-mark,
+html[data-theme="construction"] .btn.primary,
+html[data-theme="construction"] .settings-menu-options button.active,
+html[data-theme="construction"] .app-nav a.active,
+html[data-theme="construction"] .mobile-bottom-nav a.active,
+html[data-theme="construction"] .tracking-tabs .btn.primary,
+html[data-theme="construction"] .ai-intake-step.done span,
+html[data-theme="construction"] .monitoring-picker-steps span {
+  border-color: rgba(255, 169, 105, 0.42) !important;
+  background: linear-gradient(135deg, #ffae75, #f05a18) !important;
+  color: #1b0d06 !important;
+  box-shadow: 0 12px 28px rgba(240, 90, 24, 0.28);
+}
+
+html[data-theme="construction"] .btn:hover:not(:disabled),
+html[data-theme="construction"] .app-nav a:hover,
+html[data-theme="construction"] .settings-menu-options button:hover {
+  border-color: rgba(255, 169, 105, 0.55);
+  background: rgba(255, 126, 38, 0.14);
+}
+
+html[data-theme="construction"] input,
+html[data-theme="construction"] select,
+html[data-theme="construction"] textarea {
+  color: var(--text);
+  border-color: rgba(255, 169, 105, 0.22);
+  background: rgba(20, 13, 9, 0.62);
+}
+
+html[data-theme="construction"] input::placeholder,
+html[data-theme="construction"] textarea::placeholder {
+  color: rgba(196, 165, 139, 0.75);
+}
+
+html[data-theme="construction"] .ai-chat-message,
+html[data-theme="construction"] .ai-quick-prompt,
+html[data-theme="construction"] .ai-debug-panel,
+html[data-theme="construction"] .dashboard-stats div,
+html[data-theme="construction"] .entity-stat,
+html[data-theme="construction"] .ai-intake-snapshot > div,
+html[data-theme="construction"] .ai-intake-step,
+html[data-theme="construction"] .monitoring-picker-summary div {
+  color: var(--text);
+  border-color: rgba(255, 169, 105, 0.18);
+  background: rgba(43, 26, 17, 0.72);
+}
+
+html[data-theme="construction"] .ai-chat-message.user {
+  color: #1b0d06;
+  border-color: rgba(255, 174, 117, 0.42);
+  background: linear-gradient(135deg, #ffd1ad, #ff9b52);
+}
+
+html[data-theme="construction"] .ai-chat-role,
+html[data-theme="construction"] .eyebrow,
+html[data-theme="construction"] .entity-kicker,
+html[data-theme="construction"] .monitoring-kicker,
+html[data-theme="construction"] .monitoring-picker-label,
+html[data-theme="construction"] .ai-quick-prompt span {
+  color: #ffb987;
+}
+
+html[data-theme="construction"] .progress-chart-actual {
+  background: linear-gradient(90deg, #f05a18, #ffb36f);
+  box-shadow: 0 0 18px rgba(240, 90, 24, 0.32);
+}
+
+html[data-theme="construction"] .progress-chart-value,
+html[data-theme="construction"] .monitoring-progress-breakdown-values strong {
+  color: #ffb987;
+  background: rgba(255, 126, 38, 0.12);
+}
+
+html[data-theme="construction"] .tracking-site-card::before,
+html[data-theme="construction"] .tracking-baseline-card::before {
+  background: linear-gradient(180deg, #ffb36f, #f05a18);
+}
+
+/* Professional settings menu layout update */
+.settings-menu-panel {
+  width: min(390px, calc(100vw - 28px)) !important;
+  gap: 18px !important;
+  padding: 16px !important;
+  border-radius: 22px !important;
+}
+
+.settings-menu-header {
+  align-items: flex-start;
+}
+
+.settings-menu-header > div {
+  display: grid;
+  gap: 4px;
+}
+
+.settings-menu-header strong {
+  font-size: 1.05rem;
+  letter-spacing: -0.02em;
+}
+
+.settings-menu-header small {
+  color: var(--muted);
+  font-size: 0.78rem;
+  font-weight: 700;
+}
+
+.settings-menu-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.settings-menu-title::before {
+  content: '';
+  width: 7px;
+  height: 7px;
+  border-radius: 999px;
+  background: var(--accent);
+  box-shadow: 0 0 0 4px var(--accent-soft);
+}
+
+.settings-menu-options {
+  grid-template-columns: 1fr !important;
+}
+
+.settings-menu-options button {
+  min-height: 54px;
+  grid-template-columns: 1fr auto;
+  align-items: center;
+  justify-items: stretch;
+  text-align: start;
+  padding: 10px 12px;
+  border-radius: 16px;
+}
+
+.settings-menu-options button span {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-weight: 900;
+}
+
+.settings-menu-options button span em {
+  display: inline-grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  border-radius: 10px;
+  background: var(--accent-soft);
+  color: var(--accent);
+  font-style: normal;
+  font-size: 0.72rem;
+  font-weight: 950;
+}
+
+.settings-menu-options button small {
+  justify-self: end;
+  text-align: end;
+}
+
+.settings-menu-options button.active {
+  position: relative;
+}
+
+.settings-menu-options button.active::after {
+  content: '✓';
+  position: absolute;
+  inset-block-start: 8px;
+  inset-inline-end: 10px;
+  display: grid;
+  place-items: center;
+  width: 18px;
+  height: 18px;
+  border-radius: 999px;
+  background: var(--accent);
+  color: #0b0c0f;
+  font-size: 0.72rem;
+  font-weight: 950;
+}
+
+html[dir='rtl'] .settings-menu-options button {
+  text-align: right;
+}
+
+html[dir='rtl'] .settings-menu-options button small {
+  justify-self: start;
+  text-align: start;
+}
+
+/* Construction theme table headers */
+html[data-theme="construction"] .table th,
+html[data-theme="construction"] .tracking-table th,
+html[data-theme="construction"] .entity-panel .table th {
+  color: #2a1208 !important;
+  border-color: rgba(255, 179, 111, 0.34) !important;
+  background:
+    linear-gradient(135deg, #ffd1ad 0%, #ff9b52 48%, #e8621f 100%) !important;
+  text-shadow: none;
+}
+
+html[data-theme="construction"] .table td,
+html[data-theme="construction"] .tracking-table td,
+html[data-theme="construction"] .entity-panel .table td {
+  border-bottom-color: rgba(255, 169, 105, 0.16);
+}
+
+html[data-theme="construction"] .entity-panel .table tr:hover td,
+html[data-theme="construction"] .tracking-table tr:hover td {
+  background: rgba(255, 126, 38, 0.055);
+}
+
+/* Settings active state contrast refinement */
+.settings-menu-options button.active {
+  padding-inline-end: 48px !important;
+  border-color: rgba(96, 165, 250, 0.76);
+  box-shadow: 0 14px 32px rgba(37, 99, 235, 0.18);
+}
+
+.settings-menu-options button.active small {
+  color: color-mix(in srgb, var(--text) 78%, var(--muted));
+  font-weight: 800;
+}
+
+.settings-menu-options button.active::after {
+  inset-block-start: 50% !important;
+  inset-inline-end: 14px !important;
+  transform: translateY(-50%);
+  width: 22px !important;
+  height: 22px !important;
+  border: 1px solid color-mix(in srgb, var(--accent) 45%, var(--card));
+  background: color-mix(in srgb, var(--accent) 24%, var(--card));
+  color: var(--text);
+  box-shadow: 0 8px 18px rgba(0, 0, 0, 0.18);
+}
+
+html[data-theme="construction"] .settings-menu-options button.active {
+  color: #241008 !important;
+  border-color: rgba(255, 197, 151, 0.72) !important;
+  background: linear-gradient(135deg, #ffc59a 0%, #f58a49 52%, #d95a1b 100%) !important;
+  box-shadow: 0 14px 30px rgba(240, 90, 24, 0.32) !important;
+}
+
+html[data-theme="construction"] .settings-menu-options button.active small {
+  color: rgba(36, 16, 8, 0.78) !important;
+}
+
+html[data-theme="construction"] .settings-menu-options button.active::after {
+  color: #ffd8bd !important;
+  border-color: rgba(255, 216, 189, 0.34) !important;
+  background: #2a1208 !important;
+}
+
+html[data-theme="construction"] .settings-menu-options button.active span em {
+  color: #8a300f !important;
+  background: rgba(255, 241, 221, 0.36) !important;
+}
+
+/* Omran logo header integration */
+.brand-logo-link {
+  display: grid;
+  place-items: center;
+  width: 58px;
+  height: 58px;
+  flex: 0 0 58px;
+  overflow: hidden;
+  border: 1px solid color-mix(in srgb, var(--accent) 26%, var(--border));
+  border-radius: 18px;
+  background: color-mix(in srgb, var(--card) 72%, transparent);
+  box-shadow: 0 12px 30px rgba(0, 0, 0, 0.16);
+}
+
+.brand-logo-link:hover {
+  text-decoration: none;
+  transform: translateY(-1px);
+}
+
+.brand-logo-image {
+  display: block;
+  width: 94%;
+  height: 94%;
+  object-fit: contain;
+}
+
+.brand-copy {
+  min-width: 0;
+}
+
+html[data-theme="construction"] .brand-logo-link {
+  border-color: rgba(255, 169, 105, 0.34);
+  background: linear-gradient(135deg, rgba(255, 241, 221, 0.10), rgba(255, 138, 61, 0.08));
+  box-shadow: 0 16px 34px rgba(10, 5, 2, 0.28);
+}
+
+@media (max-width: 760px) {
+  .brand-logo-link {
+    width: 46px;
+    height: 46px;
+    flex-basis: 46px;
+    border-radius: 15px;
+  }
+}
+
+/* Logo readability backgrounds */
+.brand-logo-link {
+  padding: 5px;
+  background:
+    radial-gradient(circle at 18% 14%, rgba(255, 255, 255, 0.95), transparent 34%),
+    linear-gradient(135deg, #fffaf0 0%, #f4ead8 100%) !important;
+}
+
+.brand-logo-image {
+  width: 88%;
+  height: 88%;
+  filter: drop-shadow(0 6px 12px rgba(7, 24, 39, 0.16));
+}
+
+html[data-theme="dark"] .brand-logo-link {
+  border-color: rgba(212, 175, 55, 0.36);
+  background:
+    radial-gradient(circle at 18% 14%, rgba(255, 255, 255, 0.96), transparent 34%),
+    linear-gradient(135deg, #fff7e8 0%, #eadbc2 100%) !important;
+}
+
+html[data-theme="light"] .brand-logo-link {
+  border-color: rgba(9, 54, 82, 0.16);
+  background:
+    radial-gradient(circle at 18% 14%, rgba(255, 255, 255, 0.98), transparent 34%),
+    linear-gradient(135deg, #ffffff 0%, #edf4f7 100%) !important;
+}
+
+html[data-theme="construction"] .brand-logo-link {
+  border-color: rgba(255, 169, 105, 0.38) !important;
+  background:
+    radial-gradient(circle at 16% 12%, rgba(255, 255, 255, 0.94), transparent 36%),
+    linear-gradient(135deg, #fff0dc 0%, #eec29c 62%, #bf6732 100%) !important;
+  box-shadow: 0 16px 34px rgba(10, 5, 2, 0.30), inset 0 0 0 1px rgba(255, 255, 255, 0.24) !important;
+}
+
+/* Warm theme active nav dot readability */
+html[data-theme="construction"] .app-nav a.active::before {
+  width: 8px;
+  height: 8px;
+  background: #2a1208 !important;
+  border: 2px solid #ffe0c8;
+  box-shadow: 0 0 0 3px rgba(42, 18, 8, 0.18), 0 0 14px rgba(255, 224, 200, 0.72) !important;
+}
+
+html[data-theme="construction"] .mobile-bottom-nav a.active::before,
+html[data-theme="construction"] .mobile-bottom-nav button.active::before {
+  background: #2a1208 !important;
+  border-color: #ffe0c8 !important;
+  box-shadow: 0 0 0 3px rgba(42, 18, 8, 0.20) !important;
+}
+
+/* Performance pagination and render-limit controls */
+.list-pager,
+.ai-render-limit-notice {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+  margin-top: 14px;
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  background: color-mix(in srgb, var(--card) 82%, transparent);
+  color: var(--muted);
+  font-weight: 800;
+}
+
+.list-pager-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.list-pager-actions .btn {
+  min-width: 38px;
+  padding-inline: 10px;
+}
+
+.ai-render-more {
+  width: 100%;
+  justify-content: center;
+  margin-top: 8px;
+}
+
+.ai-render-limit-notice {
+  margin: 0 0 12px;
+  font-size: 0.86rem;
+}
+
+html[data-theme="construction"] .list-pager,
+html[data-theme="construction"] .ai-render-limit-notice {
+  border-color: rgba(255, 169, 105, 0.18);
+  background: rgba(43, 26, 17, 0.72);
+}

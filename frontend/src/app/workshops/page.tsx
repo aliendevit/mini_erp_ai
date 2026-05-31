@@ -3,6 +3,7 @@
 import { useEffect, useState } from 'react';
 
 import { apiGet, apiJson } from '../../lib/api';
+import { getPageSlice, ListPager } from '../ui/ListPager';
 
 type Workshop = {
   id: string;
@@ -28,6 +29,8 @@ type FormState = {
   availabilityNote: string;
   isActive: boolean;
 };
+
+const LIST_PAGE_SIZE = 12;
 
 const emptyForm: FormState = {
   name: '',
@@ -56,6 +59,7 @@ export default function WorkshopsPage() {
   const [items, setItems] = useState<Workshop[]>([]);
   const [form, setForm] = useState<FormState>(emptyForm);
   const [editingId, setEditingId] = useState<string | null>(null);
+  const [page, setPage] = useState(1);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
 
@@ -133,6 +137,8 @@ export default function WorkshopsPage() {
       alert(error.message);
     }
   }
+
+  const pagedItems = getPageSlice(items, page, LIST_PAGE_SIZE);
 
   return (
     <div className="entity-page workshops-page">
@@ -222,7 +228,7 @@ export default function WorkshopsPage() {
           </tr>
         </thead>
         <tbody>
-          {items.map((item) => (
+          {pagedItems.map((item) => (
             <tr key={item.id}>
               <td>{item.name}</td>
               <td>
@@ -248,6 +254,7 @@ export default function WorkshopsPage() {
           {loading && <tr><td colSpan={5} className="muted">Loading...</td></tr>}
         </tbody>
       </table>
+      <ListPager page={page} total={items.length} pageSize={LIST_PAGE_SIZE} onPageChange={setPage} />
       </div>
     </div>
   );

@@ -4,13 +4,13 @@ import { useEffect, useState } from 'react';
 
 import { useI18n } from '../../lib/i18n';
 
-type Theme = 'dark' | 'light';
+type Theme = 'dark' | 'light' | 'construction';
 const STORAGE_KEY = 'sa_theme';
 
 function getInitialTheme(): Theme {
   try {
     const saved = window.localStorage.getItem(STORAGE_KEY) as Theme | null;
-    if (saved === 'dark' || saved === 'light') return saved;
+    if (saved === 'dark' || saved === 'light' || saved === 'construction') return saved;
     const prefersLight = window.matchMedia && window.matchMedia('(prefers-color-scheme: light)').matches;
     return prefersLight ? 'light' : 'dark';
   } catch {
