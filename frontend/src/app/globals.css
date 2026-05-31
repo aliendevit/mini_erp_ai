@@ -4572,87 +4572,6 @@ html[data-theme="construction"] .settings-menu-options button.active span em {
   background: rgba(255, 241, 221, 0.36) !important;
 }
 
-/* Omran logo header integration */
-.brand-logo-link {
-  display: grid;
-  place-items: center;
-  width: 58px;
-  height: 58px;
-  flex: 0 0 58px;
-  overflow: hidden;
-  border: 1px solid color-mix(in srgb, var(--accent) 26%, var(--border));
-  border-radius: 18px;
-  background: color-mix(in srgb, var(--card) 72%, transparent);
-  box-shadow: 0 12px 30px rgba(0, 0, 0, 0.16);
-}
-
-.brand-logo-link:hover {
-  text-decoration: none;
-  transform: translateY(-1px);
-}
-
-.brand-logo-image {
-  display: block;
-  width: 94%;
-  height: 94%;
-  object-fit: contain;
-}
-
-.brand-copy {
-  min-width: 0;
-}
-
-html[data-theme="construction"] .brand-logo-link {
-  border-color: rgba(255, 169, 105, 0.34);
-  background: linear-gradient(135deg, rgba(255, 241, 221, 0.10), rgba(255, 138, 61, 0.08));
-  box-shadow: 0 16px 34px rgba(10, 5, 2, 0.28);
-}
-
-@media (max-width: 760px) {
-  .brand-logo-link {
-    width: 46px;
-    height: 46px;
-    flex-basis: 46px;
-    border-radius: 15px;
-  }
-}
-
-/* Logo readability backgrounds */
-.brand-logo-link {
-  padding: 5px;
-  background:
-    radial-gradient(circle at 18% 14%, rgba(255, 255, 255, 0.95), transparent 34%),
-    linear-gradient(135deg, #fffaf0 0%, #f4ead8 100%) !important;
-}
-
-.brand-logo-image {
-  width: 88%;
-  height: 88%;
-  filter: drop-shadow(0 6px 12px rgba(7, 24, 39, 0.16));
-}
-
-html[data-theme="dark"] .brand-logo-link {
-  border-color: rgba(212, 175, 55, 0.36);
-  background:
-    radial-gradient(circle at 18% 14%, rgba(255, 255, 255, 0.96), transparent 34%),
-    linear-gradient(135deg, #fff7e8 0%, #eadbc2 100%) !important;
-}
-
-html[data-theme="light"] .brand-logo-link {
-  border-color: rgba(9, 54, 82, 0.16);
-  background:
-    radial-gradient(circle at 18% 14%, rgba(255, 255, 255, 0.98), transparent 34%),
-    linear-gradient(135deg, #ffffff 0%, #edf4f7 100%) !important;
-}
-
-html[data-theme="construction"] .brand-logo-link {
-  border-color: rgba(255, 169, 105, 0.38) !important;
-  background:
-    radial-gradient(circle at 16% 12%, rgba(255, 255, 255, 0.94), transparent 36%),
-    linear-gradient(135deg, #fff0dc 0%, #eec29c 62%, #bf6732 100%) !important;
-  box-shadow: 0 16px 34px rgba(10, 5, 2, 0.30), inset 0 0 0 1px rgba(255, 255, 255, 0.24) !important;
-}
-
 /* Warm theme active nav dot readability */
 html[data-theme="construction"] .app-nav a.active::before {
   width: 8px;
@@ -4712,4 +4631,68 @@ html[data-theme="construction"] .list-pager,
 html[data-theme="construction"] .ai-render-limit-notice {
   border-color: rgba(255, 169, 105, 0.18);
   background: rgba(43, 26, 17, 0.72);
+}
+
+/* Final transparent Omran wordmark in header */
+.app-header-brand {
+  gap: 14px;
+}
+
+.brand-logo-link {
+  display: block !important;
+  width: 178px !important;
+  height: 58px !important;
+  flex: 0 0 178px !important;
+  padding: 0 !important;
+  overflow: visible !important;
+  border: 0 !important;
+  border-radius: 0 !important;
+  background: transparent !important;
+  box-shadow: none !important;
+}
+
+.brand-logo-link::before,
+.brand-logo-link::after {
+  display: none !important;
+  content: none !important;
+}
+
+.brand-logo-image {
+  display: block !important;
+  width: 100% !important;
+  height: 100% !important;
+  object-fit: contain !important;
+  object-position: center !important;
+  filter: none !important;
+}
+
+html[data-theme="dark"] .brand-logo-link,
+html[data-theme="light"] .brand-logo-link,
+html[data-theme="construction"] .brand-logo-link {
+  border: 0 !important;
+  background: transparent !important;
+  box-shadow: none !important;
+}
+
+@media (max-width: 980px) {
+  .brand-logo-link {
+    width: 136px !important;
+    height: 46px !important;
+    flex-basis: 136px !important;
+  }
+}
+
+@media (max-width: 760px) {
+  .brand-logo-link {
+    width: 112px !important;
+    height: 40px !important;
+    flex-basis: 112px !important;
+  }
+}
+
+@media (max-width: 420px) {
+  .brand-logo-link {
+    width: 94px !important;
+    flex-basis: 94px !important;
+  }
 }
