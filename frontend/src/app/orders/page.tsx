@@ -5,6 +5,7 @@ import { useEffect, useState } from 'react';
 
 import { useI18n } from '../../lib/i18n';
 import { apiGet, apiJson } from '../../lib/api';
+import { getPageSlice, ListPager } from '../ui/ListPager';
 
 type Customer = { id: string; companyName: string };
 
@@ -19,6 +20,8 @@ type Order = {
   defaultHourlyRate?: string | null;
   createdAt?: string;
 };
+
+const LIST_PAGE_SIZE = 12;
 
 const empty: Partial<Order> = {
   customerId: '',
@@ -35,6 +38,7 @@ export default function OrdersPage() {
   const [items, setItems] = useState<Order[]>([]);
   const [form, setForm] = useState<Partial<Order>>(empty);
   const [editingId, setEditingId] = useState<string | null>(null);
+  const [page, setPage] = useState(1);
   const [loading, setLoading] = useState(false);
 
   async function load() {
@@ -111,6 +115,8 @@ export default function OrdersPage() {
       alert(error.message);
     }
   }
+
+  const pagedItems = getPageSlice(items, page, LIST_PAGE_SIZE);
 
   return (
     <div className="entity-page orders-page">
@@ -191,7 +197,7 @@ export default function OrdersPage() {
           </tr>
         </thead>
         <tbody>
-          {items.map((order) => (
+          {pagedItems.map((order) => (
             <tr key={order.id}>
               <td>{order.title}</td>
               <td>{order.customer?.companyName || m.common.none}</td>
@@ -212,6 +218,7 @@ export default function OrdersPage() {
           )}
         </tbody>
       </table>
+      <ListPager page={page} total={items.length} pageSize={LIST_PAGE_SIZE} onPageChange={setPage} />
 
       <div className="spacer" />
       <div className="muted">{m.ordersPage.deleteHint}</div>

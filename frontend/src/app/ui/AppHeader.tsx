@@ -1,4 +1,4 @@
-'use client';
+﻿'use client';
 
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
@@ -36,10 +36,10 @@ export function AppHeader() {
   return (
     <header className="app-header">
       <div className="app-header-brand">
-        <Link href="/" className="brand-mark" aria-label={messages.app.title}>
-          ERP
+        <Link href="/" className="brand-logo-link" aria-label={messages.app.title}>
+          <img className="brand-logo-image" src="/omran-logo.png" alt={messages.app.title} />
         </Link>
-        <div>
+        <div className="brand-copy">
           <div className="brand-eyebrow">{messages.app.brand}</div>
           <h1>{messages.app.title}</h1>
         </div>
@@ -70,3 +70,5 @@ export function AppHeader() {
     </header>
   );
 }
+
+

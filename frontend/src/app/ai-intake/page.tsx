@@ -775,6 +775,9 @@ function formatDuration(durationMs: number): string {
   return `${String(minutes).padStart(2, '0')}:${String(seconds).padStart(2, '0')}`;
 }
 
+const INTAKE_LIST_RENDER_LIMIT = 12;
+const MESSAGE_RENDER_LIMIT = 30;
+
 export default function AIIntakePage() {
   const { locale, messages: m } = useI18n();
   const x = useMemo(() => extraLabels(locale), [locale]);
@@ -784,7 +787,9 @@ export default function AIIntakePage() {
   const [draft, setDraft] = useState<Partial<ProposalDraft>>(emptyDraft);
   const [messages, setMessages] = useState<ProposalMessage[]>([]);
   const [historyCollapsed, setHistoryCollapsed] = useState(false);
+  const [showAllMessages, setShowAllMessages] = useState(false);
   const [intakeListCollapsed, setIntakeListCollapsed] = useState(false);
+  const [showAllIntakes, setShowAllIntakes] = useState(false);
   const [recommendations, setRecommendations] = useState<RecommendationPayload | null>(null);
   const [chatInput, setChatInput] = useState('');
   const [busy, setBusy] = useState(false);
@@ -861,6 +866,7 @@ export default function AIIntakePage() {
       storeSelectedIntakeId('');
       setDraft(normalizeDraftValue({}));
       setMessages([]);
+      setShowAllMessages(false);
       setHistoryCollapsed(false);
       setRecommendations(null);
       setExistingCustomerId('');
@@ -884,6 +890,7 @@ export default function AIIntakePage() {
       currency: intake.currency || 'EUR',
     }));
     setMessages(intake.messages || []);
+    setShowAllMessages(false);
     setHistoryCollapsed(false);
     const nextRecommendations = normalizeRecommendations(intake.recommendedTeam);
     setRecommendations(nextRecommendations);
@@ -1906,6 +1913,15 @@ export default function AIIntakePage() {
   ];
   const quickExamples = [x.exampleProjectBasics, x.exampleScope, x.examplePaymentWorkshop];
   const selectedIntake = intakes.find((item) => item.id === selectedId);
+  const visibleIntakes = showAllIntakes ? intakes : intakes.slice(0, INTAKE_LIST_RENDER_LIMIT);
+  const hiddenIntakeCount = Math.max(0, intakes.length - visibleIntakes.length);
+  const visibleMessages = showAllMessages || messages.length <= MESSAGE_RENDER_LIMIT ? messages : messages.slice(-MESSAGE_RENDER_LIMIT);
+  const hiddenMessageCount = Math.max(0, messages.length - visibleMessages.length);
+  const performanceText = locale === 'ar'
+    ? { showAll: '\u0639\u0631\u0636 \u0627\u0644\u0643\u0644', showLess: '\u0639\u0631\u0636 \u0623\u0642\u0644', hiddenSessions: '\u0645\u062d\u0627\u062f\u062b\u0627\u062a \u0625\u0636\u0627\u0641\u064a\u0629 \u0645\u062e\u0641\u064a\u0629 \u0644\u062a\u062d\u0633\u064a\u0646 \u0627\u0644\u0623\u062f\u0627\u0621', hiddenMessages: '\u0631\u0633\u0627\u0626\u0644 \u0642\u062f\u064a\u0645\u0629 \u0645\u062e\u0641\u064a\u0629 \u0644\u062a\u062d\u0633\u064a\u0646 \u0627\u0644\u0623\u062f\u0627\u0621' }
+    : locale === 'de'
+      ? { showAll: 'Alle anzeigen', showLess: 'Weniger anzeigen', hiddenSessions: 'weitere Sitzungen werden fuer bessere Performance ausgeblendet', hiddenMessages: 'aeltere Nachrichten werden fuer bessere Performance ausgeblendet' }
+      : { showAll: 'Show all', showLess: 'Show less', hiddenSessions: 'more sessions are hidden for better performance', hiddenMessages: 'older messages are hidden for better performance' };
 
   const intakeSidebar = (
 <div className="card ai-intake-sidebar">
@@ -1940,7 +1956,7 @@ export default function AIIntakePage() {
       </div>
     ) : (
       <div className="ai-intake-list">
-        {intakes.map((item) => (
+        {visibleIntakes.map((item) => (
           <button
             key={item.id}
             className="btn ai-intake-list-item"
@@ -1957,6 +1973,16 @@ export default function AIIntakePage() {
             </div>
           </button>
         ))}
+        {!showAllIntakes && hiddenIntakeCount > 0 && (
+          <button className="btn secondary ai-render-more" type="button" onClick={() => setShowAllIntakes(true)}>
+            {performanceText.showAll} ({hiddenIntakeCount} {performanceText.hiddenSessions})
+          </button>
+        )}
+        {showAllIntakes && intakes.length > INTAKE_LIST_RENDER_LIMIT && (
+          <button className="btn secondary ai-render-more" type="button" onClick={() => setShowAllIntakes(false)}>
+            {performanceText.showLess}
+          </button>
+        )}
         {intakes.length === 0 && <div className="muted">{m.aiIntakePage.noIntakes}</div>}
       </div>
     )}
@@ -2108,7 +2134,19 @@ export default function AIIntakePage() {
               </div>
             ) : (
               <div className="ai-chat-thread">
-                {messages.map((message) => (
+                {hiddenMessageCount > 0 && (
+                  <div className="ai-render-limit-notice">
+                    <span>{hiddenMessageCount} {performanceText.hiddenMessages}</span>
+                    <button className="btn secondary" type="button" onClick={() => setShowAllMessages(true)}>{performanceText.showAll}</button>
+                  </div>
+                )}
+                {showAllMessages && messages.length > MESSAGE_RENDER_LIMIT && (
+                  <div className="ai-render-limit-notice">
+                    <span>{messages.length} {x.conversationMessages}</span>
+                    <button className="btn secondary" type="button" onClick={() => setShowAllMessages(false)}>{performanceText.showLess}</button>
+                  </div>
+                )}
+                {visibleMessages.map((message) => (
                   <div
                     key={message.id}
                     className={`ai-chat-message ${message.role}`}

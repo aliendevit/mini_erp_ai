@@ -5,6 +5,7 @@ import { useEffect, useState } from 'react';
 
 import { useI18n } from '../../lib/i18n';
 import { apiGet, apiJson } from '../../lib/api';
+import { getPageSlice, ListPager } from '../ui/ListPager';
 
 type Customer = { id: string; companyName: string };
 type Order = { id: string; title: string; customer?: Customer };
@@ -20,6 +21,8 @@ type Site = {
   notes?: string | null;
   isActive: boolean;
 };
+
+const LIST_PAGE_SIZE = 12;
 
 const empty: Partial<Site> = {
   orderId: '',
@@ -37,6 +40,7 @@ export default function SitesPage() {
   const [items, setItems] = useState<Site[]>([]);
   const [form, setForm] = useState<Partial<Site>>(empty);
   const [editingId, setEditingId] = useState<string | null>(null);
+  const [page, setPage] = useState(1);
 
   async function load() {
     const [nextOrders, nextSites] = await Promise.all([apiGet<Order[]>('/orders'), apiGet<Site[]>('/sites')]);
@@ -97,6 +101,8 @@ export default function SitesPage() {
       alert(error.message);
     }
   }
+
+  const pagedItems = getPageSlice(items, page, LIST_PAGE_SIZE);
 
   return (
     <div className="entity-page sites-page">
@@ -176,7 +182,7 @@ export default function SitesPage() {
           </tr>
         </thead>
         <tbody>
-          {items.map((site) => (
+          {pagedItems.map((site) => (
             <tr key={site.id}>
               <td>{site.siteName}</td>
               <td>{site.order?.title || m.common.none}</td>
@@ -197,6 +203,7 @@ export default function SitesPage() {
           )}
         </tbody>
       </table>
+      <ListPager page={page} total={items.length} pageSize={LIST_PAGE_SIZE} onPageChange={setPage} />
 
       <div className="spacer" />
       <div className="muted">{m.sitesPage.deleteHint}</div>

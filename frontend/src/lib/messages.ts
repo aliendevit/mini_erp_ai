@@ -1,4 +1,4 @@
-﻿import type { Locale } from './i18n-config';
+import type { Locale } from './i18n-config';
 
 export type Messages = {
   app: {
@@ -83,6 +83,8 @@ export type Messages = {
     switchTitle: string;
     light: string;
     dark: string;
+    original: string;
+    construction: string;
   };
   language: {
     switchTitle: string;
@@ -473,6 +475,8 @@ export const messages: Record<Locale, Messages> = {
       switchTitle: 'Theme wechseln',
       light: 'Hell',
       dark: 'Dunkel',
+      original: 'Original',
+      construction: 'Baustelle',
     },
     language: {
       switchTitle: 'Sprache wechseln',
@@ -900,6 +904,8 @@ export const messages: Record<Locale, Messages> = {
       switchTitle: 'Switch theme',
       light: 'Light',
       dark: 'Dark',
+      original: 'Original',
+      construction: 'Construction',
     },
     language: {
       switchTitle: 'Switch language',
@@ -1322,6 +1328,8 @@ export const messages: Record<Locale, Messages> = {
       switchTitle: 'تبديل المظهر',
       light: 'فاتح',
       dark: 'داكن',
+      original: 'الأصلي',
+      construction: 'عمراني',
     },
     language: {
       switchTitle: 'تبديل اللغة',
