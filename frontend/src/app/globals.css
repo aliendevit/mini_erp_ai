@@ -4635,14 +4635,15 @@ html[data-theme="construction"] .ai-render-limit-notice {
 
 /* Final transparent Omran wordmark in header */
 .app-header-brand {
-  gap: 14px;
+  gap: 10px;
+  direction: ltr;
 }
 
 .brand-logo-link {
   display: block !important;
-  width: 178px !important;
-  height: 58px !important;
-  flex: 0 0 178px !important;
+  width: 160px !important;
+  height: 54px !important;
+  flex: 0 0 160px !important;
   padding: 0 !important;
   overflow: visible !important;
   border: 0 !important;
@@ -4666,12 +4667,154 @@ html[data-theme="construction"] .ai-render-limit-notice {
   filter: none !important;
 }
 
+.brand-copy-compact {
+  display: grid;
+  gap: 2px;
+  min-width: 82px;
+  align-content: center;
+  line-height: 1.1;
+}
+
+.brand-title-small {
+  color: var(--text);
+  font-size: 0.96rem;
+  font-weight: 950;
+  letter-spacing: -0.03em;
+  direction: rtl;
+  white-space: nowrap;
+}
+
+.brand-powered {
+  color: var(--muted);
+  font-size: 0.6rem;
+  font-weight: 850;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
+html[data-theme="construction"] .brand-title-small {
+  color: #fff7ed;
+}
+
+html[data-theme="construction"] .brand-powered {
+  color: rgba(255, 220, 188, 0.78);
+}
+
 html[data-theme="dark"] .brand-logo-link,
 html[data-theme="light"] .brand-logo-link,
 html[data-theme="construction"] .brand-logo-link {
   border: 0 !important;
   background: transparent !important;
   box-shadow: none !important;
+}
+
+/* Stable desktop header layout: no nav clipping, no Settings wrap */
+@media (min-width: 981px) {
+  .app-header,
+  html[dir='rtl'] .app-header {
+    display: grid !important;
+    grid-template-columns: max-content minmax(0, 1fr) !important;
+    align-items: center !important;
+    column-gap: clamp(16px, 2vw, 28px) !important;
+  }
+
+  .app-header-brand,
+  html[dir='rtl'] .app-header-brand {
+    min-width: 0 !important;
+    max-width: none !important;
+    width: max-content !important;
+    flex: 0 0 auto !important;
+  }
+
+  .app-header-actions,
+  html[dir='rtl'] .app-header-actions {
+    display: flex !important;
+    align-items: center !important;
+    justify-content: flex-end !important;
+    gap: 10px !important;
+    min-width: 0 !important;
+    width: 100% !important;
+    flex-wrap: nowrap !important;
+    padding-inline-start: 0 !important;
+  }
+
+  .app-nav,
+  html[dir='rtl'] .app-nav {
+    order: 1 !important;
+    flex: 1 1 auto !important;
+    min-width: 0 !important;
+    display: flex !important;
+    align-items: center !important;
+    justify-content: flex-start !important;
+    gap: clamp(5px, 0.6vw, 9px) !important;
+    flex-wrap: nowrap !important;
+    overflow-x: auto !important;
+    overflow-y: visible !important;
+    scroll-padding-inline: 8px !important;
+    scrollbar-width: none;
+  }
+
+  .app-nav::-webkit-scrollbar {
+    display: none;
+  }
+
+  .app-nav a {
+    flex: 0 0 auto !important;
+    white-space: nowrap !important;
+    padding-inline: clamp(7px, 0.65vw, 10px) !important;
+  }
+
+  .app-header-toggles,
+  html[dir='rtl'] .app-header-toggles {
+    order: 2 !important;
+    flex: 0 0 auto !important;
+    display: flex !important;
+    align-items: center !important;
+    justify-content: flex-end !important;
+    flex-wrap: nowrap !important;
+  }
+
+  .settings-menu,
+  .settings-menu-trigger {
+    flex: 0 0 auto !important;
+    white-space: nowrap !important;
+  }
+}
+
+@media (min-width: 981px) and (max-width: 1180px) {
+  .app-header,
+  html[dir='rtl'] .app-header {
+    column-gap: 14px !important;
+  }
+
+  .brand-logo-link {
+    width: 132px !important;
+    height: 44px !important;
+    flex-basis: 132px !important;
+  }
+
+  .brand-copy-compact {
+    min-width: 68px !important;
+  }
+
+  .brand-title-small {
+    font-size: 0.84rem !important;
+  }
+
+  .brand-powered {
+    font-size: 0.5rem !important;
+    letter-spacing: 0.03em !important;
+  }
+
+  .app-nav a {
+    font-size: 0.78rem !important;
+    padding-inline: 7px !important;
+  }
+
+  .settings-menu-trigger {
+    padding-inline: 10px !important;
+  }
 }
 
 @media (max-width: 980px) {
@@ -4683,16 +4826,39 @@ html[data-theme="construction"] .brand-logo-link {
 }
 
 @media (max-width: 760px) {
+  .app-header-brand {
+    gap: 8px;
+    min-width: 0;
+  }
+
   .brand-logo-link {
-    width: 112px !important;
+    width: 118px !important;
     height: 40px !important;
-    flex-basis: 112px !important;
+    flex-basis: 118px !important;
+  }
+
+  .brand-copy-compact {
+    min-width: 68px;
+  }
+
+  .brand-title-small {
+    font-size: 0.82rem;
+  }
+
+  .brand-powered {
+    font-size: 0.5rem;
+    letter-spacing: 0.03em;
   }
 }
 
-@media (max-width: 420px) {
+@media (max-width: 460px) {
   .brand-logo-link {
-    width: 94px !important;
-    flex-basis: 94px !important;
+    width: 106px !important;
+    height: 34px !important;
+    flex-basis: 106px !important;
+  }
+
+  .brand-copy-compact {
+    display: none;
   }
 }

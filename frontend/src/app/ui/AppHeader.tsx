@@ -39,9 +39,9 @@ export function AppHeader() {
         <Link href="/" className="brand-logo-link" aria-label={messages.app.title}>
           <img className="brand-logo-image" src="/omran-logo.png" alt={messages.app.title} />
         </Link>
-        <div className="brand-copy">
-          <div className="brand-eyebrow">{messages.app.brand}</div>
-          <h1>{messages.app.title}</h1>
+        <div className="brand-copy brand-copy-compact" aria-label="Omran management portal powered by AI">
+          <div className="brand-title-small">بوابة الإدارة</div>
+          <div className="brand-powered">Powered by AI</div>
         </div>
       </div>
 
@@ -70,5 +70,6 @@ export function AppHeader() {
     </header>
   );
 }
+
 
 
