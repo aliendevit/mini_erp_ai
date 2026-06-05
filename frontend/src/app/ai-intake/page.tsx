@@ -793,6 +793,8 @@ export default function AIIntakePage() {
   const [recommendations, setRecommendations] = useState<RecommendationPayload | null>(null);
   const [chatInput, setChatInput] = useState('');
   const [busy, setBusy] = useState(false);
+  const [deletingMessageId, setDeletingMessageId] = useState<string | null>(null);
+  const [deletingIntakeId, setDeletingIntakeId] = useState<string | null>(null);
   const [streaming, setStreaming] = useState(false);
   const [streamingAssistantId, setStreamingAssistantId] = useState<string | null>(null);
   const [proposalGenerationStatus, setProposalGenerationStatus] = useState<'idle' | 'running' | 'done' | 'error'>('idle');
@@ -828,7 +830,7 @@ export default function AIIntakePage() {
   const [portalReady, setPortalReady] = useState(false);
   const [isMobileLayout, setIsMobileLayout] = useState(false);
   const supportsVoice = supportsNativeRecording || supportsWavRecording;
-  const interactionLocked = busy || streaming || recording || transcribing || explanationStatus === 'running';
+  const interactionLocked = busy || Boolean(deletingMessageId) || Boolean(deletingIntakeId) || streaming || recording || transcribing || explanationStatus === 'running';
   const notMentioned = m.aiIntakePage.notMentioned;
 
   useEffect(() => {
@@ -870,6 +872,7 @@ export default function AIIntakePage() {
       setHistoryCollapsed(false);
       setRecommendations(null);
       setExistingCustomerId('');
+      setLastResult(null);
     }
   }
 
@@ -1381,6 +1384,27 @@ export default function AIIntakePage() {
     }
   }
 
+  async function deleteMessage(messageId: string) {
+    if (!selectedId) return alert(m.aiIntakePage.createIntakeFirst);
+    if (!window.confirm(m.aiIntakePage.deleteMessageConfirm)) return;
+
+    setDeletingMessageId(messageId);
+    try {
+      const updated = await apiJson<ProposalDraft>(`/ai/intakes/${selectedId}/messages/${messageId}`, 'DELETE');
+      setDraft(normalizeDraftValue(updated));
+      setMessages(updated.messages || []);
+      setRecommendations(normalizeRecommendations(updated.recommendedTeam));
+      setRecommendationStatus('idle');
+      setProposalGenerationStatus('idle');
+      closeRecommendationExplanation();
+      await loadLists(selectedId);
+    } catch (error: any) {
+      alert(error.message);
+    } finally {
+      setDeletingMessageId(null);
+    }
+  }
+
   async function clearAllFields() {
     if (!selectedId) return alert(m.aiIntakePage.createIntakeFirst);
     if (!window.confirm(m.aiIntakePage.clearAllFieldsConfirm)) return;
@@ -1426,6 +1450,24 @@ export default function AIIntakePage() {
       alert(error.message);
     } finally {
       setBusy(false);
+    }
+  }
+
+  async function deleteIntakeSession(intakeId: string) {
+    if (!window.confirm(m.aiIntakePage.deleteIntakeConfirm)) return;
+
+    setDeletingIntakeId(intakeId);
+    try {
+      await apiJson<{ ok: boolean }>(`/ai/intakes/${intakeId}`, 'DELETE');
+      if (intakeId === selectedId) {
+        setSelectedId('');
+        storeSelectedIntakeId('');
+      }
+      await loadLists(intakeId === selectedId ? undefined : selectedId);
+    } catch (error: any) {
+      alert(error.message);
+    } finally {
+      setDeletingIntakeId(null);
     }
   }
 
@@ -1957,21 +1999,31 @@ export default function AIIntakePage() {
     ) : (
       <div className="ai-intake-list">
         {visibleIntakes.map((item) => (
-          <button
-            key={item.id}
-            className="btn ai-intake-list-item"
-            style={{
-              borderColor: item.id === selectedId ? 'rgba(125,180,255,0.7)' : undefined,
-            }}
-            onClick={() => loadIntake(item.id).catch((error) => alert(error.message))}
-            disabled={interactionLocked}
-          >
-            <div style={{ fontWeight: 700 }}>{item.orderTitle || m.aiIntakePage.unnamed}</div>
-            <div className="muted">{item.customerCompanyName || m.aiIntakePage.noCustomer}</div>
-            <div className="muted">
-              {m.common.status}: {item.status}
-            </div>
-          </button>
+          <div key={item.id} className={`ai-intake-list-entry ${item.id === selectedId ? 'selected' : ''}`}>
+            <button
+              type="button"
+              className="btn ai-intake-list-item"
+              onClick={() => loadIntake(item.id).catch((error) => alert(error.message))}
+              disabled={interactionLocked}
+            >
+              <div style={{ fontWeight: 700 }}>{item.orderTitle || m.aiIntakePage.unnamed}</div>
+              <div className="muted">{item.customerCompanyName || m.aiIntakePage.noCustomer}</div>
+              <div className="muted">
+                {m.common.status}: {item.status}
+              </div>
+            </button>
+            <button
+              type="button"
+              className="ai-intake-delete"
+              onClick={() => void deleteIntakeSession(item.id)}
+              disabled={interactionLocked}
+              aria-label={m.aiIntakePage.deleteIntake}
+              title={m.aiIntakePage.deleteIntake}
+              aria-busy={deletingIntakeId === item.id}
+            >
+              <Icon name="trash" />
+            </button>
+          </div>
         ))}
         {!showAllIntakes && hiddenIntakeCount > 0 && (
           <button className="btn secondary ai-render-more" type="button" onClick={() => setShowAllIntakes(true)}>
@@ -2151,8 +2203,22 @@ export default function AIIntakePage() {
                     key={message.id}
                     className={`ai-chat-message ${message.role}`}
                   >
-                    <div className="ai-chat-role">
-                      {message.role === 'assistant' ? m.aiIntakePage.assistant : m.aiIntakePage.manager}
+                    <div className="ai-chat-message-header">
+                      <div className="ai-chat-role">
+                        {message.role === 'assistant' ? m.aiIntakePage.assistant : m.aiIntakePage.manager}
+                      </div>
+                      <button
+                        type="button"
+                        className="ai-message-delete"
+                        onClick={() => void deleteMessage(message.id)}
+                        disabled={interactionLocked}
+                        aria-label={m.aiIntakePage.deleteMessage}
+                        title={m.aiIntakePage.deleteMessage}
+                        aria-busy={deletingMessageId === message.id}
+                      >
+                        <Icon name="trash" />
+                        <span>{deletingMessageId === message.id ? m.aiIntakePage.deletingMessage : m.aiIntakePage.deleteMessage}</span>
+                      </button>
                     </div>
                     {message.content ? (
                     <div style={{ whiteSpace: 'pre-wrap' }}>{message.content}</div>
