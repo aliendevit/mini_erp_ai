@@ -733,6 +733,68 @@ class ProposalAndStaffingTests(unittest.TestCase):
         self.assertNotIn("\u0627\u0644\u062f\u0641\u0639", reply or "")
         self.assertNotIn("\u0639\u0631\u0628\u0648\u0646", reply or "")
 
+    def test_scope_first_reply_for_arabic_area_only_answer_asks_work_types_only(self) -> None:
+        proposal = Proposal(status="intake")
+        messages = [
+            ProposalMessage(
+                role="user",
+                content=(
+                    "\u0639\u0646\u062f\u064a \u0645\u0634\u0631\u0648\u0639 \u062a\u0631\u0645\u064a\u0645 \u0644\u0634\u0631\u0643\u0629 \u0625\u0639\u0645\u0627\u0631 \u0627\u0644\u0634\u0627\u0645."
+                ),
+            ),
+            ProposalMessage(
+                role="assistant",
+                content=(
+                    "\u0644\u0625\u0643\u0645\u0627\u0644 \u0627\u0644\u062a\u0633\u062c\u064a\u0644\u060c \u0645\u0627 \u0647\u064a \u0645\u0646\u0627\u0637\u0642 \u0627\u0644\u0639\u0645\u0644 \u0648\u0646\u0648\u0639 \u0627\u0644\u0623\u0639\u0645\u0627\u0644 \u0627\u0644\u0645\u0637\u0644\u0648\u0628\u0629\u061f"
+                ),
+            ),
+            ProposalMessage(
+                role="user",
+                content="\u0645\u0646\u0627\u0637\u0642 \u0627\u0644\u0639\u0645\u0644 \u0628 \u0627\u0644\u0645\u0637\u0628\u062e \u0648\u0627\u0644\u062d\u0645\u0627\u0645 \u0648 \u0627\u0644\u0628\u0631\u0646\u062f\u0627",
+            ),
+        ]
+
+        reply = maybe_build_scope_first_reply(proposal, messages)
+
+        self.assertIsNotNone(reply)
+        self.assertIn("\u062a\u0645 \u062a\u0633\u062c\u064a\u0644 \u0645\u0646\u0627\u0637\u0642 \u0627\u0644\u0639\u0645\u0644", reply or "")
+        self.assertIn("\u0627\u0644\u0645\u0637\u0628\u062e", reply or "")
+        self.assertIn("\u0627\u0644\u062d\u0645\u0627\u0645", reply or "")
+        self.assertIn("\u0627\u0644\u0628\u0631\u0646\u062f\u0627", reply or "")
+        self.assertIn("\u0645\u0627 \u0646\u0648\u0639 \u0627\u0644\u0639\u0645\u0644", reply or "")
+        self.assertNotIn("\u0645\u0627 \u0647\u064a \u0645\u0646\u0627\u0637\u0642 \u0627\u0644\u0639\u0645\u0644", reply or "")
+
+    def test_scope_reply_for_arabic_work_type_answer_does_not_repeat_work_type_question(self) -> None:
+        proposal = Proposal(status="intake")
+        messages = [
+            ProposalMessage(role="user", content="عندي مشروع ترميم لشركة إعمار الشام."),
+            ProposalMessage(role="assistant", content="ما هي مناطق العمل؟"),
+            ProposalMessage(role="user", content="مناطق العمل ب المطبخ والحمام و البرندا"),
+            ProposalMessage(role="assistant", content="ما نوع العمل المطلوب في كل منطقة؟"),
+            ProposalMessage(role="user", content="المطبخ قلع الارض و تجديد المطبخ غرفة القعدة بدا تغيير الارض"),
+        ]
+
+        reply = maybe_build_scope_first_reply(proposal, messages)
+
+        self.assertIsNotNone(reply)
+        self.assertIn("تم تسجيل تحديث نطاق العمل", reply or "")
+        self.assertIn("أرضيات", reply or "")
+        self.assertNotIn("ما نوع العمل المطلوب", reply or "")
+        self.assertIn("مادة", reply or "")
+        self.assertIn("ورشة", reply or "")
+    def test_intake_chat_prompt_guides_ai_not_to_repeat_work_type_question(self) -> None:
+        messages = [
+            ProposalMessage(role="user", content="مناطق العمل ب المطبخ والحمام"),
+            ProposalMessage(role="assistant", content="ما نوع العمل المطلوب؟"),
+            ProposalMessage(role="user", content="المطبخ قلع الارض و غرفة القعدة بدا تغيير الارض"),
+        ]
+
+        prompt = build_intake_chat_prompt(Proposal(status="intake"), messages)
+
+        self.assertIn("آخر رسالة من المدير تحتوي نوع عمل واضح", prompt)
+        self.assertIn("لا تسأل مرة أخرى", prompt)
+        self.assertIn("أرضيات/بلاط", prompt)
+
     def test_intake_chat_prompt_includes_selective_construction_guidance(self) -> None:
         prompt = build_intake_chat_prompt(Proposal(status="intake"), [ProposalMessage(role="user", content="Kitchen renovation with flooring and plumbing.")])
 

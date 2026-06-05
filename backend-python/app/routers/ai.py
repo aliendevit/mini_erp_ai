@@ -14,7 +14,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session, selectinload
 
 from ..database import get_db
-from ..models import Proposal, Workshop
+from ..models import Proposal, ProposalMessage, Workshop
 from ..schemas import (
     AIIntakeConfirmPayload,
     AIIntakeCreatePayload,
@@ -36,7 +36,6 @@ from ..services.proposals import (
     refresh_proposal_memory,
     refresh_proposal_memory_locally,
     intake_assistant_source_text,
-    maybe_build_scope_first_reply,
     sanitize_intake_assistant_reply,
 )
 from ..utils import as_datetime, end_of_utc_day, ensure, json_dumps, json_loads, not_found, proposal_payload
@@ -211,6 +210,14 @@ def update_intake(proposal_id: str, payload: ProposalDraftPayload, db: Session =
     return proposal_payload(proposal, include_messages=True)
 
 
+@router.delete("/ai/intakes/{proposal_id}")
+def delete_intake(proposal_id: str, db: Session = Depends(get_db)) -> dict:
+    proposal = _get_proposal(db, proposal_id)
+    db.delete(proposal)
+    db.commit()
+    return {"ok": True}
+
+
 @router.delete("/ai/intakes/{proposal_id}/messages")
 def clear_intake_messages(proposal_id: str, db: Session = Depends(get_db)) -> dict:
     proposal = _get_proposal(db, proposal_id)
@@ -221,6 +228,32 @@ def clear_intake_messages(proposal_id: str, db: Session = Depends(get_db)) -> di
     db.commit()
     db.refresh(proposal)
     return proposal_payload(proposal, include_messages=True)
+
+
+@router.delete("/ai/intakes/{proposal_id}/messages/{message_id}")
+def delete_intake_message(proposal_id: str, message_id: str, db: Session = Depends(get_db)) -> dict:
+    proposal = _get_proposal(db, proposal_id)
+    message = db.get(ProposalMessage, message_id)
+    if not message or message.proposal_id != proposal.id:
+        raise not_found()
+
+    proposal.messages.remove(message)
+    db.flush()
+    remaining_messages = list(
+        db.scalars(
+            select(ProposalMessage)
+            .where(ProposalMessage.proposal_id == proposal.id)
+            .order_by(ProposalMessage.created_at.asc(), ProposalMessage.id.asc())
+        ).all()
+    )
+
+    # Deleted chat facts must not continue influencing proposal generation.
+    clear_proposal_memory(db, proposal)
+    refresh_proposal_memory_locally(db, proposal, remaining_messages)
+    proposal.updated_at = datetime.now(timezone.utc)
+    db.add(proposal)
+    db.commit()
+    return proposal_payload(_get_proposal(db, proposal_id), include_messages=True)
 
 
 @router.post("/ai/intakes/{proposal_id}/messages/stream")
@@ -236,12 +269,6 @@ def intake_message_stream(proposal_id: str, payload: AIIntakeMessagePayload, db:
         db.rollback()
         logger.warning("AI intake memory refresh failed: proposal_id=%s error=%s", proposal_id, exc)
     proposal = _get_proposal(db, proposal_id)
-    deterministic_reply = maybe_build_scope_first_reply(proposal, proposal.messages)
-    if deterministic_reply:
-        append_message(db, proposal, "assistant", deterministic_reply)
-        db.commit()
-        return StreamingResponse(iter([deterministic_reply]), media_type="text/plain; charset=utf-8", headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})
-
     ensure_gemini_ready()
 
     def generate() -> Iterable[str]:

@@ -18,7 +18,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from app.database import Base
 from app.models import Proposal, ProposalMessage
-from app.routers.ai import clear_intake_messages, create_intake, generate_proposal, intake_message_stream, transcribe_intake_audio
+from app.routers.ai import clear_intake_messages, create_intake, delete_intake, delete_intake_message, generate_proposal, intake_message_stream, transcribe_intake_audio
 from app.services.assemblyai_client import transcribe_audio
 from app.services.proposals import build_proposal_prompt
 from app.schemas import AIIntakeCreatePayload, AIIntakeMessagePayload
@@ -118,6 +118,41 @@ class AIAssistantTests(unittest.TestCase):
         self.assertEqual(payload["messages"], [])
         messages = self.db.scalars(select(ProposalMessage).where(ProposalMessage.proposal_id == proposal_id)).all()
         self.assertEqual(messages, [])
+
+    def test_delete_intake_removes_session_and_related_messages(self) -> None:
+        created = create_intake(AIIntakeCreatePayload(orderTitle="Delete this intake"), db=self.db)
+        keep = create_intake(AIIntakeCreatePayload(orderTitle="Keep this intake"), db=self.db)
+        proposal_id = created["id"]
+
+        proposal = self.db.get(Proposal, proposal_id)
+        proposal.messages = [ProposalMessage(role="user", content="Temporary conversation")]
+        self.db.add(proposal)
+        self.db.commit()
+
+        payload = delete_intake(proposal_id, db=self.db)
+
+        self.assertEqual(payload, {"ok": True})
+        self.assertIsNone(self.db.get(Proposal, proposal_id))
+        self.assertEqual(self.db.scalars(select(ProposalMessage).where(ProposalMessage.proposal_id == proposal_id)).all(), [])
+        self.assertIsNotNone(self.db.get(Proposal, keep["id"]))
+
+    def test_delete_intake_message_removes_only_selected_message(self) -> None:
+        created = create_intake(AIIntakeCreatePayload(orderTitle="Selective cleanup"), db=self.db)
+        proposal_id = created["id"]
+
+        proposal = self.db.get(Proposal, proposal_id)
+        first = ProposalMessage(role="user", content="Keep this project detail")
+        selected = ProposalMessage(role="assistant", content="Delete this reply")
+        last = ProposalMessage(role="user", content="Keep this payment detail")
+        proposal.messages = [first, selected, last]
+        self.db.add(proposal)
+        self.db.commit()
+        selected_id = selected.id
+
+        payload = delete_intake_message(proposal_id, selected_id, db=self.db)
+
+        self.assertEqual([message["content"] for message in payload["messages"]], [first.content, last.content])
+        self.assertIsNone(self.db.get(ProposalMessage, selected_id))
 
     def test_generate_proposal_sets_site_hours_when_gemini_omits_them(self) -> None:
         created = create_intake(AIIntakeCreatePayload(), db=self.db)

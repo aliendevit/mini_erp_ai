@@ -331,6 +331,101 @@ _PROJECT_CONTEXT_HINTS = (
     "\u062a\u0631\u0645\u064a\u0645",
 )
 
+_WORK_AREA_HINTS: tuple[tuple[str, tuple[str, ...], dict[str, str]], ...] = (
+    (
+        "kitchen",
+        ("kitchen", "kuche", "kueche", "\u0645\u0637\u0628\u062e", "\u0627\u0644\u0645\u0637\u0628\u062e"),
+        {"arabic": "\u0627\u0644\u0645\u0637\u0628\u062e", "german": "Kueche", "english": "kitchen"},
+    ),
+    (
+        "bathroom",
+        ("bathroom", "bath", "bad", "\u062d\u0645\u0627\u0645", "\u0627\u0644\u062d\u0645\u0627\u0645"),
+        {"arabic": "\u0627\u0644\u062d\u0645\u0627\u0645", "german": "Bad", "english": "bathroom"},
+    ),
+    (
+        "balcony",
+        ("balcony", "terrace", "balkon", "\u0628\u0631\u0646\u062f\u0627", "\u0627\u0644\u0628\u0631\u0646\u062f\u0627", "\u0634\u0631\u0641\u0629", "\u0627\u0644\u0634\u0631\u0641\u0629"),
+        {"arabic": "\u0627\u0644\u0628\u0631\u0646\u062f\u0627", "german": "Balkon", "english": "balcony"},
+    ),
+    (
+        "living_room",
+        ("living room", "wohnzimmer", "\u063a\u0631\u0641\u0629 \u0627\u0644\u0645\u0639\u064a\u0634\u0629", "\u063a\u0631\u0641\u0629 \u0627\u0644\u0642\u0639\u062f\u0629", "\u0635\u0627\u0644\u0648\u0646"),
+        {"arabic": "\u063a\u0631\u0641\u0629 \u0627\u0644\u0645\u0639\u064a\u0634\u0629", "german": "Wohnzimmer", "english": "living room"},
+    ),
+    (
+        "entrance",
+        ("entrance", "entry", "eingang", "\u0645\u062f\u062e\u0644", "\u0627\u0644\u0645\u062f\u062e\u0644"),
+        {"arabic": "\u0627\u0644\u0645\u062f\u062e\u0644", "german": "Eingang", "english": "entrance"},
+    ),
+)
+
+
+def _mentioned_work_areas(text: str, language_mode: str) -> list[str]:
+    normalized = _normalize_match_text(text)
+    areas: list[str] = []
+    for _key, hints, labels in _WORK_AREA_HINTS:
+        if any(_normalize_match_text(hint) in normalized for hint in hints):
+            areas.append(labels.get(language_mode) or labels["english"])
+    return _dedupe_strings(areas)
+
+
+_SKILL_REPLY_LABELS: dict[str, dict[str, str]] = {
+    "flooring": {"arabic": "\u0623\u0631\u0636\u064a\u0627\u062a/\u0628\u0644\u0627\u0637", "german": "Boden/Fliesen", "english": "flooring/tiles"},
+    "maler": {"arabic": "\u062f\u0647\u0627\u0646", "german": "Malerarbeiten", "english": "painting"},
+    "plumbing": {"arabic": "\u0623\u0639\u0645\u0627\u0644 \u0635\u062d\u064a\u0629", "german": "Sanitaer", "english": "plumbing"},
+    "feuchtigkeitsschutz": {"arabic": "\u0639\u0632\u0644", "german": "Abdichtung", "english": "waterproofing"},
+    "carpentry": {"arabic": "\u0646\u062c\u0627\u0631\u0629", "german": "Schreinerarbeiten", "english": "carpentry"},
+    "electrical": {"arabic": "\u0643\u0647\u0631\u0628\u0627\u0621", "german": "Elektro", "english": "electrical"},
+    "trockenbau": {"arabic": "\u062c\u0628\u0633 \u0628\u0648\u0631\u062f", "german": "Trockenbau", "english": "drywall"},
+}
+
+def _localized_skill_labels(skills: list[str], language_mode: str) -> list[str]:
+    labels: list[str] = []
+    for skill in skills:
+        label = _SKILL_REPLY_LABELS.get(skill, {}).get(language_mode) or _SKILL_REPLY_LABELS.get(skill, {}).get("english") or skill
+        labels.append(label)
+    return _dedupe_strings(labels)
+
+
+def _latest_scope_turn_guidance(messages: list[ProposalMessage], language_mode: str) -> list[str]:
+    manager_messages = _manager_messages(messages)
+    if not manager_messages:
+        return []
+
+    manager_text = "\n".join(manager_messages).strip()
+    latest_text = manager_messages[-1].strip()
+    latest_skills = _infer_skills_from_text(latest_text)
+    mentioned_areas = _mentioned_work_areas(manager_text, language_mode)
+    guidance: list[str] = []
+
+    if latest_skills:
+        skill_labels = _localized_skill_labels(latest_skills, language_mode)
+        if language_mode == "arabic":
+            guidance.append("\u0622\u062e\u0631 \u0631\u0633\u0627\u0644\u0629 \u0645\u0646 \u0627\u0644\u0645\u062f\u064a\u0631 \u062a\u062d\u062a\u0648\u064a \u0646\u0648\u0639 \u0639\u0645\u0644 \u0648\u0627\u0636\u062d\u061b \u0644\u0627 \u062a\u0633\u0623\u0644 \u0645\u0631\u0629 \u0623\u062e\u0631\u0649: \u0645\u0627 \u0646\u0648\u0639 \u0627\u0644\u0639\u0645\u0644 \u0627\u0644\u0645\u0637\u0644\u0648\u0628\u061f")
+            guidance.append("\u0627\u0639\u062a\u0631\u0641 \u0628\u0627\u0644\u0623\u0639\u0645\u0627\u0644 \u0627\u0644\u0645\u0641\u0647\u0648\u0645\u0629 \u0645\u0646 \u0622\u062e\u0631 \u0631\u0633\u0627\u0644\u0629: " + "\u060c ".join(skill_labels) + ".")
+            if mentioned_areas:
+                guidance.append("\u0645\u0646\u0627\u0637\u0642 \u0627\u0644\u0639\u0645\u0644 \u0627\u0644\u0645\u0630\u0643\u0648\u0631\u0629 \u062d\u062a\u0649 \u0627\u0644\u0622\u0646: " + "\u060c ".join(mentioned_areas) + ".")
+            guidance.append("\u0627\u0633\u0623\u0644 \u0641\u0642\u0637 \u0639\u0646 \u0627\u0644\u062a\u0641\u0627\u0635\u064a\u0644 \u0627\u0644\u0646\u0627\u0642\u0635\u0629 \u0627\u0644\u0639\u0645\u0644\u064a\u0629 \u0645\u062b\u0644 \u0627\u0644\u0645\u0627\u062f\u0629/\u0627\u0644\u0645\u0642\u0627\u0633/\u0627\u0644\u062a\u0634\u0637\u064a\u0628/\u0627\u0644\u0648\u0631\u0634\u0629\u060c \u0648\u0628\u062d\u062f \u0623\u0642\u0635\u0649 \u0633\u0624\u0627\u0644\u064a\u0646 \u0623\u0648 \u062b\u0644\u0627\u062b\u0629.")
+        elif language_mode == "german":
+            guidance.append("The latest manager message already contains concrete work types; do not ask again which work type is required.")
+            guidance.append("Acknowledge the understood work types: " + ", ".join(skill_labels) + ".")
+            if mentioned_areas:
+                guidance.append("Known work areas so far: " + ", ".join(mentioned_areas) + ".")
+            guidance.append("Ask only for practical missing details such as material, size, finish, or workshop, maximum two or three questions.")
+        else:
+            guidance.append("The latest manager message already contains concrete work types; do not ask again which work type is required.")
+            guidance.append("Acknowledge the understood work types: " + ", ".join(skill_labels) + ".")
+            if mentioned_areas:
+                guidance.append("Known work areas so far: " + ", ".join(mentioned_areas) + ".")
+            guidance.append("Ask only for practical missing details such as material, size, finish, or workshop, maximum two or three questions.")
+    elif mentioned_areas and not _infer_skills_from_text(manager_text):
+        if language_mode == "arabic":
+            guidance.append("\u0627\u0644\u0645\u062f\u064a\u0631 \u0630\u0643\u0631 \u0645\u0646\u0627\u0637\u0642 \u0627\u0644\u0639\u0645\u0644 \u0641\u0642\u0637 \u0648\u0644\u0645 \u064a\u0630\u0643\u0631 \u0646\u0648\u0639 \u0627\u0644\u0639\u0645\u0644 \u0628\u0639\u062f\u061b \u0627\u0633\u0623\u0644 \u0639\u0646 \u0646\u0648\u0639 \u0627\u0644\u0639\u0645\u0644 \u0644\u0643\u0644 \u0645\u0646\u0637\u0642\u0629 \u0641\u0642\u0637 \u0648\u0644\u0627 \u062a\u0633\u0623\u0644 \u0639\u0646 \u0645\u0639\u0644\u0648\u0645\u0627\u062a \u0627\u0644\u0645\u0634\u0631\u0648\u0639 \u0627\u0644\u0623\u0633\u0627\u0633\u064a\u0629 \u0645\u0646 \u062c\u062f\u064a\u062f.")
+        else:
+            guidance.append("The manager mentioned work areas only and no work types yet; ask only for the work type per area and do not ask for basic project data again.")
+
+    return guidance
+
 
 def maybe_build_scope_first_reply(proposal: Proposal, messages: list[ProposalMessage]) -> str | None:
     """Return a deterministic first follow-up when project basics exist but scope is still unknown."""
@@ -338,14 +433,61 @@ def maybe_build_scope_first_reply(proposal: Proposal, messages: list[ProposalMes
     if not manager_text:
         return None
 
+    language_mode = _conversation_language_mode(messages)
+    mentioned_areas = _mentioned_work_areas(manager_text, language_mode)
+    manager_messages = _manager_messages(messages)
+    last_manager_text = manager_messages[-1] if manager_messages else ""
+    last_message_skills = _infer_skills_from_text(last_manager_text)
+    if last_message_skills:
+        skill_labels = _localized_skill_labels(last_message_skills, language_mode)
+        areas_text = "\u060c ".join(mentioned_areas) if mentioned_areas else "\u0627\u0644\u0645\u0646\u0627\u0637\u0642 \u0627\u0644\u0645\u0630\u0643\u0648\u0631\u0629"
+        skills_text = "\u060c ".join(skill_labels)
+        if language_mode == "arabic":
+            return (
+                f"\u062a\u0645 \u062a\u0633\u062c\u064a\u0644 \u062a\u062d\u062f\u064a\u062b \u0646\u0637\u0627\u0642 \u0627\u0644\u0639\u0645\u0644: {areas_text}.\n"
+                f"\u0627\u0644\u0623\u0639\u0645\u0627\u0644 \u0627\u0644\u062a\u064a \u0641\u0647\u0645\u062a\u0647\u0627: {skills_text}.\n\n"
+                "\u0644\u0625\u0643\u0645\u0627\u0644 \u0627\u0644\u062a\u0641\u0627\u0635\u064a\u0644 \u0627\u0644\u0646\u0627\u0642\u0635\u0629 \u0641\u0642\u0637: \u0645\u0627 \u0645\u0627\u062f\u0629/\u0646\u0648\u0639 \u0627\u0644\u062a\u0634\u0637\u064a\u0628 \u0627\u0644\u0645\u0637\u0644\u0648\u0628\u0629\u061f \u0648\u0647\u0644 \u062a\u0648\u062c\u062f \u0648\u0631\u0634\u0629 \u0645\u062d\u062f\u062f\u0629 \u0644\u0647\u0630\u0647 \u0627\u0644\u0623\u0639\u0645\u0627\u0644 \u0623\u0645 \u0646\u062a\u0631\u0643\u0647\u0627 \u0643\u0640 \u0648\u0631\u0634\u0629 \u0645\u0637\u0644\u0648\u0628\u0629\u061f"
+            )
+        if language_mode == "german":
+            return (
+                f"Der Leistungsumfang wurde aktualisiert: {areas_text}.\n"
+                f"Erfasste Arbeiten: {skills_text}.\n\n"
+                "Welche Materialien/Oberflaechen sind gewuenscht, und gibt es dafuer bereits eine bestimmte Werkstatt?"
+            )
+        return (
+            f"The scope was updated for: {areas_text}.\n"
+            f"Understood work types: {skills_text}.\n\n"
+            "Which material/finish is required, and is there a specific workshop for this work or should it stay as workshop needed?"
+        )
+
     normalized = _normalize_match_text(manager_text)
     has_project_context = any(_normalize_match_text(hint) in normalized for hint in _PROJECT_CONTEXT_HINTS)
     if not has_project_context:
         return None
+
     if _infer_skills_from_text(manager_text):
         return None
 
-    language_mode = _conversation_language_mode(messages)
+    if mentioned_areas:
+        if language_mode == "arabic":
+            return (
+                "\u062a\u0645 \u062a\u0633\u062c\u064a\u0644 \u0645\u0646\u0627\u0637\u0642 \u0627\u0644\u0639\u0645\u0644: "
+                + "\u060c ".join(mentioned_areas)
+                + ".\n\n\u0645\u0627 \u0646\u0648\u0639 \u0627\u0644\u0639\u0645\u0644 \u0627\u0644\u0645\u0637\u0644\u0648\u0628 \u0641\u064a \u0643\u0644 \u0645\u0646\u0637\u0642\u0629\u061f "
+                "\u0645\u062b\u0644\u0627\u064b: \u0628\u0644\u0627\u0637\u060c \u062f\u0647\u0627\u0646\u060c \u0623\u0639\u0645\u0627\u0644 \u0635\u062d\u064a\u0629\u060c \u0639\u0632\u0644\u060c \u0623\u0648 \u0646\u062c\u0627\u0631\u0629."
+            )
+        if language_mode == "german":
+            return (
+                "Die Arbeitsbereiche wurden erfasst: "
+                + ", ".join(mentioned_areas)
+                + ".\n\nWelche Arbeiten sind pro Bereich erforderlich? Zum Beispiel Boden, Malerarbeiten, Sanitaer, Abdichtung oder Schreinerarbeiten."
+            )
+        return (
+            "The work areas have been recorded: "
+            + ", ".join(mentioned_areas)
+            + ".\n\nWhat work type is required for each area? For example: flooring, painting, plumbing, waterproofing, or carpentry."
+        )
+
     if language_mode == "arabic":
         return (
             "\u062a\u0645 \u062a\u0633\u062c\u064a\u0644 \u0645\u0639\u0644\u0648\u0645\u0627\u062a \u0627\u0644\u0645\u0634\u0631\u0648\u0639 \u0627\u0644\u0623\u0633\u0627\u0633\u064a\u0629 \u0627\u0644\u062a\u064a \u0630\u0643\u0631\u062a\u0647\u0627.\n\n"
@@ -1019,6 +1161,7 @@ def build_intake_chat_prompt(
     payment_drafts = _safe_json(proposal.payment_drafts_json, [])
     external_workshops = _safe_json(proposal.external_workshops_json, [])
     known_available_workshops = known_available_workshops or []
+    latest_turn_guidance = _latest_scope_turn_guidance(messages, language_mode)
 
     return "\n".join(
         [
@@ -1052,6 +1195,8 @@ def build_intake_chat_prompt(
             "- For flooring, prioritize material, size, old-floor removal vs over-installation, stairs/edges, and installation type only when missing.",
             "Hidden construction checklist:",
             construction_scope_guidance(),
+            "Latest manager turn guidance:",
+            *(latest_turn_guidance or ["- No extra turn-specific guidance."]),
             "Chat rules:",
             "- Never ask the manager for internal employees, employee counts, capacity, availability, or internal staffing.",
             "- Ask which workshop/subcontractor will cover a site only when the execution partner is missing or unclear.",
@@ -1385,6 +1530,45 @@ def _infer_skills_from_text(text: str) -> list[str]:
     inferred: list[str] = []
     for canonical, hints in _SITE_SKILL_HINTS.items():
         if any(_normalize_match_text(hint) in lowered for hint in hints if hint):
+            inferred.append(canonical)
+
+    # Arabic construction phrases are often written conversationally, not as exact
+    # catalog terms. Keep this deterministic so the intake does not repeat the
+    # generic "which work type?" question after the manager already answered it.
+    arabic_skill_hints: dict[str, tuple[str, ...]] = {
+        "flooring": (
+            "\u0623\u0631\u0636",
+            "\u0627\u0631\u0636",
+            "\u0627\u0644\u0623\u0631\u0636",
+            "\u0627\u0644\u0627\u0631\u0636",
+            "\u0623\u0631\u0636\u064a\u0629",
+            "\u0627\u0631\u0636\u064a\u0647",
+            "\u0623\u0631\u0636\u064a\u0627\u062a",
+            "\u0627\u0631\u0636\u064a\u0627\u062a",
+            "\u0628\u0644\u0627\u0637",
+            "\u0633\u064a\u0631\u0627\u0645\u064a\u0643",
+            "\u0628\u0648\u0631\u0633\u0644\u0627\u0646",
+            "\u0631\u062e\u0627\u0645",
+            "\u0628\u0627\u0631\u0643\u064a\u0647",
+            "\u0642\u0644\u0639 \u0627\u0644\u0623\u0631\u0636",
+            "\u0642\u0644\u0639 \u0627\u0644\u0627\u0631\u0636",
+            "\u062a\u063a\u064a\u064a\u0631 \u0627\u0644\u0623\u0631\u0636",
+            "\u062a\u063a\u064a\u064a\u0631 \u0627\u0644\u0627\u0631\u0636",
+            "\u062a\u0628\u062f\u064a\u0644 \u0627\u0644\u0623\u0631\u0636",
+            "\u062a\u0628\u062f\u064a\u0644 \u0627\u0644\u0627\u0631\u0636",
+            "\u0641\u0631\u0634 \u0627\u0644\u0623\u0631\u0636",
+            "\u0641\u0631\u0634 \u0627\u0644\u0627\u0631\u0636",
+            "\u062a\u062c\u062f\u064a\u062f \u0627\u0644\u0623\u0631\u0636",
+            "\u062a\u062c\u062f\u064a\u062f \u0627\u0644\u0627\u0631\u0636",
+        ),
+        "maler": ("\u062f\u0647\u0627\u0646", "\u062f\u0647\u0646", "\u0637\u0644\u0627\u0621", "\u0645\u0639\u062c\u0648\u0646", "\u0635\u0646\u0641\u0631\u0647", "\u0635\u0646\u0641\u0631\u0629"),
+        "feuchtigkeitsschutz": ("\u0639\u0632\u0644", "\u0639\u0632\u0644 \u0645\u0627\u0626\u064a", "\u0631\u0637\u0648\u0628\u0647", "\u0631\u0637\u0648\u0628\u0629", "\u062a\u0633\u0631\u064a\u0628", "\u062a\u0633\u0631\u0628"),
+        "plumbing": ("\u0635\u062d\u064a", "\u0635\u062d\u064a\u0647", "\u0635\u062d\u064a\u0629", "\u0633\u0628\u0627\u0643\u0647", "\u0633\u0628\u0627\u0643\u0629", "\u0645\u0648\u0627\u0633\u064a\u0631", "\u0635\u0631\u0641", "\u0645\u062c\u0644\u0649", "\u0645\u063a\u0633\u0644\u0647", "\u0645\u063a\u0633\u0644\u0629", "\u062f\u0634", "\u062e\u0644\u0627\u0637"),
+        "carpentry": ("\u0646\u062c\u0627\u0631\u0647", "\u0646\u062c\u0627\u0631\u0629", "\u062e\u0634\u0628", "\u062e\u0632\u0627\u0626\u0646", "\u0631\u0641\u0648\u0641", "\u0627\u0628\u0648\u0627\u0628", "\u0623\u0628\u0648\u0627\u0628"),
+        "electrical": ("\u0643\u0647\u0631\u0628\u0627\u0621", "\u0643\u0647\u0631\u0628\u0627", "\u062a\u0645\u062f\u064a\u062f \u0643\u0647\u0631\u0628\u0627\u0621", "\u0644\u0648\u062d\u0647 \u0643\u0647\u0631\u0628\u0627\u0626\u064a\u0647", "\u0644\u0648\u062d\u0629 \u0643\u0647\u0631\u0628\u0627\u0626\u064a\u0629", "\u0627\u0646\u0627\u0631\u0647", "\u0625\u0646\u0627\u0631\u0629", "\u0627\u0636\u0627\u0621\u0647", "\u0625\u0636\u0627\u0621\u0629"),
+    }
+    for canonical, hints in arabic_skill_hints.items():
+        if any(_normalize_match_text(hint) in lowered for hint in hints):
             inferred.append(canonical)
     return _dedupe_strings(inferred)
 

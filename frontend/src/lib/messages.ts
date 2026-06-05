@@ -307,6 +307,8 @@ export type Messages = {
     unnamed: string;
     noCustomer: string;
     noIntakes: string;
+    deleteIntake: string;
+    deleteIntakeConfirm: string;
     conversation: string;
     conversationDesc: string;
     generateProposal: string;
@@ -314,6 +316,9 @@ export type Messages = {
     saveDraft: string;
     clearConversation: string;
     clearConversationConfirm: string;
+    deleteMessage: string;
+    deleteMessageConfirm: string;
+    deletingMessage: string;
     clearAllFields: string;
     clearAllFieldsConfirm: string;
     noConversation: string;
@@ -738,6 +743,8 @@ export const messages: Record<Locale, Messages> = {
       unnamed: 'Unbenannter Intake',
       noCustomer: 'Kein Kunde',
       noIntakes: 'Noch keine Intakes vorhanden.',
+      deleteIntake: 'Intake loeschen',
+      deleteIntakeConfirm: 'Diesen Intake vollstaendig loeschen? Nachrichten und Intake-Daten werden entfernt. Bereits erstellte Kunden und Auftraege bleiben erhalten.',
       conversation: 'Konversation',
       conversationDesc: 'Erfasste Anforderungen mit Gemini-Unterstuetzung',
       generateProposal: 'Vorschlag erzeugen',
@@ -745,6 +752,9 @@ export const messages: Record<Locale, Messages> = {
       saveDraft: 'Entwurf speichern',
       clearConversation: 'Nachrichten leeren',
       clearConversationConfirm: 'Konversation wirklich leeren? Die gespeicherten Nachrichten dieses Intakes werden entfernt.',
+      deleteMessage: 'Nachricht loeschen',
+      deleteMessageConfirm: 'Diese Nachricht wirklich loeschen? Die Intake-Daten werden aus den verbleibenden Nachrichten neu aufgebaut.',
+      deletingMessage: 'Wird geloescht...',
       clearAllFields: 'Alle Felder leeren',
       clearAllFieldsConfirm: 'Alle Felder dieses Intakes leeren? Nachrichten und der Intake-Eintrag bleiben erhalten.',
       noConversation: 'Noch keine Unterhaltung.',
@@ -1162,6 +1172,8 @@ export const messages: Record<Locale, Messages> = {
       unnamed: 'Untitled intake',
       noCustomer: 'No customer',
       noIntakes: 'No intakes yet.',
+      deleteIntake: 'Delete intake',
+      deleteIntakeConfirm: 'Delete this intake completely? Its messages and intake data will be removed. Already-created customers and orders will remain.',
       conversation: 'Conversation',
       conversationDesc: 'Captured requirements with Gemini support',
       generateProposal: 'Generate proposal',
@@ -1169,6 +1181,9 @@ export const messages: Record<Locale, Messages> = {
       saveDraft: 'Save draft',
       clearConversation: 'Clear messages',
       clearConversationConfirm: 'Clear this conversation? The saved messages for this intake will be removed.',
+      deleteMessage: 'Delete message',
+      deleteMessageConfirm: 'Delete this message? Intake memory will be rebuilt from the remaining messages.',
+      deletingMessage: 'Deleting...',
       clearAllFields: 'Clear all fields',
       clearAllFieldsConfirm: 'Clear all fields for this intake? Messages and the intake record will be kept.',
       noConversation: 'No conversation yet.',
@@ -1792,6 +1807,8 @@ export const messages: Record<Locale, Messages> = {
       unnamed: 'استقبال بدون عنوان',
       noCustomer: 'بدون عميل',
       noIntakes: 'لا توجد حالات استقبال بعد.',
+      deleteIntake: '\u062d\u0630\u0641 \u0627\u0644\u0627\u0633\u062a\u0642\u0628\u0627\u0644',
+      deleteIntakeConfirm: '\u0647\u0644 \u062a\u0631\u064a\u062f \u062d\u0630\u0641 \u062d\u0627\u0644\u0629 \u0627\u0644\u0627\u0633\u062a\u0642\u0628\u0627\u0644 \u0628\u0627\u0644\u0643\u0627\u0645\u0644\u061f \u0633\u062a\u064f\u062d\u0630\u0641 \u0631\u0633\u0627\u0626\u0644\u0647\u0627 \u0648\u0628\u064a\u0627\u0646\u0627\u062a\u0647\u0627\u060c \u0648\u0633\u062a\u0628\u0642\u0649 \u0627\u0644\u0637\u0644\u0628\u0627\u062a \u0648\u0627\u0644\u0639\u0645\u0644\u0627\u0621 \u0627\u0644\u0630\u064a\u0646 \u0623\u064f\u0646\u0634\u0626\u0648\u0627 \u0633\u0627\u0628\u0642\u064b\u0627.',
       conversation: 'المحادثة',
       conversationDesc: 'المتطلبات المسجلة بدعم Gemini',
       generateProposal: 'إنشاء العرض',
@@ -1799,6 +1816,9 @@ export const messages: Record<Locale, Messages> = {
       saveDraft: 'حفظ المسودة',
       clearConversation: 'مسح الرسائل',
       clearConversationConfirm: 'هل تريد مسح هذه المحادثة؟ سيتم حذف الرسائل المحفوظة لهذا الإدخال.',
+      deleteMessage: '\u062d\u0630\u0641 \u0627\u0644\u0631\u0633\u0627\u0644\u0629',
+      deleteMessageConfirm: '\u0647\u0644 \u062a\u0631\u064a\u062f \u062d\u0630\u0641 \u0647\u0630\u0647 \u0627\u0644\u0631\u0633\u0627\u0644\u0629\u061f \u0633\u062a\u064f\u0639\u0627\u062f \u0645\u0639\u0627\u0644\u062c\u0629 \u0645\u0639\u0644\u0648\u0645\u0627\u062a \u0627\u0644\u0627\u0633\u062a\u0642\u0628\u0627\u0644 \u0627\u0639\u062a\u0645\u0627\u062f\u064b\u0627 \u0639\u0644\u0649 \u0627\u0644\u0631\u0633\u0627\u0626\u0644 \u0627\u0644\u0645\u062a\u0628\u0642\u064a\u0629.',
+      deletingMessage: '\u062c\u0627\u0631\u064d \u0627\u0644\u062d\u0630\u0641...',
       clearAllFields: '\u0645\u0633\u062d \u0643\u0644 \u0627\u0644\u062d\u0642\u0648\u0644',
       clearAllFieldsConfirm: '\u0647\u0644 \u062a\u0631\u064a\u062f \u0645\u0633\u062d \u0643\u0644 \u0627\u0644\u062d\u0642\u0648\u0644 \u0644\u0647\u0630\u0627 \u0627\u0644\u0625\u062f\u062e\u0627\u0644\u061f \u0633\u062a\u0628\u0642\u0649 \u0627\u0644\u0631\u0633\u0627\u0626\u0644 \u0648\u0633\u062c\u0644 \u0627\u0644\u0625\u062f\u062e\u0627\u0644 \u0645\u062d\u0641\u0648\u0638\u064a\u0646.',
       noConversation: 'لا توجد محادثة بعد.',
