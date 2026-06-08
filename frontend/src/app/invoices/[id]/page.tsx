@@ -59,7 +59,8 @@ export default function InvoiceDetailPage() {
 
   const totalAmount = useMemo(() => {
     if (!invoice) return 0;
-    return invoice.lines.reduce((sum, line) => sum + Number(line.lineAmount || 0), 0);
+    const lineTotal = invoice.lines.reduce((sum, line) => sum + Number(line.lineAmount || 0), 0);
+    return lineTotal > 0 ? lineTotal : Number(invoice.pauschalAmount || 0);
   }, [invoice]);
 
   async function load() {

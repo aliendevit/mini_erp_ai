@@ -18,14 +18,20 @@ type Invoice = {
   createdAt: string;
   totalHours?: number;
   lineCount?: number;
+  pauschalAmount?: string | number | null;
 };
 
 export default function InvoicesPage() {
-  const { messages: m } = useI18n();
+  const { locale, messages: m } = useI18n();
   const [items, setItems] = useState<Invoice[]>([]);
   const [status, setStatus] = useState<string>('');
   const [from, setFrom] = useState<Date | undefined>(undefined);
   const [to, setTo] = useState<Date | undefined>(undefined);
+  const pageCopy = locale === 'ar'
+    ? { kicker: 'الفوترة', description: 'مراجعة حالة الفواتير وتصفيتها وفتح مستندات الفوترة بسرعة.', createWorkshopInvoice: 'إنشاء فاتورة ورشة' }
+    : locale === 'de'
+      ? { kicker: 'Abrechnung', description: 'Rechnungsstatus pr?fen, nach Zeitraum filtern und Rechnungsdokumente schnell ?ffnen.', createWorkshopInvoice: 'Werkstattrechnung erstellen' }
+      : { kicker: 'Billing', description: 'Review invoice status, filter by period, and open billing documents quickly.', createWorkshopInvoice: 'Create workshop invoice' };
 
   const query = useMemo(() => {
     const params = new URLSearchParams();
@@ -64,9 +70,9 @@ export default function InvoicesPage() {
     <div className="entity-page invoices-page">
       <section className="entity-hero card">
         <div className="entity-hero-copy">
-          <div className="entity-kicker">Billing</div>
+          <div className="entity-kicker">{pageCopy.kicker}</div>
           <h1>{m.invoicesPage.heading}</h1>
-          <p>Review invoice status, filter by period, and open billing documents quickly.</p>
+          <p>{pageCopy.description}</p>
         </div>
         <div className="entity-hero-stats">
             <div className="entity-stat"><strong>{items.length}</strong><span>{m.nav.invoices}</span></div>
@@ -105,6 +111,12 @@ export default function InvoicesPage() {
             {m.invoicesPage.toDrafts}
           </Link>
         </div>
+
+        <div style={{ alignSelf: 'end' }}>
+          <Link className="btn primary" href="/invoices/new">
+            {pageCopy.createWorkshopInvoice}
+          </Link>
+        </div>
       </div>
 
       <div className="spacer" />
@@ -117,6 +129,7 @@ export default function InvoicesPage() {
             <th>{m.common.status}</th>
             <th>{m.common.hours}</th>
             <th>{m.invoicesPage.positions}</th>
+            <th>{m.common.amount}</th>
             <th>{m.common.created}</th>
             <th style={{ width: 260 }}>{m.common.actions}</th>
           </tr>
@@ -129,6 +142,7 @@ export default function InvoicesPage() {
               <td>{statusLabel(invoice.status)}</td>
               <td>{Number(invoice.totalHours ?? 0).toFixed(2)}</td>
               <td>{invoice.lineCount ?? m.common.none}</td>
+              <td>{invoice.pauschalAmount != null ? Number(invoice.pauschalAmount).toFixed(2) : m.common.none}</td>
               <td>{invoice.createdAt?.substring(0, 10)}</td>
               <td>
                 <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
@@ -146,7 +160,7 @@ export default function InvoicesPage() {
           ))}
           {items.length === 0 && (
             <tr>
-              <td colSpan={7} className="muted">{m.invoicesPage.noInvoices}</td>
+              <td colSpan={8} className="muted">{m.invoicesPage.noInvoices}</td>
             </tr>
           )}
         </tbody>

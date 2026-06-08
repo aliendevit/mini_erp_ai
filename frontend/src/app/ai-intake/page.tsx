@@ -1536,7 +1536,7 @@ export default function AIIntakePage() {
     if (!selectedId) return alert(m.aiIntakePage.createIntakeFirst);
     const preview = typeof window !== 'undefined' ? window.open('', '_blank', 'noopener,noreferrer') : null;
     if (preview) {
-      preview.document.write('<p style="font-family: sans-serif; padding: 16px;">Preparing PDF...</p>');
+      preview.document.write(`<p style="font-family: sans-serif; padding: 16px;">${pdfPreparingText}</p>`);
     }
     setBusy(true);
     try {
@@ -1964,6 +1964,22 @@ export default function AIIntakePage() {
     : locale === 'de'
       ? { showAll: 'Alle anzeigen', showLess: 'Weniger anzeigen', hiddenSessions: 'weitere Sitzungen werden fuer bessere Performance ausgeblendet', hiddenMessages: 'aeltere Nachrichten werden fuer bessere Performance ausgeblendet' }
       : { showAll: 'Show all', showLess: 'Show less', hiddenSessions: 'more sessions are hidden for better performance', hiddenMessages: 'older messages are hidden for better performance' };
+  const pdfPreparingText = locale === 'ar' ? 'جاري تحضير ملف بي دي إف...' : locale === 'de' ? 'PDF wird vorbereitet...' : 'Preparing PDF...';
+  const relationshipLabels: Record<string, string> = locale === 'ar'
+    ? { known: 'معروفة', preferred: 'مفضلة', one_time: 'مرة واحدة', blocked: 'محظورة' }
+    : locale === 'de'
+      ? { known: 'Bekannt', preferred: 'Bevorzugt', one_time: 'Einmalig', blocked: 'Gesperrt' }
+      : { known: 'Known', preferred: 'Preferred', one_time: 'One time', blocked: 'Blocked' };
+  const paymentTypeLabels: Record<string, string> = locale === 'ar'
+    ? { deposit: 'عربون', advance: 'دفعة مقدمة', installment: 'قسط', final: 'دفعة نهائية', other: 'أخرى' }
+    : locale === 'de'
+      ? { deposit: 'Anzahlung', advance: 'Vorauszahlung', installment: 'Rate', final: 'Schlusszahlung', other: 'Sonstiges' }
+      : { deposit: 'Deposit', advance: 'Advance', installment: 'Installment', final: 'Final', other: 'Other' };
+  const paymentStatusLabels: Record<string, string> = locale === 'ar'
+    ? { planned: 'مخططة', received: 'مستلمة', refunded: 'مسترجعة', canceled: 'ملغاة' }
+    : locale === 'de'
+      ? { planned: 'Geplant', received: 'Erhalten', refunded: 'Erstattet', canceled: 'Storniert' }
+      : { planned: 'Planned', received: 'Received', refunded: 'Refunded', canceled: 'Canceled' };
 
   const intakeSidebar = (
 <div className="card ai-intake-sidebar">
@@ -2680,10 +2696,10 @@ export default function AIIntakePage() {
                   <div>
                     <label>{x.relation}</label>
                     <select value={workshop.relationshipStatus || 'known'} onChange={(event) => updateExternalWorkshop(index, { relationshipStatus: event.target.value })}>
-                      <option value="known">known</option>
-                      <option value="preferred">preferred</option>
-                      <option value="one_time">one_time</option>
-                      <option value="blocked">blocked</option>
+                      <option value="known">{relationshipLabels.known}</option>
+                      <option value="preferred">{relationshipLabels.preferred}</option>
+                      <option value="one_time">{relationshipLabels.one_time}</option>
+                      <option value="blocked">{relationshipLabels.blocked}</option>
                     </select>
                   </div>
                 </div>
@@ -2716,20 +2732,20 @@ export default function AIIntakePage() {
                   <div>
                     <label>{x.paymentType}</label>
                     <select value={payment.type || 'deposit'} onChange={(event) => updatePaymentDraft(index, { type: event.target.value })}>
-                      <option value="deposit">deposit</option>
-                      <option value="advance">advance</option>
-                      <option value="installment">installment</option>
-                      <option value="final">final</option>
-                      <option value="other">other</option>
+                      <option value="deposit">{paymentTypeLabels.deposit}</option>
+                      <option value="advance">{paymentTypeLabels.advance}</option>
+                      <option value="installment">{paymentTypeLabels.installment}</option>
+                      <option value="final">{paymentTypeLabels.final}</option>
+                      <option value="other">{paymentTypeLabels.other}</option>
                     </select>
                   </div>
                   <div>
                     <label>{x.paymentStatus}</label>
                     <select value={payment.status || 'planned'} onChange={(event) => updatePaymentDraft(index, { status: event.target.value })}>
-                      <option value="planned">planned</option>
-                      <option value="received">received</option>
-                      <option value="refunded">refunded</option>
-                      <option value="canceled">canceled</option>
+                      <option value="planned">{paymentStatusLabels.planned}</option>
+                      <option value="received">{paymentStatusLabels.received}</option>
+                      <option value="refunded">{paymentStatusLabels.refunded}</option>
+                      <option value="canceled">{paymentStatusLabels.canceled}</option>
                     </select>
                   </div>
                   <div>

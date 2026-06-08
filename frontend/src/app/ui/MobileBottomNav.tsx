@@ -50,6 +50,11 @@ export function MobileBottomNav() {
   const pathname = usePathname();
   const [moreOpen, setMoreOpen] = useState(false);
   const moreLabel = locale === 'ar' ? '\u0627\u0644\u0645\u0632\u064a\u062f' : locale === 'de' ? 'Mehr' : 'More';
+  const mobileLabels = locale === 'ar'
+    ? { close: '\u0625\u063a\u0644\u0627\u0642 \u0627\u0644\u0642\u0627\u0626\u0645\u0629', nav: '\u062a\u0646\u0642\u0644 \u0627\u0644\u0647\u0627\u062a\u0641' }
+    : locale === 'de'
+      ? { close: 'Menue schliessen', nav: 'Mobile Navigation' }
+      : { close: 'Close menu', nav: 'Mobile navigation' };
 
   useEffect(() => {
     setMoreOpen(false);
@@ -72,7 +77,7 @@ export function MobileBottomNav() {
 
   return (
     <>
-      {moreOpen && <button type="button" className="mobile-bottom-nav-backdrop" aria-label="Close menu" onClick={() => setMoreOpen(false)} />}
+      {moreOpen && <button type="button" className="mobile-bottom-nav-backdrop" aria-label={mobileLabels.close} onClick={() => setMoreOpen(false)} />}
       <div className={`mobile-more-sheet ${moreOpen ? 'open' : ''}`} aria-hidden={!moreOpen}>
         <div className="mobile-more-handle" />
         <div className="mobile-more-title">{moreLabel}</div>
@@ -85,7 +90,7 @@ export function MobileBottomNav() {
           ))}
         </div>
       </div>
-      <nav className="mobile-bottom-nav" aria-label="Mobile navigation">
+      <nav className="mobile-bottom-nav" aria-label={mobileLabels.nav}>
         <div className="mobile-bottom-nav-bar">
           {primaryItems.map((item) => (
             <Link key={item.href} href={item.href} className={isActive(pathname, item.href) ? 'active' : undefined}>

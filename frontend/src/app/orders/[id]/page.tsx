@@ -120,7 +120,7 @@ function address(site: Site, fallback: string) {
 }
 
 export default function OrderDetailPage() {
-  const { messages: m } = useI18n();
+  const { locale, messages: m } = useI18n();
   const params = useParams<{ id: string }>();
   const router = useRouter();
   const id = params?.id;
@@ -332,6 +332,11 @@ export default function OrderDetailPage() {
 
   const statusLabels = m.statuses.order;
   const trackingLabels = m.trackingPage.labels;
+  const actionCopy = locale === 'ar'
+    ? { track: 'تتبع', ai: 'ذكاء', bill: 'فاتورة', workshopInvoice: 'فاتورة ورشة', workshopInvoiceDescription: 'إنشاء فاتورة ثابتة لمواقع العمل وحزم الورش.' }
+    : locale === 'de'
+      ? { track: 'TRACK', ai: 'KI', bill: 'RECHNUNG', workshopInvoice: 'Werkstattrechnung', workshopInvoiceDescription: 'Pauschalrechnung f?r Standorte und Werkstatt-Leistungspakete erstellen.' }
+      : { track: 'TRACK', ai: 'AI', bill: 'BILL', workshopInvoice: 'Workshop invoice', workshopInvoiceDescription: 'Create a fixed invoice for site and workshop work packages.' };
 
   return (
     <div className="card">
@@ -350,7 +355,7 @@ export default function OrderDetailPage() {
 
       <div className="order-action-panel">
         <Link className="order-action-card tracking" href={`/orders/${order.id}/tracking`}>
-          <span className="order-action-icon">TRACK</span>
+          <span className="order-action-icon">{actionCopy.track}</span>
           <span>
             <strong>{trackingLabels.openTracking || m.trackingPage.heading}</strong>
             <small>{m.trackingPage.description}</small>
@@ -358,10 +363,18 @@ export default function OrderDetailPage() {
           <b>{'>'}</b>
         </Link>
         <Link className="order-action-card monitoring" href={`/orders/${order.id}/monitoring`}>
-          <span className="order-action-icon">AI</span>
+          <span className="order-action-icon">{actionCopy.ai}</span>
           <span>
             <strong>{trackingLabels.openMonitoring || m.trackingPage.aiAnalysis.title}</strong>
             <small>{m.trackingPage.aiAnalysis.description}</small>
+          </span>
+          <b>{'>'}</b>
+        </Link>
+        <Link className="order-action-card" href={`/invoices/new?orderId=${order.id}`}>
+          <span className="order-action-icon">{actionCopy.bill}</span>
+          <span>
+            <strong>{actionCopy.workshopInvoice}</strong>
+            <small>{actionCopy.workshopInvoiceDescription}</small>
           </span>
           <b>{'>'}</b>
         </Link>

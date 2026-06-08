@@ -325,7 +325,7 @@ function warningTargetTab(warning: TrackingWarning): TabKey {
 }
 
 export default function ProjectTrackingSection({ orderId }: { orderId: string }) {
-  const { messages } = useI18n();
+  const { locale, messages } = useI18n();
   const x = messages.trackingPage;
   const labels = x.labels;
   const [tracking, setTracking] = useState<TrackingPayload | null>(null);
@@ -554,6 +554,12 @@ export default function ProjectTrackingSection({ orderId }: { orderId: string })
     );
   }
 
+  const actionCopy = locale === 'ar'
+    ? { order: 'طلب', ai: 'ذكاء', sync: 'تحديث' }
+    : locale === 'de'
+      ? { order: 'AUFTRAG', ai: 'KI', sync: 'SYNC' }
+      : { order: 'ORDER', ai: 'AI', sync: 'SYNC' };
+
   return (
     <div className="card tracking-page">
       <div className="tracking-hero">
@@ -563,15 +569,15 @@ export default function ProjectTrackingSection({ orderId }: { orderId: string })
         </div>
         <div className="project-page-actions">
           <Link className="project-page-action" href={`/orders/${orderId}`}>
-            <span>ORDER</span>
+            <span>{actionCopy.order}</span>
             <strong>{messages.common.back}</strong>
           </Link>
           <Link className="project-page-action monitoring" href={`/orders/${orderId}/monitoring`}>
-            <span>AI</span>
+            <span>{actionCopy.ai}</span>
             <strong>{labels.openMonitoring || x.aiAnalysis.title}</strong>
           </Link>
           <button className="project-page-action" onClick={loadTracking}>
-            <span>SYNC</span>
+            <span>{actionCopy.sync}</span>
             <strong>{x.refresh}</strong>
           </button>
         </div>
@@ -938,8 +944,8 @@ function WarningList({ warnings, labels, emptyLabel, onOpenAction, onRefresh }: 
               <button type="button" className="btn secondary" style={{ padding: '4px 8px', fontSize: 12, lineHeight: 1 }} title={labels.whatToDo || 'What should I do?'} onClick={() => showWarningGuidance(warning, labels)}>
                 {labels.info || 'Info'}
               </button>
-              {onOpenAction && <button type="button" className="btn secondary" style={{ padding: '4px 8px', fontSize: 12, lineHeight: 1 }} onClick={() => onOpenAction(warning)}>{labels.openFix || 'Open fix'}</button>}
-              {onRefresh && <button type="button" className="btn secondary" style={{ padding: '4px 8px', fontSize: 12, lineHeight: 1 }} onClick={onRefresh}>{labels.refreshWarnings || 'Check again'}</button>}
+              {onOpenAction && <button type="button" className="btn secondary" style={{ padding: '4px 8px', fontSize: 12, lineHeight: 1 }} onClick={() => onOpenAction(warning)}>{labels.openFix || 'فتح الحل'}</button>}
+              {onRefresh && <button type="button" className="btn secondary" style={{ padding: '4px 8px', fontSize: 12, lineHeight: 1 }} onClick={onRefresh}>{labels.refreshWarnings || 'إعادة الفحص'}</button>}
             </div>
           </div>
         </div>

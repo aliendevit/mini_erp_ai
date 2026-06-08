@@ -1,10 +1,13 @@
-'use client';
+"use client";
 
 import Link from 'next/link';
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
+import { useForm } from 'react-hook-form';
+import { zodResolver } from '@hookform/resolvers/zod';
 
 import { useI18n } from '../../lib/i18n';
 import { apiGet, apiJson } from '../../lib/api';
+import { fieldClass, SiteFormData, siteSchema, validationCopy } from '../../lib/form-validation';
 import { getPageSlice, ListPager } from '../ui/ListPager';
 
 type Customer = { id: string; companyName: string };
@@ -24,7 +27,7 @@ type Site = {
 
 const LIST_PAGE_SIZE = 12;
 
-const empty: Partial<Site> = {
+const empty: SiteFormData = {
   orderId: '',
   siteName: '',
   street: '',
@@ -34,20 +37,44 @@ const empty: Partial<Site> = {
   isActive: true,
 };
 
+function OptionalBadge({ label }: { label: string }) {
+  return <span className="optional-badge">{label}</span>;
+}
+
+function FieldError({ message }: { message?: string }) {
+  return message ? <div className="field-error">{message}</div> : null;
+}
+
 export default function SitesPage() {
-  const { messages: m } = useI18n();
+  const { locale, messages: m } = useI18n();
   const [orders, setOrders] = useState<Order[]>([]);
   const [items, setItems] = useState<Site[]>([]);
-  const [form, setForm] = useState<Partial<Site>>(empty);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [page, setPage] = useState(1);
+  const v = validationCopy(locale);
+  const schema = useMemo(() => siteSchema(v, {
+    orderId: m.common.order,
+    siteName: m.common.name,
+  }), [locale, m]);
+  const pageCopy = locale === 'ar'
+    ? { kicker: '\u0645\u0646\u0627\u0637\u0642 \u0627\u0644\u0639\u0645\u0644', description: '\u062a\u0646\u0638\u064a\u0645 \u0645\u0648\u0627\u0642\u0639 \u0627\u0644\u0639\u0645\u0644 \u0648\u0631\u0628\u0637 \u0643\u0644 \u0645\u0648\u0642\u0639 \u0628\u0627\u0644\u0637\u0644\u0628 \u0627\u0644\u0646\u0634\u0637.' }
+    : locale === 'de'
+      ? { kicker: 'Arbeitsbereiche', description: 'Projektstandorte organisieren und jeden Standort mit dem aktiven Auftrag verbinden.' }
+      : { kicker: 'Work Areas', description: 'Organize project locations and connect each site back to its active order.' };
+
+  const { register, handleSubmit, reset, setValue, getValues, formState: { errors } } = useForm<SiteFormData>({
+    resolver: zodResolver(schema) as any,
+    defaultValues: empty,
+    mode: 'onTouched',
+    reValidateMode: 'onChange',
+  });
 
   async function load() {
     const [nextOrders, nextSites] = await Promise.all([apiGet<Order[]>('/orders'), apiGet<Site[]>('/sites')]);
     setOrders(nextOrders);
     setItems(nextSites);
-    if (!editingId && !form.orderId && nextOrders.length > 0) {
-      setForm((current) => ({ ...current, orderId: nextOrders[0].id }));
+    if (!editingId && !getValues('orderId') && nextOrders.length > 0) {
+      setValue('orderId', nextOrders[0].id, { shouldValidate: true });
     }
   }
 
@@ -58,26 +85,32 @@ export default function SitesPage() {
 
   function startNew() {
     setEditingId(null);
-    setForm({ ...empty, orderId: orders[0]?.id || '' });
+    reset({ ...empty, orderId: orders[0]?.id || '' });
   }
 
   function startEdit(site: Site) {
     setEditingId(site.id);
-    setForm({ ...site, street: site.street || '', zipCode: site.zipCode || '', city: site.city || '', notes: site.notes || '' });
+    reset({
+      orderId: site.orderId,
+      siteName: site.siteName || '',
+      street: site.street || '',
+      zipCode: site.zipCode || '',
+      city: site.city || '',
+      notes: site.notes || '',
+      isActive: site.isActive,
+    });
   }
 
-  async function save() {
-    if (!form.orderId) return alert(m.sitesPage.orderRequired);
-    if (!form.siteName?.trim()) return alert(m.sitesPage.siteNameRequired);
+  async function save(data: SiteFormData) {
     try {
       const payload = {
-        orderId: form.orderId,
-        siteName: form.siteName,
-        street: form.street || null,
-        zipCode: form.zipCode || null,
-        city: form.city || null,
-        notes: form.notes || null,
-        isActive: true,
+        orderId: data.orderId,
+        siteName: data.siteName,
+        street: data.street || null,
+        zipCode: data.zipCode || null,
+        city: data.city || null,
+        notes: data.notes || null,
+        isActive: data.isActive,
       };
       if (editingId) {
         await apiJson(`/sites/${editingId}`, 'PUT', payload);
@@ -108,106 +141,107 @@ export default function SitesPage() {
     <div className="entity-page sites-page">
       <section className="entity-hero card">
         <div className="entity-hero-copy">
-          <div className="entity-kicker">Work Areas</div>
+          <div className="entity-kicker">{pageCopy.kicker}</div>
           <h1>{m.sitesPage.heading}</h1>
-          <p>Organize project locations and connect each site back to its active order.</p>
+          <p>{pageCopy.description}</p>
         </div>
         <div className="entity-hero-stats">
-            <div className="entity-stat"><strong>{items.length}</strong><span>{m.nav.sites}</span></div>
-            <div className="entity-stat"><strong>{items.filter((item) => item.isActive).length}</strong><span>{m.common.status}</span></div>
-            <div className="entity-stat"><strong>{orders.length}</strong><span>{m.nav.orders}</span></div>
+          <div className="entity-stat"><strong>{items.length}</strong><span>{m.nav.sites}</span></div>
+          <div className="entity-stat"><strong>{items.filter((item) => item.isActive).length}</strong><span>{m.common.status}</span></div>
+          <div className="entity-stat"><strong>{orders.length}</strong><span>{m.nav.orders}</span></div>
         </div>
       </section>
 
+      <form className="card entity-panel validated-form" onSubmit={handleSubmit(save)} noValidate>
+        <h2>{m.sitesPage.heading}</h2>
+        <div className="muted">{m.sitesPage.description}</div>
+        <div className="form-required-note"><span>*</span> {v.requiredLabel}</div>
+
+        <div className="spacer" />
+
+        <div className="row">
+          <div className="form-field">
+            <label>{m.common.order} *</label>
+            <select {...register('orderId')} className={fieldClass(!!errors.orderId)} aria-invalid={!!errors.orderId}>
+              {orders.map((order) => (
+                <option key={order.id} value={order.id}>{order.title} ({order.customer?.companyName || m.common.none})</option>
+              ))}
+              {orders.length === 0 && <option value="">{m.sitesPage.noOrdersOption}</option>}
+            </select>
+            <FieldError message={errors.orderId?.message} />
+          </div>
+          <div className="form-field">
+            <label>{m.common.name} *</label>
+            <input {...register('siteName')} className={fieldClass(!!errors.siteName)} aria-invalid={!!errors.siteName} />
+            <FieldError message={errors.siteName?.message} />
+          </div>
+          <div className="form-field">
+            <label>{m.common.city} <OptionalBadge label={v.optional} /></label>
+            <input {...register('city')} className={fieldClass(!!errors.city)} />
+            <FieldError message={errors.city?.message} />
+          </div>
+        </div>
+
+        <div className="spacer" />
+
+        <div className="row">
+          <div className="form-field">
+            <label>{m.common.street} <OptionalBadge label={v.optional} /></label>
+            <input {...register('street')} className={fieldClass(!!errors.street)} />
+            <FieldError message={errors.street?.message} />
+          </div>
+          <div className="form-field">
+            <label>{m.common.zipCode} <OptionalBadge label={v.optional} /></label>
+            <input {...register('zipCode')} className={fieldClass(!!errors.zipCode)} />
+            <FieldError message={errors.zipCode?.message} />
+          </div>
+          <div className="form-field">
+            <label>{m.common.notes} <OptionalBadge label={v.optional} /></label>
+            <input {...register('notes')} className={fieldClass(!!errors.notes)} />
+            <FieldError message={errors.notes?.message} />
+          </div>
+        </div>
+
+        <div className="spacer" />
+        <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+          <button className="btn primary" type="submit">{editingId ? m.common.save : m.common.create}</button>
+          <button className="btn" type="button" onClick={startNew}>{m.common.createNew}</button>
+        </div>
+      </form>
+
       <div className="card entity-panel">
-      <h2>{m.sitesPage.heading}</h2>
-      <div className="muted">{m.sitesPage.description}</div>
-
-      <div className="spacer" />
-
-      <div className="row">
-        <div>
-          <label>{m.common.order} *</label>
-          <select value={form.orderId || ''} onChange={(event) => setForm({ ...form, orderId: event.target.value })}>
-            {orders.map((order) => (
-              <option key={order.id} value={order.id}>
-                {order.title} ({order.customer?.companyName || m.common.none})
-              </option>
-            ))}
-            {orders.length === 0 && <option value="">{m.sitesPage.noOrdersOption}</option>}
-          </select>
-        </div>
-        <div>
-          <label>{m.common.name} *</label>
-          <input value={form.siteName || ''} onChange={(event) => setForm({ ...form, siteName: event.target.value })} />
-        </div>
-        <div>
-          <label>{m.common.city}</label>
-          <input value={form.city || ''} onChange={(event) => setForm({ ...form, city: event.target.value })} />
-        </div>
-      </div>
-
-      <div className="spacer" />
-
-      <div className="row">
-        <div>
-          <label>{m.common.street}</label>
-          <input value={form.street || ''} onChange={(event) => setForm({ ...form, street: event.target.value })} />
-        </div>
-        <div>
-          <label>{m.common.zipCode}</label>
-          <input value={form.zipCode || ''} onChange={(event) => setForm({ ...form, zipCode: event.target.value })} />
-        </div>
-        <div>
-          <label>{m.common.notes}</label>
-          <input value={form.notes || ''} onChange={(event) => setForm({ ...form, notes: event.target.value })} />
-        </div>
-      </div>
-
-      <div className="spacer" />
-      <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-        <button className="btn primary" onClick={save}>{editingId ? m.common.save : m.common.create}</button>
-        <button className="btn" onClick={startNew}>{m.common.createNew}</button>
-      </div>
-
-      <div className="spacer" />
-
-      <table className="table">
-        <thead>
-          <tr>
-            <th>{m.common.site}</th>
-            <th>{m.common.order}</th>
-            <th>{m.common.customer}</th>
-            <th style={{ width: 260 }}>{m.common.actions}</th>
-          </tr>
-        </thead>
-        <tbody>
-          {pagedItems.map((site) => (
-            <tr key={site.id}>
-              <td>{site.siteName}</td>
-              <td>{site.order?.title || m.common.none}</td>
-              <td>{site.order?.customer?.companyName || m.common.none}</td>
-              <td>
-                <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-                  <Link className="btn" href={`/orders/${site.orderId}`}>{m.sitesPage.toOrder}</Link>
-                  <button className="btn" onClick={() => startEdit(site)}>{m.common.edit}</button>
-                  <button className="btn danger" onClick={() => del(site.id)}>{m.common.delete}</button>
-                </div>
-              </td>
-            </tr>
-          ))}
-          {items.length === 0 && (
+        <table className="table">
+          <thead>
             <tr>
-              <td colSpan={4} className="muted">{m.sitesPage.noSites}</td>
+              <th>{m.common.site}</th>
+              <th>{m.common.order}</th>
+              <th>{m.common.customer}</th>
+              <th style={{ width: 260 }}>{m.common.actions}</th>
             </tr>
-          )}
-        </tbody>
-      </table>
-      <ListPager page={page} total={items.length} pageSize={LIST_PAGE_SIZE} onPageChange={setPage} />
-
-      <div className="spacer" />
-      <div className="muted">{m.sitesPage.deleteHint}</div>
+          </thead>
+          <tbody>
+            {pagedItems.map((site) => (
+              <tr key={site.id}>
+                <td>{site.siteName}</td>
+                <td>{site.order?.title || m.common.none}</td>
+                <td>{site.order?.customer?.companyName || m.common.none}</td>
+                <td>
+                  <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+                    <Link className="btn" href={`/orders/${site.orderId}`}>{m.sitesPage.toOrder}</Link>
+                    <button className="btn" onClick={() => startEdit(site)}>{m.common.edit}</button>
+                    <button className="btn danger" onClick={() => del(site.id)}>{m.common.delete}</button>
+                  </div>
+                </td>
+              </tr>
+            ))}
+            {items.length === 0 && <tr><td colSpan={4} className="muted">{m.sitesPage.noSites}</td></tr>}
+          </tbody>
+        </table>
+        <ListPager page={page} total={items.length} pageSize={LIST_PAGE_SIZE} onPageChange={setPage} />
+        <div className="spacer" />
+        <div className="muted">{m.sitesPage.deleteHint}</div>
       </div>
     </div>
   );
 }
+

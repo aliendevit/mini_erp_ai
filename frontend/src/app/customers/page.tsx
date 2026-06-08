@@ -1,9 +1,18 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
+import { useForm } from 'react-hook-form';
+import { zodResolver } from '@hookform/resolvers/zod';
 
 import { useI18n } from '../../lib/i18n';
 import { apiGet, apiJson } from '../../lib/api';
+import {
+  CustomerFormData,
+  customerSchema,
+  fieldClass,
+  sanitizePhoneInput,
+  validationCopy,
+} from '../../lib/form-validation';
 import { getPageSlice, ListPager } from '../ui/ListPager';
 
 type Customer = {
@@ -22,7 +31,7 @@ type Customer = {
 
 const LIST_PAGE_SIZE = 12;
 
-const empty: Partial<Customer> = {
+const empty: CustomerFormData = {
   companyName: '',
   street: '',
   zipCode: '',
@@ -35,13 +44,54 @@ const empty: Partial<Customer> = {
   notes: '',
 };
 
+function toForm(customer: Customer): CustomerFormData {
+  return {
+    companyName: customer.companyName || '',
+    street: customer.street || '',
+    zipCode: customer.zipCode || '',
+    city: customer.city || '',
+    country: customer.country || 'DE',
+    vatId: customer.vatId || '',
+    contactName: customer.contactName || '',
+    contactPhone: customer.contactPhone || '',
+    contactEmail: customer.contactEmail || '',
+    notes: customer.notes || '',
+  };
+}
+
+function OptionalBadge({ label }: { label: string }) {
+  return <span className="optional-badge">{label}</span>;
+}
+
+function FieldError({ message }: { message?: string }) {
+  return message ? <div className="field-error">{message}</div> : null;
+}
+
 export default function CustomersPage() {
-  const { messages: m } = useI18n();
+  const { locale, messages: m } = useI18n();
   const [items, setItems] = useState<Customer[]>([]);
-  const [form, setForm] = useState<Partial<Customer>>(empty);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [page, setPage] = useState(1);
   const [loading, setLoading] = useState(false);
+  const v = validationCopy(locale);
+  const schema = useMemo(() => customerSchema(v, {
+    companyName: m.customersPage.companyName,
+    contactPhone: m.common.phone,
+    contactEmail: m.common.email,
+  }), [locale, m]);
+  const pageCopy = locale === 'ar'
+    ? { kicker: '\u0625\u062f\u0627\u0631\u0629 \u0627\u0644\u0639\u0645\u0644\u0627\u0621', description: '\u0625\u062f\u0627\u0631\u0629 \u0628\u064a\u0627\u0646\u0627\u062a \u0627\u0644\u0639\u0645\u0644\u0627\u0621 \u0648\u0645\u0639\u0644\u0648\u0645\u0627\u062a \u0627\u0644\u062a\u0648\u0627\u0635\u0644 \u0648\u0627\u0644\u0641\u0648\u062a\u0631\u0629.', edit: '\u062a\u0639\u062f\u064a\u0644', new: '\u062c\u062f\u064a\u062f' }
+    : locale === 'de'
+      ? { kicker: 'CRM', description: 'Kundenprofile, Kontaktdaten und abrechnungsbereite Geschaeftsinformationen verwalten.', edit: 'Bearbeiten', new: 'Neu' }
+      : { kicker: 'CRM', description: 'Manage customer profiles, contact details, and billing-ready business information.', edit: 'Edit', new: 'New' };
+
+  const { register, handleSubmit, reset, formState: { errors, touchedFields } } = useForm<CustomerFormData>({
+    resolver: zodResolver(schema) as any,
+    defaultValues: empty,
+    mode: 'onTouched',
+    reValidateMode: 'onChange',
+  });
+  const phoneField = register('contactPhone');
 
   async function load() {
     const data = await apiGet<Customer[]>('/customers');
@@ -54,22 +104,26 @@ export default function CustomersPage() {
 
   function startNew() {
     setEditingId(null);
-    setForm({ ...empty });
+    reset({ ...empty });
   }
 
   function startEdit(customer: Customer) {
     setEditingId(customer.id);
-    setForm({ ...customer });
+    reset(toForm(customer));
   }
 
-  async function save() {
-    if (!form.companyName?.trim()) return alert(m.customersPage.companyNameRequired);
+  async function save(data: CustomerFormData) {
     setLoading(true);
     try {
+      const payload = {
+        ...data,
+        contactPhone: data.contactPhone || null,
+        contactEmail: data.contactEmail || null,
+      };
       if (editingId) {
-        await apiJson(`/customers/${editingId}`, 'PUT', form);
+        await apiJson(`/customers/${editingId}`, 'PUT', payload);
       } else {
-        await apiJson('/customers', 'POST', form);
+        await apiJson('/customers', 'POST', payload);
       }
       await load();
       startNew();
@@ -97,120 +151,142 @@ export default function CustomersPage() {
     <div className="entity-page customers-page">
       <section className="entity-hero card">
         <div className="entity-hero-copy">
-          <div className="entity-kicker">CRM</div>
+          <div className="entity-kicker">{pageCopy.kicker}</div>
           <h1>{m.customersPage.heading}</h1>
-          <p>Manage customer profiles, contact details, and billing-ready business information.</p>
+          <p>{pageCopy.description}</p>
         </div>
         <div className="entity-hero-stats">
-            <div className="entity-stat"><strong>{items.length}</strong><span>{m.nav.customers}</span></div>
-            <div className="entity-stat"><strong>{items.filter((item) => item.contactEmail || item.contactPhone).length}</strong><span>{m.common.contact}</span></div>
-            <div className="entity-stat"><strong>{editingId ? 'Edit' : 'New'}</strong><span>{m.common.status}</span></div>
+          <div className="entity-stat"><strong>{items.length}</strong><span>{m.nav.customers}</span></div>
+          <div className="entity-stat"><strong>{items.filter((item) => item.contactEmail || item.contactPhone).length}</strong><span>{m.common.contact}</span></div>
+          <div className="entity-stat"><strong>{editingId ? pageCopy.edit : pageCopy.new}</strong><span>{m.common.status}</span></div>
         </div>
       </section>
 
+      <form className="card entity-panel validated-form" onSubmit={handleSubmit(save)} noValidate>
+        <h2>{m.customersPage.heading}</h2>
+        <div className="form-required-note"><span>*</span> {v.requiredLabel}</div>
+
+        <div className="row">
+          <div className="form-field">
+            <label>{m.customersPage.companyName} *</label>
+            <input {...register('companyName')} className={fieldClass(!!errors.companyName)} aria-invalid={!!errors.companyName} />
+            <FieldError message={errors.companyName?.message} />
+          </div>
+          <div className="form-field">
+            <label>{m.customersPage.vatId} <OptionalBadge label={v.optional} /></label>
+            <input {...register('vatId')} className={fieldClass(!!errors.vatId)} />
+            <FieldError message={errors.vatId?.message} />
+          </div>
+          <div className="form-field">
+            <label>{m.common.country} <OptionalBadge label={v.optional} /></label>
+            <input {...register('country')} className={fieldClass(!!errors.country)} />
+            <FieldError message={errors.country?.message} />
+          </div>
+        </div>
+
+        <div className="spacer" />
+
+        <div className="row">
+          <div className="form-field">
+            <label>{m.common.street} <OptionalBadge label={v.optional} /></label>
+            <input {...register('street')} className={fieldClass(!!errors.street)} />
+            <FieldError message={errors.street?.message} />
+          </div>
+          <div className="form-field">
+            <label>{m.common.zipCode} <OptionalBadge label={v.optional} /></label>
+            <input {...register('zipCode')} className={fieldClass(!!errors.zipCode)} />
+            <FieldError message={errors.zipCode?.message} />
+          </div>
+          <div className="form-field">
+            <label>{m.common.city} <OptionalBadge label={v.optional} /></label>
+            <input {...register('city')} className={fieldClass(!!errors.city)} />
+            <FieldError message={errors.city?.message} />
+          </div>
+        </div>
+
+        <div className="spacer" />
+
+        <div className="row">
+          <div className="form-field">
+            <label>{m.customersPage.contactName} <OptionalBadge label={v.optional} /></label>
+            <input {...register('contactName')} className={fieldClass(!!errors.contactName)} />
+            <FieldError message={errors.contactName?.message} />
+          </div>
+          <div className="form-field">
+            <label>{m.common.phone} <OptionalBadge label={v.optional} /></label>
+            <input
+              {...phoneField}
+              type="tel"
+              inputMode="tel"
+              className={fieldClass(!!errors.contactPhone)}
+              aria-invalid={!!errors.contactPhone}
+              onChange={(event) => {
+                event.target.value = sanitizePhoneInput(event.target.value);
+                phoneField.onChange(event);
+              }}
+            />
+            <FieldError message={errors.contactPhone?.message} />
+          </div>
+          <div className="form-field">
+            <label>{m.common.email} <OptionalBadge label={v.optional} /></label>
+            <input {...register('contactEmail')} type="email" className={fieldClass(!!errors.contactEmail)} aria-invalid={!!errors.contactEmail} />
+            <FieldError message={errors.contactEmail?.message} />
+          </div>
+        </div>
+
+        <div className="spacer" />
+        <div className="form-field">
+          <label>{m.common.notes} <OptionalBadge label={v.optional} /></label>
+          <textarea {...register('notes')} className={fieldClass(!!errors.notes)} />
+          <FieldError message={errors.notes?.message} />
+        </div>
+
+        <div className="spacer" />
+
+        <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+          <button className="btn primary" type="submit" disabled={loading}>
+            {editingId ? m.common.save : m.common.create}
+          </button>
+          <button className="btn" type="button" onClick={startNew} disabled={loading}>
+            {m.common.createNew}
+          </button>
+        </div>
+      </form>
+
       <div className="card entity-panel">
-      <h2>{m.customersPage.heading}</h2>
-
-      <div className="row">
-        <div>
-          <label>{m.customersPage.companyName} *</label>
-          <input value={form.companyName || ''} onChange={(event) => setForm({ ...form, companyName: event.target.value })} />
-        </div>
-        <div>
-          <label>{m.customersPage.vatId}</label>
-          <input value={form.vatId || ''} onChange={(event) => setForm({ ...form, vatId: event.target.value })} />
-        </div>
-        <div>
-          <label>{m.common.country}</label>
-          <input value={form.country || ''} onChange={(event) => setForm({ ...form, country: event.target.value })} />
-        </div>
-      </div>
-
-      <div className="spacer" />
-
-      <div className="row">
-        <div>
-          <label>{m.common.street}</label>
-          <input value={form.street || ''} onChange={(event) => setForm({ ...form, street: event.target.value })} />
-        </div>
-        <div>
-          <label>{m.common.zipCode}</label>
-          <input value={form.zipCode || ''} onChange={(event) => setForm({ ...form, zipCode: event.target.value })} />
-        </div>
-        <div>
-          <label>{m.common.city}</label>
-          <input value={form.city || ''} onChange={(event) => setForm({ ...form, city: event.target.value })} />
-        </div>
-      </div>
-
-      <div className="spacer" />
-
-      <div className="row">
-        <div>
-          <label>{m.customersPage.contactName}</label>
-          <input value={form.contactName || ''} onChange={(event) => setForm({ ...form, contactName: event.target.value })} />
-        </div>
-        <div>
-          <label>{m.common.phone}</label>
-          <input value={form.contactPhone || ''} onChange={(event) => setForm({ ...form, contactPhone: event.target.value })} />
-        </div>
-        <div>
-          <label>{m.common.email}</label>
-          <input value={form.contactEmail || ''} onChange={(event) => setForm({ ...form, contactEmail: event.target.value })} />
-        </div>
-      </div>
-
-      <div className="spacer" />
-      <div>
-        <label>{m.common.notes}</label>
-        <textarea value={form.notes || ''} onChange={(event) => setForm({ ...form, notes: event.target.value })} />
-      </div>
-
-      <div className="spacer" />
-
-      <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-        <button className="btn primary" onClick={save} disabled={loading}>
-          {editingId ? m.common.save : m.common.create}
-        </button>
-        <button className="btn" onClick={startNew} disabled={loading}>
-          {m.common.createNew}
-        </button>
-      </div>
-
-      <div className="spacer" />
-
-      <table className="table">
-        <thead>
-          <tr>
-            <th>{m.customersPage.company}</th>
-            <th>{m.customersPage.place}</th>
-            <th>{m.common.contact}</th>
-            <th style={{ width: 220 }}>{m.common.actions}</th>
-          </tr>
-        </thead>
-        <tbody>
-          {pagedItems.map((customer) => (
-            <tr key={customer.id}>
-              <td>{customer.companyName}</td>
-              <td>{[customer.zipCode, customer.city].filter(Boolean).join(' ') || m.common.none}</td>
-              <td>{customer.contactName || m.common.none}</td>
-              <td>
-                <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-                  <button className="btn" onClick={() => startEdit(customer)}>{m.common.edit}</button>
-                  <button className="btn danger" onClick={() => del(customer.id)}>{m.common.delete}</button>
-                </div>
-              </td>
-            </tr>
-          ))}
-          {items.length === 0 && (
+        <table className="table">
+          <thead>
             <tr>
-              <td colSpan={4} className="muted">{m.customersPage.noCustomers}</td>
+              <th>{m.customersPage.company}</th>
+              <th>{m.customersPage.place}</th>
+              <th>{m.common.contact}</th>
+              <th style={{ width: 220 }}>{m.common.actions}</th>
             </tr>
-          )}
-        </tbody>
-      </table>
-      <ListPager page={page} total={items.length} pageSize={LIST_PAGE_SIZE} onPageChange={setPage} />
+          </thead>
+          <tbody>
+            {pagedItems.map((customer) => (
+              <tr key={customer.id}>
+                <td>{customer.companyName}</td>
+                <td>{[customer.zipCode, customer.city].filter(Boolean).join(' ') || m.common.none}</td>
+                <td>{customer.contactName || m.common.none}</td>
+                <td>
+                  <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+                    <button className="btn" onClick={() => startEdit(customer)}>{m.common.edit}</button>
+                    <button className="btn danger" onClick={() => del(customer.id)}>{m.common.delete}</button>
+                  </div>
+                </td>
+              </tr>
+            ))}
+            {items.length === 0 && (
+              <tr>
+                <td colSpan={4} className="muted">{m.customersPage.noCustomers}</td>
+              </tr>
+            )}
+          </tbody>
+        </table>
+        <ListPager page={page} total={items.length} pageSize={LIST_PAGE_SIZE} onPageChange={setPage} />
       </div>
     </div>
   );
 }
+

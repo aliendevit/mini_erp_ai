@@ -404,10 +404,13 @@ export default function ProjectMonitoringSection({ orderId }: { orderId: string 
     try {
       await apiJson<MonitoringAlert>(`/orders/${orderId}/tracking/alerts/${item.id}`, 'PATCH', {
         status: 'resolved',
-        resolutionNote: 'Resolved from AI Monitoring page.',
+        resolutionNote: locale === 'ar'
+          ? 'تم إغلاق التنبيه من واجهة المراقبة.'
+          : locale === 'de'
+            ? 'Warnung wurde im Monitoring geschlossen.'
+            : 'Alert resolved from monitoring.',
       });
-      const alertData = await apiGet<{ items: MonitoringAlert[] }>(`/orders/${orderId}/tracking/alerts?status=open`);
-      setAlerts(alertData.items || []);
+      await loadTracking();
     } catch (error: any) {
       alert(error.message);
     } finally {
@@ -415,14 +418,14 @@ export default function ProjectMonitoringSection({ orderId }: { orderId: string 
     }
   }
 
-  useEffect(() => {
-    loadTracking().catch((error) => alert(error.message));
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [orderId]);
+  if (loading && !tracking) return <div className="card">{x.loading}</div>;
+  if (!tracking) return <div className="card">{x.noRecords}</div>;
 
-  if (loading || !tracking) {
-    return <div className="card"><div className="muted">{x.loading}</div></div>;
-  }
+  const actionCopy = locale === 'ar'
+    ? { kicker: 'المراقبة الذكية', order: 'طلب', track: 'تتبع', sync: 'تحديث', ai: 'ذكاء' }
+    : locale === 'de'
+      ? { kicker: 'KI-MONITORING', order: 'AUFTRAG', track: 'TRACK', sync: 'SYNC', ai: 'KI' }
+      : { kicker: 'AI MONITORING', order: 'ORDER', track: 'TRACK', sync: 'SYNC', ai: 'AI' };
 
   const warnings = tracking.dashboard.warnings || [];
   const planned = tracking.dashboard.plannedProgressPercent;
@@ -435,7 +438,7 @@ export default function ProjectMonitoringSection({ orderId }: { orderId: string 
     <div className="monitoring-page">
       <section className={`monitoring-hero monitoring-hero-${healthStatus || 'unknown'}`}>
         <div className="monitoring-hero-main">
-          <div className="monitoring-kicker">AI MONITORING</div>
+          <div className="monitoring-kicker">{actionCopy.kicker}</div>
           <h2>{x.aiAnalysis.title}</h2>
           <p>{x.aiAnalysis.description}</p>
           <div className="monitoring-hero-status">
@@ -446,19 +449,19 @@ export default function ProjectMonitoringSection({ orderId }: { orderId: string 
         </div>
         <div className="project-page-actions">
           <Link className="project-page-action" href={`/orders/${orderId}`}>
-            <span>ORDER</span>
+            <span>{actionCopy.order}</span>
             <strong>{messages.common.back}</strong>
           </Link>
           <Link className="project-page-action tracking" href={`/orders/${orderId}/tracking`}>
-            <span>TRACK</span>
+            <span>{actionCopy.track}</span>
             <strong>{labels.openTracking || x.heading}</strong>
           </Link>
           <button className="project-page-action" onClick={loadTracking}>
-            <span>SYNC</span>
+            <span>{actionCopy.sync}</span>
             <strong>{x.refresh}</strong>
           </button>
           <button className="project-page-action primary" onClick={analyzeProjectTracking} disabled={analyzing}>
-            <span>AI</span>
+            <span>{actionCopy.ai}</span>
             <strong>{analyzing ? x.aiAnalysis.analyzing : x.aiAnalysis.analyze}</strong>
           </button>
         </div>

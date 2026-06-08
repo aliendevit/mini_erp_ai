@@ -8,7 +8,7 @@ import { useI18n } from '../../lib/i18n';
 import { AppSettingsMenu } from './AppSettingsMenu';
 
 export function AppHeader() {
-  const { messages } = useI18n();
+  const { locale, messages } = useI18n();
   const pathname = usePathname();
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
   const navItems = [
@@ -27,6 +27,12 @@ export function AppHeader() {
     setMobileNavOpen(false);
   }, [pathname]);
 
+  const headerCopy = locale === 'ar'
+    ? { brand: 'بوابة عمران الإدارية المدعومة بالذكاء الاصطناعي', powered: 'مدعوم بالذكاء الاصطناعي', menu: 'القائمة', nav: 'التنقل الرئيسي' }
+    : locale === 'de'
+      ? { brand: 'Omran Verwaltungsportal mit KI', powered: 'Powered by AI', menu: 'Men?', nav: 'Hauptnavigation' }
+      : { brand: 'Omran management portal powered by AI', powered: 'Powered by AI', menu: 'Menu', nav: 'Main navigation' };
+
   function isActive(href: string) {
     if (href === '/') return pathname === '/';
     if (href === '/invoices') return pathname === '/invoices' || pathname.startsWith('/invoices/') && !pathname.startsWith('/invoices/drafts');
@@ -39,9 +45,9 @@ export function AppHeader() {
         <Link href="/" className="brand-logo-link" aria-label={messages.app.title}>
           <img className="brand-logo-image" src="/omran-logo.png" alt={messages.app.title} />
         </Link>
-        <div className="brand-copy brand-copy-compact" aria-label="Omran management portal powered by AI">
+        <div className="brand-copy brand-copy-compact" aria-label={headerCopy.brand}>
           <div className="brand-title-small">بوابة الإدارة</div>
-          <div className="brand-powered">Powered by AI</div>
+          <div className="brand-powered">{headerCopy.powered}</div>
         </div>
       </div>
 
@@ -55,11 +61,11 @@ export function AppHeader() {
             aria-controls="app-mobile-nav"
           >
             <span className="app-mobile-menu-icon" aria-hidden="true" />
-            Menu
+            {headerCopy.menu}
           </button>
           <AppSettingsMenu />
         </div>
-        <nav id="app-mobile-nav" className={`app-nav ${mobileNavOpen ? 'open' : ''}`} aria-label="Main navigation">
+        <nav id="app-mobile-nav" className={`app-nav ${mobileNavOpen ? 'open' : ''}`} aria-label={headerCopy.nav}>
           {navItems.map((item) => (
             <Link key={item.href} href={item.href} className={isActive(item.href) ? 'active' : undefined}>
               {item.label}
