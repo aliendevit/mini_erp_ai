@@ -76,8 +76,14 @@ export default function CustomersPage() {
   const v = validationCopy(locale);
   const schema = useMemo(() => customerSchema(v, {
     companyName: m.customersPage.companyName,
+    street: m.common.street,
+    city: m.common.city,
+    country: m.common.country,
+    vatId: m.customersPage.vatId,
+    contactName: m.customersPage.contactName,
     contactPhone: m.common.phone,
     contactEmail: m.common.email,
+    notes: m.common.notes,
   }), [locale, m]);
   const pageCopy = locale === 'ar'
     ? { kicker: '\u0625\u062f\u0627\u0631\u0629 \u0627\u0644\u0639\u0645\u0644\u0627\u0621', description: '\u0625\u062f\u0627\u0631\u0629 \u0628\u064a\u0627\u0646\u0627\u062a \u0627\u0644\u0639\u0645\u0644\u0627\u0621 \u0648\u0645\u0639\u0644\u0648\u0645\u0627\u062a \u0627\u0644\u062a\u0648\u0627\u0635\u0644 \u0648\u0627\u0644\u0641\u0648\u062a\u0631\u0629.', edit: '\u062a\u0639\u062f\u064a\u0644', new: '\u062c\u062f\u064a\u062f' }
@@ -173,12 +179,12 @@ export default function CustomersPage() {
             <FieldError message={errors.companyName?.message} />
           </div>
           <div className="form-field">
-            <label>{m.customersPage.vatId} <OptionalBadge label={v.optional} /></label>
+            <label>{m.customersPage.vatId} *</label>
             <input {...register('vatId')} className={fieldClass(!!errors.vatId)} />
             <FieldError message={errors.vatId?.message} />
           </div>
           <div className="form-field">
-            <label>{m.common.country} <OptionalBadge label={v.optional} /></label>
+            <label>{m.common.country} *</label>
             <input {...register('country')} className={fieldClass(!!errors.country)} />
             <FieldError message={errors.country?.message} />
           </div>
@@ -188,7 +194,7 @@ export default function CustomersPage() {
 
         <div className="row">
           <div className="form-field">
-            <label>{m.common.street} <OptionalBadge label={v.optional} /></label>
+            <label>{m.common.street} *</label>
             <input {...register('street')} className={fieldClass(!!errors.street)} />
             <FieldError message={errors.street?.message} />
           </div>
@@ -198,7 +204,7 @@ export default function CustomersPage() {
             <FieldError message={errors.zipCode?.message} />
           </div>
           <div className="form-field">
-            <label>{m.common.city} <OptionalBadge label={v.optional} /></label>
+            <label>{m.common.city} *</label>
             <input {...register('city')} className={fieldClass(!!errors.city)} />
             <FieldError message={errors.city?.message} />
           </div>
@@ -208,12 +214,12 @@ export default function CustomersPage() {
 
         <div className="row">
           <div className="form-field">
-            <label>{m.customersPage.contactName} <OptionalBadge label={v.optional} /></label>
+            <label>{m.customersPage.contactName} *</label>
             <input {...register('contactName')} className={fieldClass(!!errors.contactName)} />
             <FieldError message={errors.contactName?.message} />
           </div>
           <div className="form-field">
-            <label>{m.common.phone} <OptionalBadge label={v.optional} /></label>
+            <label>{m.common.phone} *</label>
             <input
               {...phoneField}
               type="tel"
@@ -236,7 +242,7 @@ export default function CustomersPage() {
 
         <div className="spacer" />
         <div className="form-field">
-          <label>{m.common.notes} <OptionalBadge label={v.optional} /></label>
+          <label>{m.common.notes} *</label>
           <textarea {...register('notes')} className={fieldClass(!!errors.notes)} />
           <FieldError message={errors.notes?.message} />
         </div>

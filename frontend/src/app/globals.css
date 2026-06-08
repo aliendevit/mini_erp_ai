@@ -5089,3 +5089,84 @@ select[aria-invalid='true']:focus {
   height: 18px;
   accent-color: var(--primary);
 }
+
+/* Clickable native calendar control */
+.date-input-field {
+  min-width: 0;
+}
+
+.date-input-control {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 46px;
+  gap: 8px;
+  align-items: center;
+}
+
+.date-picker-button {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 46px;
+  height: 42px;
+  margin: 0;
+  border: 1px solid color-mix(in srgb, var(--border) 72%, var(--primary) 28%);
+  border-radius: 14px;
+  background: color-mix(in srgb, var(--card) 82%, var(--primary) 18%);
+  color: var(--text);
+  cursor: pointer;
+  overflow: hidden;
+  transition: transform 0.14s ease, border-color 0.14s ease, box-shadow 0.14s ease;
+}
+
+.date-picker-button:hover {
+  transform: translateY(-1px);
+  border-color: color-mix(in srgb, var(--primary) 70%, var(--border));
+  box-shadow: 0 10px 24px color-mix(in srgb, var(--primary) 18%, transparent);
+}
+
+.date-picker-button input[type='date'] {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  opacity: 0.01;
+  cursor: pointer;
+  color-scheme: light;
+}
+
+/* Keep text readable on tinted AI intake fields */
+.ai-form-card input,
+.ai-form-card textarea,
+.ai-site-card input,
+.ai-site-card textarea,
+.ai-site-card select,
+.ai-proposal-form input,
+.ai-proposal-form textarea,
+.ai-proposal-form select {
+  color: #f8fafc !important;
+  caret-color: #ffffff !important;
+  -webkit-text-fill-color: #f8fafc;
+}
+
+.ai-form-card input::placeholder,
+.ai-form-card textarea::placeholder,
+.ai-site-card input::placeholder,
+.ai-site-card textarea::placeholder,
+.ai-proposal-form input::placeholder,
+.ai-proposal-form textarea::placeholder {
+  color: rgba(226, 232, 240, 0.82) !important;
+}
+
+html[data-theme='light'] .ai-form-card input,
+html[data-theme='light'] .ai-form-card textarea,
+html[data-theme='light'] .ai-site-card input,
+html[data-theme='light'] .ai-site-card textarea,
+html[data-theme='light'] .ai-site-card select,
+html[data-theme='light'] .ai-proposal-form input,
+html[data-theme='light'] .ai-proposal-form textarea,
+html[data-theme='light'] .ai-proposal-form select {
+  color: #0f172a !important;
+  caret-color: #0f172a !important;
+  -webkit-text-fill-color: #0f172a;
+}

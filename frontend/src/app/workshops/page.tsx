@@ -88,8 +88,12 @@ export default function WorkshopsPage() {
   const v = validationCopy(locale);
   const schema = useMemo(() => workshopSchema(v, {
     name: t.name,
+    contactName: t.contactPerson,
     phone: t.phone,
     email: t.email,
+    specialties: t.specialties,
+    notes: t.notes,
+    availabilityNote: t.availabilityNote,
   }), [locale, t.name, t.phone, t.email]);
   const { register, handleSubmit, reset, formState: { errors } } = useForm<WorkshopFormData>({
     resolver: zodResolver(schema) as any,
@@ -208,12 +212,12 @@ export default function WorkshopsPage() {
             <FieldError message={errors.name?.message} />
           </div>
           <div className="form-field">
-            <label>{t.contactPerson} <OptionalBadge label={v.optional} /></label>
+            <label>{t.contactPerson} *</label>
             <input {...register('contactName')} className={fieldClass(!!errors.contactName)} />
             <FieldError message={errors.contactName?.message} />
           </div>
           <div className="form-field">
-            <label>{t.phone} <OptionalBadge label={v.optional} /></label>
+            <label>{t.phone} *</label>
             <input
               {...phoneField}
               type="tel"
@@ -237,12 +241,12 @@ export default function WorkshopsPage() {
         <div className="spacer" />
         <div className="row">
           <div className="form-field">
-            <label>{t.specialties} <OptionalBadge label={v.optional} /></label>
+            <label>{t.specialties} *</label>
             <textarea {...register('specialties')} className={fieldClass(!!errors.specialties)} placeholder={t.specialtiesPlaceholder} />
             <FieldError message={errors.specialties?.message} />
           </div>
           <div className="form-field">
-            <label>{t.notes} <OptionalBadge label={v.optional} /></label>
+            <label>{t.notes} *</label>
             <textarea {...register('notes')} className={fieldClass(!!errors.notes)} />
             <FieldError message={errors.notes?.message} />
           </div>
@@ -262,7 +266,7 @@ export default function WorkshopsPage() {
 
         <div className="spacer" />
         <div className="form-field">
-          <label>{t.availabilityNote} <OptionalBadge label={v.optional} /></label>
+          <label>{t.availabilityNote} *</label>
           <input {...register('availabilityNote')} className={fieldClass(!!errors.availabilityNote)} placeholder={t.availabilityPlaceholder} />
           <FieldError message={errors.availabilityNote?.message} />
         </div>

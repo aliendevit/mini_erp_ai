@@ -53,7 +53,9 @@ export default function OrdersPage() {
   const v = validationCopy(locale);
   const schema = useMemo(() => orderSchema(v, {
     customerId: m.common.customer,
+    orderNumber: m.ordersPage.orderNumber,
     title: m.common.title,
+    description: m.common.description,
     defaultHourlyRate: m.ordersPage.hourlyRate,
   }), [locale, m]);
   const pageCopy = locale === 'ar'
@@ -172,7 +174,7 @@ export default function OrdersPage() {
             <FieldError message={errors.customerId?.message} />
           </div>
           <div className="form-field">
-            <label>{m.ordersPage.orderNumber} <OptionalBadge label={v.optional} /></label>
+            <label>{m.ordersPage.orderNumber} *</label>
             <input {...register('orderNumber')} className={fieldClass(!!errors.orderNumber)} />
             <FieldError message={errors.orderNumber?.message} />
           </div>
@@ -213,7 +215,7 @@ export default function OrdersPage() {
 
         <div className="spacer" />
         <div className="form-field">
-          <label>{m.common.description} <OptionalBadge label={v.optional} /></label>
+          <label>{m.common.description} *</label>
           <textarea {...register('description')} className={fieldClass(!!errors.description)} />
           <FieldError message={errors.description?.message} />
         </div>

@@ -55,6 +55,9 @@ export default function SitesPage() {
   const schema = useMemo(() => siteSchema(v, {
     orderId: m.common.order,
     siteName: m.common.name,
+    street: m.common.street,
+    city: m.common.city,
+    notes: m.common.notes,
   }), [locale, m]);
   const pageCopy = locale === 'ar'
     ? { kicker: '\u0645\u0646\u0627\u0637\u0642 \u0627\u0644\u0639\u0645\u0644', description: '\u062a\u0646\u0638\u064a\u0645 \u0645\u0648\u0627\u0642\u0639 \u0627\u0644\u0639\u0645\u0644 \u0648\u0631\u0628\u0637 \u0643\u0644 \u0645\u0648\u0642\u0639 \u0628\u0627\u0644\u0637\u0644\u0628 \u0627\u0644\u0646\u0634\u0637.' }
@@ -176,7 +179,7 @@ export default function SitesPage() {
             <FieldError message={errors.siteName?.message} />
           </div>
           <div className="form-field">
-            <label>{m.common.city} <OptionalBadge label={v.optional} /></label>
+            <label>{m.common.city} *</label>
             <input {...register('city')} className={fieldClass(!!errors.city)} />
             <FieldError message={errors.city?.message} />
           </div>
@@ -186,7 +189,7 @@ export default function SitesPage() {
 
         <div className="row">
           <div className="form-field">
-            <label>{m.common.street} <OptionalBadge label={v.optional} /></label>
+            <label>{m.common.street} *</label>
             <input {...register('street')} className={fieldClass(!!errors.street)} />
             <FieldError message={errors.street?.message} />
           </div>
@@ -196,7 +199,7 @@ export default function SitesPage() {
             <FieldError message={errors.zipCode?.message} />
           </div>
           <div className="form-field">
-            <label>{m.common.notes} <OptionalBadge label={v.optional} /></label>
+            <label>{m.common.notes} *</label>
             <input {...register('notes')} className={fieldClass(!!errors.notes)} />
             <FieldError message={errors.notes?.message} />
           </div>
