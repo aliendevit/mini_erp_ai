@@ -18,11 +18,16 @@ type Group = {
 type Payload = { groupBy: string; groups: Group[] };
 
 export default function DraftsPage() {
-  const { messages: m } = useI18n();
+  const { locale, messages: m } = useI18n();
   const [groupBy, setGroupBy] = useState<'employee' | 'site' | 'order'>('employee');
   const [groups, setGroups] = useState<Group[]>([]);
   const [from, setFrom] = useState<Date | undefined>(undefined);
   const [to, setTo] = useState<Date | undefined>(undefined);
+  const pageCopy = locale === 'ar'
+    ? { kicker: 'مركز المسودات', description: 'تجميع مسودات الفواتير ومراجعة الإجماليات ودمجها في فواتير نهائية.' }
+    : locale === 'de'
+      ? { kicker: 'Entwurfszentrale', description: 'Rechnungsentw?rfe gruppieren, abrechenbare Summen pr?fen und in finale Rechnungen zusammenf?hren.' }
+      : { kicker: 'Draft Center', description: 'Group draft invoice work, review billable totals, and merge into final invoices.' };
 
   const query = useMemo(() => {
     const params = new URLSearchParams();
@@ -46,9 +51,9 @@ export default function DraftsPage() {
     <div className="entity-page drafts-page">
       <section className="entity-hero card">
         <div className="entity-hero-copy">
-          <div className="entity-kicker">Draft Center</div>
+          <div className="entity-kicker">{pageCopy.kicker}</div>
           <h1>{m.invoiceDraftsPage.heading}</h1>
-          <p>Group draft invoice work, review billable totals, and merge into final invoices.</p>
+          <p>{pageCopy.description}</p>
         </div>
         <div className="entity-hero-stats">
             <div className="entity-stat"><strong>{groups.length}</strong><span>{m.common.group}</span></div>

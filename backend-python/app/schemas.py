@@ -200,6 +200,25 @@ class InvoiceUpdatePayload(BaseModel):
     pauschalAmount: float | None = None
 
 
+class WorkshopInvoiceItemPayload(BaseModel):
+    siteId: str | None = None
+    description: str
+    quantity: float = 1
+    unitPrice: float | None = None
+    totalAmount: float | None = None
+    workshopName: str | None = None
+    notes: str | None = None
+
+
+class WorkshopInvoiceCreatePayload(BaseModel):
+    orderId: str
+    status: Literal["draft", "final", "sent", "paid"] = "final"
+    issueDate: datetime | date | None = None
+    currency: str | None = None
+    notes: str | None = None
+    items: list[WorkshopInvoiceItemPayload]
+
+
 class InvoiceMergePayload(BaseModel):
     groupBy: Literal["employee", "site", "order"]
     key: str

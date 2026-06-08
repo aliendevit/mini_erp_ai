@@ -49,6 +49,8 @@ const copy = {
     orderNumber: 'Auftrag',
     status: 'Status',
     noDescription: 'Keine Beschreibung hinterlegt.',
+    flowLabel: 'Monitoring Ablauf',
+    statusFilterLabel: 'Projektstatus Filter',
   },
   en: {
     kicker: 'AI Monitoring',
@@ -74,6 +76,8 @@ const copy = {
     orderNumber: 'Order',
     status: 'Status',
     noDescription: 'No description added.',
+    flowLabel: 'Monitoring flow',
+    statusFilterLabel: 'Project status filter',
   },
   ar: {
     kicker: '\u0627\u0644\u0645\u0631\u0627\u0642\u0628\u0629 \u0627\u0644\u0630\u0643\u064a\u0629',
@@ -99,6 +103,8 @@ const copy = {
     orderNumber: '\u0631\u0642\u0645 \u0627\u0644\u0637\u0644\u0628',
     status: '\u0627\u0644\u062d\u0627\u0644\u0629',
     noDescription: '\u0644\u0627 \u064a\u0648\u062c\u062f \u0648\u0635\u0641 \u0645\u0633\u062c\u0644.',
+    flowLabel: '\u062e\u0637\u0648\u0627\u062a \u0627\u0644\u0645\u0631\u0627\u0642\u0628\u0629',
+    statusFilterLabel: '\u062a\u0635\u0641\u064a\u0629 \u062d\u0627\u0644\u0629 \u0627\u0644\u0645\u0634\u0631\u0648\u0639',
   },
 } as const;
 
@@ -164,7 +170,7 @@ export default function MonitoringIndexPage() {
           <div className="entity-kicker">{t.kicker}</div>
           <h1>{t.title}</h1>
           <p>{t.description}</p>
-          <div className="monitoring-picker-steps" aria-label="Monitoring flow">
+          <div className="monitoring-picker-steps" aria-label={t.flowLabel}>
             <span>1. {t.step1}</span>
             <span>2. {t.step2}</span>
             <span>3. {t.step3}</span>
@@ -183,7 +189,7 @@ export default function MonitoringIndexPage() {
             <label>{t.search}</label>
             <input value={query} onChange={(event) => setQuery(event.target.value)} placeholder={t.search} />
           </div>
-          <div className="monitoring-picker-filters" aria-label="Project status filter">
+          <div className="monitoring-picker-filters" aria-label={t.statusFilterLabel}>
             {filters.map((filter) => (
               <button key={filter} type="button" className={statusFilter === filter ? 'active' : ''} onClick={() => setStatusFilter(filter)}>
                 {t[filter]}

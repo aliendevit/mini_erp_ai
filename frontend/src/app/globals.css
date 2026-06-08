@@ -1,4 +1,4 @@
-﻿:root {
+:root {
   --bg: #0b0c0f;
   --card: #11131a;
   --text: #f2f4f8;
@@ -5008,4 +5008,84 @@ html[data-theme="construction"] .brand-logo-link {
   .brand-copy-compact {
     display: none;
   }
+}
+
+/* Professional client-side validation states */
+.validated-form .form-field {
+  min-width: 0;
+}
+
+.validated-form label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.optional-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  color: var(--muted);
+  background: color-mix(in srgb, var(--card) 78%, transparent);
+  font-size: 0.68rem;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  line-height: 1;
+  padding: 4px 8px;
+}
+
+.form-required-note {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 14px;
+  color: var(--muted);
+  font-size: 0.82rem;
+  font-weight: 700;
+}
+
+.form-required-note span {
+  color: #ef4444;
+  font-size: 1rem;
+}
+
+.field-error {
+  color: #ef4444;
+  font-size: 0.78rem;
+  font-weight: 700;
+  line-height: 1.35;
+  margin-top: 7px;
+}
+
+.form-control-invalid,
+input[aria-invalid='true'],
+textarea[aria-invalid='true'],
+select[aria-invalid='true'] {
+  border-color: color-mix(in srgb, #ef4444 78%, var(--border)) !important;
+  box-shadow: 0 0 0 3px color-mix(in srgb, #ef4444 16%, transparent) !important;
+}
+
+.form-control-invalid:focus,
+input[aria-invalid='true']:focus,
+textarea[aria-invalid='true']:focus,
+select[aria-invalid='true']:focus {
+  border-color: #ef4444 !important;
+  box-shadow: 0 0 0 4px color-mix(in srgb, #ef4444 22%, transparent) !important;
+}
+
+.checkbox-field {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  color: var(--text);
+  font-weight: 800;
+}
+
+.checkbox-field input {
+  width: 18px;
+  height: 18px;
+  accent-color: var(--primary);
 }

@@ -81,6 +81,12 @@ export function AppSettingsMenu() {
     } catch {}
   }
 
+  const t = locale === 'ar'
+    ? { settings: 'الإعدادات', systemSettings: 'إعدادات النظام', description: 'المظهر، اللغة، والإصدار', build: 'الإصدار', dark: 'الواجهة الافتراضية', construction: 'واجهة الورش الدافئة', light: 'واجهة فاتحة' }
+    : locale === 'de'
+      ? { settings: 'Einstellungen', systemSettings: 'Systemeinstellungen', description: 'Darstellung, Sprache und Version', build: 'Build', dark: 'Standard UI', construction: 'Warme Baustellen-UI', light: 'Helle UI' }
+      : { settings: 'Settings', systemSettings: 'System settings', description: 'Appearance, language, and version', build: 'Build', dark: 'Default UI', construction: 'Warm site UI', light: 'Bright UI' };
+
   return (
     <div className="settings-menu" ref={menuRef}>
       <button
@@ -94,15 +100,15 @@ export function AppSettingsMenu() {
           <path d="M12 15.5A3.5 3.5 0 1 0 12 8a3.5 3.5 0 0 0 0 7.5Z" />
           <path d="M19.4 15a1.8 1.8 0 0 0 .36 1.98l.04.04a2 2 0 1 1-2.83 2.83l-.04-.04A1.8 1.8 0 0 0 15 19.4a1.8 1.8 0 0 0-1 .6V20a2 2 0 1 1-4 0v-.06a1.8 1.8 0 0 0-1-.6 1.8 1.8 0 0 0-1.98.36l-.04.04a2 2 0 1 1-2.83-2.83l.04-.04A1.8 1.8 0 0 0 4.6 15a1.8 1.8 0 0 0-.6-1H4a2 2 0 1 1 0-4h.06a1.8 1.8 0 0 0 .6-1 1.8 1.8 0 0 0-.36-1.98l-.04-.04a2 2 0 1 1 2.83-2.83l.04.04A1.8 1.8 0 0 0 9 4.6a1.8 1.8 0 0 0 1-.6V4a2 2 0 1 1 4 0v.06a1.8 1.8 0 0 0 1 .6 1.8 1.8 0 0 0 1.98-.36l.04-.04a2 2 0 1 1 2.83 2.83l-.04.04A1.8 1.8 0 0 0 19.4 9c.22.36.44.7.6 1H20a2 2 0 1 1 0 4h-.06a1.8 1.8 0 0 0-.54 1Z" />
         </svg>
-        <span>Settings</span>
+        <span>{t.settings}</span>
       </button>
 
       {open && (
         <div className="settings-menu-panel" role="menu">
           <div className="settings-menu-header">
             <div>
-              <strong>System settings</strong>
-              <small>Appearance, language, and version</small>
+              <strong>{t.systemSettings}</strong>
+              <small>{t.description}</small>
             </div>
             <span>{APP_VERSION}</span>
           </div>
@@ -134,7 +140,7 @@ export function AppSettingsMenu() {
                 role="menuitem"
               >
                 <span><em>{THEME_DETAILS.dark.tone}</em>{messages.theme.original}</span>
-                <small>{THEME_DETAILS.dark.description}</small>
+                <small>{t.dark}</small>
               </button>
               <button
                 className={mounted && theme === 'construction' ? 'active' : undefined}
@@ -143,7 +149,7 @@ export function AppSettingsMenu() {
                 role="menuitem"
               >
                 <span><em>{THEME_DETAILS.construction.tone}</em>{messages.theme.construction}</span>
-                <small>{THEME_DETAILS.construction.description}</small>
+                <small>{t.construction}</small>
               </button>
               <button
                 className={mounted && theme === 'light' ? 'active' : undefined}
@@ -152,12 +158,12 @@ export function AppSettingsMenu() {
                 role="menuitem"
               >
                 <span><em>{THEME_DETAILS.light.tone}</em>{messages.theme.light}</span>
-                <small>{THEME_DETAILS.light.description}</small>
+                <small>{t.light}</small>
               </button>
             </div>
           </div>
           <div className="settings-menu-version">
-            <span>Build</span>
+            <span>{t.build}</span>
             <strong>{APP_VERSION}</strong>
           </div>
         </div>

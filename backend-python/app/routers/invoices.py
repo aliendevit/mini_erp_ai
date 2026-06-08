@@ -10,7 +10,7 @@ from sqlalchemy.orm import Session, joinedload, selectinload
 
 from ..database import get_db
 from ..models import Invoice, InvoiceLine, Order, WorkEntry
-from ..schemas import InvoiceMergePayload, InvoiceUpdatePayload
+from ..schemas import InvoiceMergePayload, InvoiceUpdatePayload, WorkshopInvoiceCreatePayload
 from ..services.invoice_documents import build_invoice_docx, build_invoice_pdf
 from ..services.invoice_totals import recalc_invoice_totals
 from ..utils import (
@@ -319,6 +319,68 @@ def merge_invoices(payload: InvoiceMergePayload, db: Session = Depends(get_db)) 
     except Exception:
         db.rollback()
         raise
+
+
+@router.post("/invoices/workshop-fixed", status_code=201)
+def create_workshop_fixed_invoice(payload: WorkshopInvoiceCreatePayload, db: Session = Depends(get_db)) -> dict:
+    order = db.execute(
+        select(Order)
+        .options(joinedload(Order.customer), selectinload(Order.sites))
+        .where(Order.id == payload.orderId)
+    ).unique().scalar_one_or_none()
+    if not order:
+        raise not_found()
+    ensure(bool(payload.items), "Mindestens eine Rechnungsposition ist erforderlich.")
+
+    site_names = {site.id: site.site_name for site in order.sites}
+    total_amount = Decimal("0")
+    note_lines: list[str] = []
+
+    for index, item in enumerate(payload.items, start=1):
+        description = (item.description or "").strip()
+        ensure(bool(description), f"Beschreibung fehlt in Position {index}.")
+        quantity = Decimal(str(item.quantity or 1))
+        ensure(quantity > 0, f"Menge muss groesser als 0 sein in Position {index}.")
+        if item.totalAmount is not None:
+            line_total = Decimal(str(item.totalAmount))
+        else:
+            ensure(item.unitPrice is not None, f"Preis fehlt in Position {index}.")
+            line_total = quantity * Decimal(str(item.unitPrice))
+        ensure(line_total >= 0, f"Betrag darf nicht negativ sein in Position {index}.")
+        total_amount += line_total
+
+        site_label = site_names.get(item.siteId or "", "No site")
+        workshop_label = (item.workshopName or "Workshop to be selected").strip()
+        unit_label = "-" if item.unitPrice is None else f"{Decimal(str(item.unitPrice)):.2f}"
+        note_lines.append(
+            f"{index}. Site: {site_label} | Workshop: {workshop_label} | Description: {description} | "
+            f"Qty: {quantity} | Unit: {unit_label} | Total: {line_total:.2f}"
+        )
+        if item.notes:
+            note_lines.append(f"   Notes: {item.notes.strip()}")
+
+    ensure(total_amount > 0, "Gesamtbetrag muss groesser als 0 sein.")
+    invoice_notes_parts = [part.strip() for part in [payload.notes, "Workshop fixed invoice items:", *note_lines] if part and str(part).strip()]
+    issue_date = as_datetime(payload.issueDate) if payload.issueDate else None
+    if payload.status != "draft" and issue_date is None:
+        issue_date = datetime.now(timezone.utc)
+
+    invoice = Invoice(
+        status=payload.status,
+        customer_id=order.customer_id,
+        issue_date=issue_date,
+        period_start=order.start_date,
+        period_end=order.end_date,
+        notes="\n".join(invoice_notes_parts),
+        pauschal_amount=total_amount,
+    )
+    db.add(invoice)
+    db.flush()
+    if invoice.status != "draft":
+        ensure_invoice_has_number_and_date(db, invoice.id)
+    db.commit()
+    db.refresh(invoice)
+    return {"invoice": invoice_payload(invoice, include_customer=True, include_lines=True), "orderId": order.id}
 
 
 @router.get("/invoices")

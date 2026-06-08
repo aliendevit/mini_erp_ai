@@ -1,0 +1,634 @@
+{
+  "info": {
+    "name": "OMRAN ERP API Testing",
+    "_postman_id": "omran-erp-api-testing-v1",
+    "description": "Collection for testing OMRAN ERP backend APIs: AI Intake, proposal generation, workshops, tracking, and AI monitoring.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "variable": [
+    {
+      "key": "base_url",
+      "value": "http://localhost:3001/api",
+      "type": "string"
+    },
+    {
+      "key": "intake_id",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "order_id",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "site_id",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "workshop_id",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "locale",
+      "value": "ar",
+      "type": "string"
+    }
+  ],
+  "item": [
+    {
+      "name": "Health",
+      "item": [
+        {
+          "name": "Health Check",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/health",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "health"
+              ]
+            },
+            "description": "Verify backend is running."
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "AI Intake",
+      "item": [
+        {
+          "name": "1. Create Intake Session",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/ai/intakes",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "ai",
+                "intakes"
+              ]
+            },
+            "description": "Creates intake and saves intake_id.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"customerCompanyName\": \"شركة إعمار الشام\",\n  \"orderTitle\": \"ترميم مطبخ وحمام وغرفة جلوس\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status is 200', function () { pm.response.to.have.status(200); });",
+                  "const data = pm.response.json();",
+                  "pm.test('intake id exists', function () { pm.expect(data.id).to.be.ok; });",
+                  "if (data.id) pm.collectionVariables.set('intake_id', data.id);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "2. Get Intake Session",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/ai/intakes/{{intake_id}}",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "ai",
+                "intakes",
+                "{{intake_id}}"
+              ]
+            },
+            "description": "Reads current intake."
+          },
+          "response": []
+        },
+        {
+          "name": "3. Send Arabic Chat Message",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "text/plain"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/ai/intakes/{{intake_id}}/messages/stream",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "ai",
+                "intakes",
+                "{{intake_id}}",
+                "messages",
+                "stream"
+              ]
+            },
+            "description": "Sends first Arabic message. Response is streamed text.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"content\": \"عندي مشروع ترميم في دمشق، حي المزة. المطبخ يحتاج إزالة بلاط قديم وتركيب سيراميك ٦٠ في ٦٠، والحمام يحتاج عزل مائي وتبديل مغسلة.\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "4. Send Follow-up Chat Message",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "text/plain"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/ai/intakes/{{intake_id}}/messages/stream",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "ai",
+                "intakes",
+                "{{intake_id}}",
+                "messages",
+                "stream"
+              ]
+            },
+            "description": "Adds scope, payment, and workshop details.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"content\": \"الدفع كاش، يوجد عربون ٣٠٠٠ دولار بتاريخ بداية المشروع، وورشة الشام للبلاط والعزل ستنفذ أعمال البلاط والعزل.\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "5. Generate Proposal",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/ai/intakes/{{intake_id}}/proposal",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "ai",
+                "intakes",
+                "{{intake_id}}",
+                "proposal"
+              ]
+            },
+            "description": "Generates structured proposal data."
+          },
+          "response": []
+        },
+        {
+          "name": "6. Recommend Workshop Assignments",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/ai/intakes/{{intake_id}}/recommend-assignments",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "ai",
+                "intakes",
+                "{{intake_id}}",
+                "recommend-assignments"
+              ]
+            },
+            "description": "Returns workshop recommendations."
+          },
+          "response": []
+        },
+        {
+          "name": "7. Get Proposal PDF",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/pdf"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/ai/intakes/{{intake_id}}/pdf?locale={{locale}}",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "ai",
+                "intakes",
+                "{{intake_id}}",
+                "pdf"
+              ],
+              "query": [
+                {
+                  "key": "locale",
+                  "value": "{{locale}}"
+                }
+              ]
+            },
+            "description": "Downloads proposal PDF."
+          },
+          "response": []
+        },
+        {
+          "name": "8. Confirm Intake To Order",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/ai/intakes/{{intake_id}}/confirm",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "ai",
+                "intakes",
+                "{{intake_id}}",
+                "confirm"
+              ]
+            },
+            "description": "Converts proposal to order when data is sufficient. Saves order_id if present.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"siteAssignments\": [],\n  \"manualEstimatedPrice\": null\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status is ok', function () { pm.expect(pm.response.code).to.be.oneOf([200, 201]); });",
+                  "const data = pm.response.json();",
+                  "const candidates = [data.orderId, data.order_id, data.order?.id, data.result?.orderId, data.result?.order?.id];",
+                  "const found = candidates.find(Boolean);",
+                  "if (found) pm.collectionVariables.set('order_id', String(found));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "9. Clear Chat Messages",
+          "request": {
+            "method": "DELETE",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/ai/intakes/{{intake_id}}/messages",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "ai",
+                "intakes",
+                "{{intake_id}}",
+                "messages"
+              ]
+            },
+            "description": "Optional cleanup for selected intake."
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "Workshops",
+      "item": [
+        {
+          "name": "List Available Workshops",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/workshops?availableOnly=true",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "workshops"
+              ],
+              "query": [
+                {
+                  "key": "availableOnly",
+                  "value": "true"
+                }
+              ]
+            },
+            "description": "Lists active and available workshop partners."
+          },
+          "response": []
+        },
+        {
+          "name": "Create Workshop",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/workshops",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "workshops"
+              ]
+            },
+            "description": "Creates a workshop partner and saves workshop_id.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"ورشة الشام للبلاط والعزل\",\n  \"contactName\": \"Abu Samer\",\n  \"phone\": \"0933445566\",\n  \"email\": \"workshop@example.com\",\n  \"specialties\": [\n    \"tile\",\n    \"waterproofing\",\n    \"ceramic\"\n  ],\n  \"notes\": \"Preferred workshop for tile and waterproofing work.\",\n  \"availabilityStatus\": \"available\",\n  \"isActive\": true\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status is ok', function () { pm.expect(pm.response.code).to.be.oneOf([200, 201]); });",
+                  "const data = pm.response.json();",
+                  "if (data.id) pm.collectionVariables.set('workshop_id', data.id);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Get Workshop",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/workshops/{{workshop_id}}",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "workshops",
+                "{{workshop_id}}"
+              ]
+            },
+            "description": "Reads selected workshop."
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "Tracking And AI Monitoring",
+      "item": [
+        {
+          "name": "Get Orders",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/orders",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "orders"
+              ]
+            },
+            "description": "Use this to find an order_id if needed."
+          },
+          "response": []
+        },
+        {
+          "name": "Get Order Tracking",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/orders/{{order_id}}/tracking",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "orders",
+                "{{order_id}}",
+                "tracking"
+              ]
+            },
+            "description": "Reads tracking dashboard and progress data."
+          },
+          "response": []
+        },
+        {
+          "name": "Suggest Baseline",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/orders/{{order_id}}/tracking/baseline/suggest",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "orders",
+                "{{order_id}}",
+                "tracking",
+                "baseline",
+                "suggest"
+              ]
+            },
+            "description": "Creates draft baseline suggestions."
+          },
+          "response": []
+        },
+        {
+          "name": "Analyze AI Monitoring",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/orders/{{order_id}}/tracking/analyze",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "orders",
+                "{{order_id}}",
+                "tracking",
+                "analyze"
+              ]
+            },
+            "description": "Generates AI monitoring analysis."
+          },
+          "response": []
+        },
+        {
+          "name": "Get Monitoring Alerts",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/orders/{{order_id}}/tracking/alerts",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "orders",
+                "{{order_id}}",
+                "tracking",
+                "alerts"
+              ]
+            },
+            "description": "Reads monitoring alerts."
+          },
+          "response": []
+        }
+      ]
+    }
+  ]
+}
