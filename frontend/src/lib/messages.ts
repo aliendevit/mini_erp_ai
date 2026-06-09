@@ -394,6 +394,37 @@ export type Messages = {
     assignmentPressure: string;
     defaultCapacity: string;
   };
+  authPage: {
+    pageTitle: string;
+    loginTab: string;
+    signupTab: string;
+    loginTitle: string;
+    signupTitle: string;
+    userButtonLabel: string;
+    email: string;
+    emailPlaceholder: string;
+    phone: string;
+    phonePlaceholder: string;
+    password: string;
+    passwordPlaceholder: string;
+    confirmPassword: string;
+    confirmPasswordPlaceholder: string;
+    submitLogin: string;
+    submitSignup: string;
+    helperText: string;
+    validation: {
+      emailRequired: string;
+      emailInvalid: string;
+      passwordRequired: string;
+      passwordStrength: string;
+      phoneRequired: string;
+      phoneInvalid: string;
+      confirmRequired: string;
+      passwordsMatch: string;
+      successSignup: string;
+      successLogin: string;
+    };
+  };
 };
 
 export const messages: Record<Locale, Messages> = {
@@ -830,6 +861,37 @@ export const messages: Record<Locale, Messages> = {
       assignmentPressure: 'Druck aus Zuweisungen',
       defaultCapacity: 'Default 40h',
     },
+    authPage: {
+      pageTitle: 'Anmelden oder Konto erstellen',
+      loginTab: 'Anmelden',
+      signupTab: 'Registrieren',
+      loginTitle: 'Willkommen zurück',
+      signupTitle: 'Neues Konto erstellen',
+      userButtonLabel: 'Benutzerkonto',
+      email: 'E-Mail',
+      emailPlaceholder: 'name@beispiel.de',
+      phone: 'Telefon',
+      phonePlaceholder: '+49 151 23456789',
+      password: 'Passwort',
+      passwordPlaceholder: 'Min. 8 Zeichen, Zahl & Sonderzeichen',
+      confirmPassword: 'Passwort bestätigen',
+      confirmPasswordPlaceholder: 'Passwort wiederholen',
+      submitLogin: 'Anmelden',
+      submitSignup: 'Registrieren',
+      helperText: 'Indem Sie fortfahren, stimmen Sie unseren Bedingungen zu.',
+      validation: {
+        emailRequired: 'E-Mail ist erforderlich.',
+        emailInvalid: 'Ungültige E-Mail-Adresse.',
+        passwordRequired: 'Passwort ist erforderlich.',
+        passwordStrength: 'Passwort muss mindestens 8 Zeichen, eine Zahl und ein Sonderzeichen enthalten.',
+        phoneRequired: 'Telefonnummer ist erforderlich.',
+        phoneInvalid: 'Ungültige Telefonnummer.',
+        confirmRequired: 'Bitte bestätigen Sie das Passwort.',
+        passwordsMatch: 'Passwörter stimmen nicht überein.',
+        successSignup: 'Registrierung erfolgreich.',
+        successLogin: 'Anmeldung erfolgreich.',
+      },
+    }
   },
   en: {
     app: {
@@ -1258,6 +1320,37 @@ export const messages: Record<Locale, Messages> = {
       bookedHours: 'Booked',
       assignmentPressure: 'Assignment pressure',
       defaultCapacity: 'Default 40h',
+    },
+    authPage: {
+      pageTitle: 'Sign in or create account',
+      loginTab: 'Login',
+      signupTab: 'Sign up',
+      loginTitle: 'Welcome back',
+      signupTitle: 'Create your account',
+      userButtonLabel: 'User',
+      email: 'Email',
+      emailPlaceholder: 'name@example.com',
+      phone: 'Phone',
+      phonePlaceholder: '+49 151 23456789',
+      password: 'Password',
+      passwordPlaceholder: 'At least 8 characters, number & symbol',
+      confirmPassword: 'Confirm password',
+      confirmPasswordPlaceholder: 'Repeat password',
+      submitLogin: 'Sign in',
+      submitSignup: 'Create account',
+      helperText: 'By continuing you agree to the terms.',
+      validation: {
+        emailRequired: 'Email is required.',
+        emailInvalid: 'Invalid email address.',
+        passwordRequired: 'Password is required.',
+        passwordStrength: 'Password must be at least 8 characters and include a number and a special character.',
+        phoneRequired: 'Phone number is required.',
+        phoneInvalid: 'Invalid phone number.',
+        confirmRequired: 'Please confirm your password.',
+        passwordsMatch: 'Passwords do not match.',
+        successSignup: 'Signup successful.',
+        successLogin: 'Login successful.',
+      },
     },
   },
   ar: {
@@ -1893,6 +1986,37 @@ export const messages: Record<Locale, Messages> = {
       bookedHours: 'محجوز',
       assignmentPressure: 'ضغط التعيينات',
       defaultCapacity: 'افتراضي 40س',
+    },
+    authPage: {
+      pageTitle: 'تسجيل الدخول أو إنشاء حساب',
+      loginTab: 'تسجيل الدخول',
+      signupTab: 'إنشاء حساب',
+      loginTitle: 'مرحبًا بعودتك',
+      signupTitle: 'إنشاء حساب جديد',
+      userButtonLabel: 'الحساب',
+      email: 'البريد الإلكتروني',
+      emailPlaceholder: 'name@example.com',
+      phone: 'الهاتف',
+      phonePlaceholder: '+966 5X XXX XXXX',
+      password: 'كلمة المرور',
+      passwordPlaceholder: '8 أحرف على الأقل، رقم ورمز',
+      confirmPassword: 'تأكيد كلمة المرور',
+      confirmPasswordPlaceholder: 'أعد كلمة المرور',
+      submitLogin: 'تسجيل الدخول',
+      submitSignup: 'إنشاء حساب',
+      helperText: 'بالمتابعة أنت توافق على الشروط.',
+      validation: {
+        emailRequired: 'البريد الإلكتروني مطلوب.',
+        emailInvalid: 'عنوان بريد إلكتروني غير صالح.',
+        passwordRequired: 'كلمة المرور مطلوبة.',
+        passwordStrength: 'يجب أن تتكون كلمة المرور من 8 أحرف على الأقل وتحتوي على رقم ورمز خاص.',
+        phoneRequired: 'رقم الهاتف مطلوب.',
+        phoneInvalid: 'رقم هاتف غير صالح.',
+        confirmRequired: 'يرجى تأكيد كلمة المرور.',
+        passwordsMatch: 'كلمتا المرور غير متطابقتين.',
+        successSignup: 'تم إنشاء الحساب بنجاح.',
+        successLogin: 'تم تسجيل الدخول بنجاح.',
+      },
     },
   },
 };

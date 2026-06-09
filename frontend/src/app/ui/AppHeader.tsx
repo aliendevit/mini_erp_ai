@@ -63,6 +63,12 @@ export function AppHeader() {
             <span className="app-mobile-menu-icon" aria-hidden="true" />
             {headerCopy.menu}
           </button>
+          <Link href="/auth" className="btn app-user-icon" aria-label={messages.authPage?.userButtonLabel || 'User'}>
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+              <path d="M12 12a4 4 0 100-8 4 4 0 000 8z" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
+              <path d="M20 21v-1a4 4 0 00-4-4H8a4 4 0 00-4 4v1" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
+            </svg>
+          </Link>
           <AppSettingsMenu />
         </div>
         <nav id="app-mobile-nav" className={`app-nav ${mobileNavOpen ? 'open' : ''}`} aria-label={headerCopy.nav}>

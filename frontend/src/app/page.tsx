@@ -103,6 +103,7 @@ function cardIcon(href: string) {
 export default function Page() {
   const { locale, messages } = useI18n();
   const labels = dashboardLabels(locale);
+  const authButtonLabel = locale === 'ar' ? 'تسجيل الدخول' : locale === 'de' ? 'Anmelden' : 'Login';
   const workflowCards = [
     { title: labels.aiTitle, desc: labels.aiDesc, badge: '01', href: '/ai-intake' },
     { title: labels.workshopsTitle, desc: labels.workshopsDesc, badge: '02', href: '/workshops' },
