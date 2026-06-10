@@ -2,6 +2,7 @@
 
 import { zodResolver } from '@hookform/resolvers/zod';
 import { useState } from 'react';
+import { useRouter } from 'next/navigation';
 import { useForm, type Resolver } from 'react-hook-form';
 import { z } from 'zod';
 import { useI18n } from '../../lib/i18n';
@@ -24,6 +25,7 @@ export function AuthForm({ mode }: AuthFormProps) {
   const { messages } = useI18n();
   const msgs = messages as any;
   const [status, setStatus] = useState<string>('');
+  const router = useRouter();
 
   const loginSchema = z.object({
     email: z.string().min(1, msgs.authPage.validation.emailRequired).email(msgs.authPage.validation.emailInvalid),
@@ -63,7 +65,9 @@ export function AuthForm({ mode }: AuthFormProps) {
   const onSubmit = (data: AuthFormValues) => {
     const message = mode === 'signup' ? msgs.authPage.validation.successSignup : msgs.authPage.validation.successLogin;
     setStatus(message);
+    // clear status after a short delay and navigate to homepage
     window.setTimeout(() => setStatus(''), 4500);
+    router.push('/');
     console.log('Auth form submitted', data);
   };
 
