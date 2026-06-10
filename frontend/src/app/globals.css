@@ -5219,3 +5219,319 @@ html[data-theme='light'] .ai-proposal-form select {
   caret-color: #0f172a !important;
   -webkit-text-fill-color: #0f172a;
 }
+
+/* Auth / registration premium black workspace - final override */
+.auth-page {
+  position: relative !important;
+  min-height: calc(100vh - 120px) !important;
+  display: flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  overflow: hidden !important;
+  padding: clamp(22px, 4vw, 54px) !important;
+  border: 1px solid color-mix(in srgb, var(--border) 72%, var(--accent) 28%) !important;
+  border-radius: 28px !important;
+  background:
+    radial-gradient(circle at 12% 16%, color-mix(in srgb, var(--accent) 28%, transparent), transparent 28%),
+    radial-gradient(circle at 84% 8%, rgba(124, 58, 237, 0.22), transparent 30%),
+    linear-gradient(135deg, #05070d 0%, #0b0c12 42%, #06070a 100%) !important;
+  box-shadow: 0 26px 80px rgba(0, 0, 0, 0.42) !important;
+  isolation: isolate;
+}
+
+.auth-page::before {
+  content: '';
+  position: absolute;
+  inset: -40%;
+  z-index: -2;
+  background:
+    conic-gradient(from 120deg, transparent 0deg, rgba(96, 165, 250, 0.18) 70deg, transparent 140deg, rgba(124, 58, 237, 0.16) 220deg, transparent 300deg);
+  animation: auth-premium-rotate 18s linear infinite;
+}
+
+.auth-page::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  background-image:
+    linear-gradient(rgba(255,255,255,0.035) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(255,255,255,0.035) 1px, transparent 1px);
+  background-size: 42px 42px;
+  mask-image: radial-gradient(circle at 50% 30%, black, transparent 72%);
+}
+
+.auth-container {
+  position: relative !important;
+  width: min(100%, 470px) !important;
+  max-width: 470px !important;
+  padding: 0 !important;
+}
+
+.auth-card {
+  border: 1px solid rgba(255, 255, 255, 0.16) !important;
+  border-radius: 28px !important;
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.105), rgba(255, 255, 255, 0.045)),
+    rgba(7, 10, 18, 0.84) !important;
+  box-shadow: 0 28px 70px rgba(0, 0, 0, 0.44) !important;
+  backdrop-filter: blur(22px) !important;
+}
+
+.auth-brand {
+  padding: 1.55rem 1.35rem 0.9rem !important;
+  text-align: center !important;
+}
+
+.auth-brand p {
+  color: #93c5fd !important;
+  font-size: 0.74rem !important;
+  font-weight: 950 !important;
+  letter-spacing: 0.16em !important;
+}
+
+.auth-brand h1 {
+  margin: 0.5rem 0 0 !important;
+  color: #ffffff !important;
+  font-size: clamp(1.55rem, 4vw, 2.3rem) !important;
+  font-weight: 950 !important;
+  letter-spacing: -0.06em !important;
+}
+
+.auth-tabs {
+  margin: 0 1.2rem 1rem !important;
+  padding: 0.35rem !important;
+  border: 1px solid rgba(147, 197, 253, 0.16) !important;
+  background: rgba(3, 7, 18, 0.62) !important;
+}
+
+.tab-button {
+  min-height: 40px !important;
+  color: #cbd5e1 !important;
+  transition: transform 0.15s ease, background 0.15s ease, color 0.15s ease !important;
+}
+
+.tab-button.active {
+  color: #07111f !important;
+  background: linear-gradient(135deg, #dbeafe, var(--accent)) !important;
+  box-shadow: 0 12px 26px color-mix(in srgb, var(--accent) 32%, transparent) !important;
+}
+
+.auth-section {
+  padding: 0 1.25rem 1.45rem !important;
+}
+
+.auth-hero {
+  min-height: 58px !important;
+  border: 1px solid rgba(147, 197, 253, 0.18) !important;
+  background:
+    radial-gradient(circle at 18% 0%, rgba(96, 165, 250, 0.24), transparent 42%),
+    rgba(15, 23, 42, 0.68) !important;
+}
+
+.auth-hero h2 {
+  color: #ffffff !important;
+  font-size: 1.05rem !important;
+}
+
+.auth-field label {
+  color: #dbeafe !important;
+  font-size: 0.82rem !important;
+  font-weight: 850 !important;
+}
+
+.auth-input {
+  min-height: 46px !important;
+  border-color: rgba(147, 197, 253, 0.22) !important;
+  border-radius: 14px !important;
+  color: #ffffff !important;
+  background: rgba(3, 7, 18, 0.62) !important;
+  -webkit-text-fill-color: #ffffff !important;
+}
+
+.auth-input::placeholder {
+  color: rgba(203, 213, 225, 0.54) !important;
+}
+
+.auth-actions .btn.primary {
+  min-height: 46px !important;
+  width: 100% !important;
+  border-radius: 14px !important;
+}
+
+.auth-helper {
+  color: #cbd5e1 !important;
+}
+
+html[data-theme="construction"] .auth-page {
+  background:
+    radial-gradient(circle at 12% 16%, rgba(255, 138, 61, 0.28), transparent 28%),
+    radial-gradient(circle at 84% 8%, rgba(110, 37, 148, 0.26), transparent 30%),
+    linear-gradient(135deg, #100805 0%, #1e120d 46%, #090503 100%) !important;
+}
+
+html[data-theme="construction"] .auth-brand p {
+  color: #fed7aa !important;
+}
+
+html[data-theme="construction"] .tab-button.active {
+  color: #1b0d06 !important;
+  background: linear-gradient(135deg, #ffcf9f, #ff8a3d) !important;
+}
+
+html[data-theme="construction"] .auth-input {
+  border-color: rgba(255, 169, 105, 0.26) !important;
+  background: rgba(20, 13, 9, 0.72) !important;
+}
+
+@keyframes auth-premium-rotate {
+  to { transform: rotate(360deg); }
+}
+
+/* Final desktop nav override: all tabs fit without horizontal scrolling. */
+@media (min-width: 981px) {
+  .app-nav,
+  html[dir='rtl'] .app-nav {
+    justify-content: space-between !important;
+    gap: clamp(3px, 0.45vw, 7px) !important;
+    overflow-x: visible !important;
+    flex-wrap: nowrap !important;
+  }
+
+  .app-nav a {
+    flex: 1 1 0 !important;
+    min-width: 0 !important;
+    max-width: 118px !important;
+    white-space: nowrap !important;
+    overflow: hidden !important;
+    text-overflow: ellipsis !important;
+    text-align: center !important;
+    padding-inline: clamp(5px, 0.5vw, 8px) !important;
+    font-size: clamp(0.68rem, 0.78vw, 0.82rem) !important;
+  }
+}
+
+@media (max-width: 560px) {
+  .auth-page {
+    padding: 16px !important;
+    border-radius: 22px !important;
+  }
+}
+/* Account menu in the global header */
+.app-account-menu {
+  position: relative;
+  z-index: 2147482500;
+}
+
+.app-account-trigger {
+  min-height: 42px;
+  display: inline-flex;
+  align-items: center;
+  gap: 9px;
+  padding: 7px 11px;
+  border-radius: 16px;
+  white-space: nowrap;
+}
+
+.app-account-trigger.signed-in {
+  border-color: color-mix(in srgb, var(--accent, #4f7cff) 48%, transparent);
+  background:
+    linear-gradient(135deg, color-mix(in srgb, var(--accent, #4f7cff) 18%, transparent), transparent),
+    var(--panel, rgba(255, 255, 255, 0.04));
+}
+
+.app-account-avatar {
+  width: 28px;
+  height: 28px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 999px;
+  background: linear-gradient(135deg, var(--accent, #4f7cff), var(--accent-2, #9b5cff));
+  color: #fff;
+  font-weight: 900;
+  font-size: 0.78rem;
+  box-shadow: 0 10px 22px color-mix(in srgb, var(--accent, #4f7cff) 28%, transparent);
+}
+
+.app-account-label {
+  max-width: 145px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  color: var(--text, #f8fafc);
+  font-weight: 800;
+}
+
+.app-account-panel {
+  position: fixed;
+  top: 82px;
+  right: max(18px, calc((100vw - 1260px) / 2 + 18px));
+  width: min(330px, calc(100vw - 28px));
+  padding: 14px;
+  border: 1px solid color-mix(in srgb, var(--border, #344256) 82%, transparent);
+  border-radius: 22px;
+  background:
+    radial-gradient(circle at top right, color-mix(in srgb, var(--accent, #4f7cff) 18%, transparent), transparent 42%),
+    var(--panel-strong, #111827);
+  box-shadow: 0 28px 70px rgba(0, 0, 0, 0.34);
+  z-index: 2147483200;
+}
+
+html[dir='rtl'] .app-account-panel {
+  right: auto;
+  left: max(18px, calc((100vw - 1260px) / 2 + 18px));
+  text-align: right;
+}
+
+.app-account-user {
+  display: grid;
+  gap: 5px;
+  padding: 10px 11px 12px;
+  border-radius: 16px;
+  background: color-mix(in srgb, var(--surface, #0f172a) 72%, transparent);
+  border: 1px solid color-mix(in srgb, var(--border, #344256) 70%, transparent);
+}
+
+.app-account-user span {
+  color: var(--muted, #94a3b8);
+  font-size: 0.78rem;
+  font-weight: 800;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.app-account-user strong {
+  color: var(--text, #f8fafc);
+  overflow-wrap: anywhere;
+}
+
+.app-account-user small {
+  color: var(--muted, #94a3b8);
+}
+
+.app-account-action {
+  width: 100%;
+  margin-top: 10px;
+  justify-content: center;
+}
+
+@media (max-width: 760px) {
+  .app-account-trigger {
+    width: 42px;
+    height: 42px;
+    padding: 6px;
+    justify-content: center;
+  }
+
+  .app-account-label {
+    display: none;
+  }
+
+  .app-account-panel,
+  html[dir='rtl'] .app-account-panel {
+    top: 70px;
+    right: 12px;
+    left: 12px;
+    width: auto;
+  }
+}

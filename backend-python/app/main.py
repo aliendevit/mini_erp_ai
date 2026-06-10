@@ -8,7 +8,7 @@ from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
 
 from .database import init_db
-from .routers import ai, core, invoices
+from .routers import ai, auth, core, invoices
 from .settings import get_settings
 
 app = FastAPI(title="Simple Accounting Python Backend")
@@ -53,3 +53,4 @@ def startup() -> None:
 app.include_router(core.router, prefix="/api")
 app.include_router(invoices.router, prefix="/api")
 app.include_router(ai.router, prefix="/api")
+app.include_router(auth.router, prefix="/api")

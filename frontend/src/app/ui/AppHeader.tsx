@@ -4,13 +4,22 @@ import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { useEffect, useState } from 'react';
 
+import { API_BASE } from '../../lib/api';
 import { useI18n } from '../../lib/i18n';
 import { AppSettingsMenu } from './AppSettingsMenu';
+
+type StoredAuthUser = {
+  id?: string;
+  email?: string;
+  phone?: string | null;
+};
 
 export function AppHeader() {
   const { locale, messages } = useI18n();
   const pathname = usePathname();
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
+  const [accountOpen, setAccountOpen] = useState(false);
+  const [authUser, setAuthUser] = useState<StoredAuthUser | null>(null);
   const navItems = [
     { href: '/', label: messages.nav.dashboard },
     { href: '/customers', label: messages.nav.customers },
@@ -25,19 +34,63 @@ export function AppHeader() {
 
   useEffect(() => {
     setMobileNavOpen(false);
+    setAccountOpen(false);
   }, [pathname]);
 
+  useEffect(() => {
+    function readAuthUser() {
+      try {
+        const rawUser = localStorage.getItem('omran_auth_user');
+        const token = localStorage.getItem('omran_auth_token');
+        setAuthUser(rawUser && token ? JSON.parse(rawUser) : null);
+      } catch {
+        setAuthUser(null);
+      }
+    }
+
+    readAuthUser();
+    window.addEventListener('storage', readAuthUser);
+    window.addEventListener('focus', readAuthUser);
+    window.addEventListener('omran-auth-changed', readAuthUser);
+    return () => {
+      window.removeEventListener('storage', readAuthUser);
+      window.removeEventListener('focus', readAuthUser);
+      window.removeEventListener('omran-auth-changed', readAuthUser);
+    };
+  }, []);
+
   const headerCopy = locale === 'ar'
-    ? { brand: 'بوابة عمران الإدارية المدعومة بالذكاء الاصطناعي', powered: 'مدعوم بالذكاء الاصطناعي', menu: 'القائمة', nav: 'التنقل الرئيسي' }
+    ? { brand: 'بوابة عمران الإدارية المدعومة بالذكاء الاصطناعي', powered: 'مدعوم بالذكاء الاصطناعي', menu: 'القائمة', nav: 'التنقل الرئيسي', account: 'الحساب', signedIn: 'مسجل الدخول', signIn: 'تسجيل الدخول', logout: 'تسجيل الخروج', phone: 'الهاتف' }
     : locale === 'de'
-      ? { brand: 'Omran Verwaltungsportal mit KI', powered: 'Powered by AI', menu: 'Men?', nav: 'Hauptnavigation' }
-      : { brand: 'Omran management portal powered by AI', powered: 'Powered by AI', menu: 'Menu', nav: 'Main navigation' };
+      ? { brand: 'Omran Verwaltungsportal mit KI', powered: 'Powered by AI', menu: 'Menü', nav: 'Hauptnavigation', account: 'Konto', signedIn: 'Angemeldet', signIn: 'Anmelden', logout: 'Abmelden', phone: 'Telefon' }
+      : { brand: 'Omran management portal powered by AI', powered: 'Powered by AI', menu: 'Menu', nav: 'Main navigation', account: 'Account', signedIn: 'Signed in', signIn: 'Sign in', logout: 'Logout', phone: 'Phone' };
 
   function isActive(href: string) {
     if (href === '/') return pathname === '/';
     if (href === '/invoices') return pathname === '/invoices' || pathname.startsWith('/invoices/') && !pathname.startsWith('/invoices/drafts');
     return pathname === href || pathname.startsWith(`${href}/`);
   }
+
+  async function logout() {
+    const token = localStorage.getItem('omran_auth_token');
+    try {
+      if (token) {
+        await fetch(`${API_BASE}/auth/logout`, {
+          method: 'POST',
+          headers: { Authorization: `Bearer ${token}` },
+        });
+      }
+    } catch {
+      // Local logout should still work if the backend is unavailable.
+    }
+    localStorage.removeItem('omran_auth_token');
+    localStorage.removeItem('omran_auth_user');
+    setAuthUser(null);
+    setAccountOpen(false);
+    window.dispatchEvent(new Event('omran-auth-changed'));
+  }
+
+  const accountInitial = authUser?.email?.trim()?.[0]?.toUpperCase() || 'U';
 
   return (
     <header className="app-header">
@@ -63,12 +116,44 @@ export function AppHeader() {
             <span className="app-mobile-menu-icon" aria-hidden="true" />
             {headerCopy.menu}
           </button>
-          <Link href="/auth" className="btn app-user-icon" aria-label={messages.authPage?.userButtonLabel || 'User'}>
-            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
-              <path d="M12 12a4 4 0 100-8 4 4 0 000 8z" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
-              <path d="M20 21v-1a4 4 0 00-4-4H8a4 4 0 00-4 4v1" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
-            </svg>
-          </Link>
+          <div className="app-account-menu">
+            <button
+              type="button"
+              className={`btn app-account-trigger ${authUser ? 'signed-in' : ''}`}
+              onClick={() => setAccountOpen((current) => !current)}
+              aria-haspopup="menu"
+              aria-expanded={accountOpen}
+            >
+              <span className="app-account-avatar" aria-hidden="true">{authUser ? accountInitial : '↗'}</span>
+              <span className="app-account-label">{authUser?.email || headerCopy.account}</span>
+            </button>
+            {accountOpen ? (
+              <div className="app-account-panel" role="menu">
+                {authUser ? (
+                  <>
+                    <div className="app-account-user">
+                      <span>{headerCopy.signedIn}</span>
+                      <strong>{authUser.email}</strong>
+                      {authUser.phone ? <small>{headerCopy.phone}: {authUser.phone}</small> : null}
+                    </div>
+                    <button type="button" className="btn danger app-account-action" onClick={logout}>
+                      {headerCopy.logout}
+                    </button>
+                  </>
+                ) : (
+                  <>
+                    <div className="app-account-user">
+                      <span>{headerCopy.account}</span>
+                      <strong>{headerCopy.signIn}</strong>
+                    </div>
+                    <Link href="/auth" className="btn primary app-account-action">
+                      {headerCopy.signIn}
+                    </Link>
+                  </>
+                )}
+              </div>
+            ) : null}
+          </div>
           <AppSettingsMenu />
         </div>
         <nav id="app-mobile-nav" className={`app-nav ${mobileNavOpen ? 'open' : ''}`} aria-label={headerCopy.nav}>

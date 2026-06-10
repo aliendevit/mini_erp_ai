@@ -6,6 +6,30 @@ from typing import Any, Literal
 from pydantic import BaseModel, ConfigDict, Field
 
 
+class AuthRegisterPayload(BaseModel):
+    email: str
+    password: str
+    phone: str | None = None
+
+
+class AuthLoginPayload(BaseModel):
+    email: str
+    password: str
+
+
+class AuthUserResponse(BaseModel):
+    id: str
+    email: str
+    phone: str | None = None
+    createdAt: datetime | None = None
+    lastLoginAt: datetime | None = None
+
+
+class AuthResponse(BaseModel):
+    token: str
+    user: AuthUserResponse
+
+
 class CustomerPayload(BaseModel):
     companyName: str
     street: str | None = None

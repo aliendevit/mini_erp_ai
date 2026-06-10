@@ -6,6 +6,7 @@ import { useRouter } from 'next/navigation';
 import { useForm, type Resolver } from 'react-hook-form';
 import { z } from 'zod';
 import { useI18n } from '../../lib/i18n';
+import { apiJson } from '../../lib/api';
 
 const passwordPattern = /(?=.*\d)(?=.*[!@#$%^&*()_+\-=[\]{};':"\\|,.<>/?]).+/;
 const phonePattern = /^\+?[1-9]\d{7,14}$/;
@@ -21,10 +22,20 @@ type AuthFormValues = {
   confirmPassword?: string;
 };
 
+type AuthResponse = {
+  token: string;
+  user: {
+    id: string;
+    email: string;
+    phone?: string | null;
+  };
+};
+
 export function AuthForm({ mode }: AuthFormProps) {
   const { messages } = useI18n();
   const msgs = messages as any;
   const [status, setStatus] = useState<string>('');
+  const [apiError, setApiError] = useState<string>('');
   const router = useRouter();
 
   const loginSchema = z.object({
@@ -59,16 +70,35 @@ export function AuthForm({ mode }: AuthFormProps) {
       confirmPassword: '',
       phone: '',
     },
-    mode: 'onTouched',
+    mode: 'onChange',
   });
 
-  const onSubmit = (data: AuthFormValues) => {
-    const message = mode === 'signup' ? msgs.authPage.validation.successSignup : msgs.authPage.validation.successLogin;
-    setStatus(message);
-    // clear status after a short delay and navigate to homepage
-    window.setTimeout(() => setStatus(''), 4500);
-    router.push('/');
-    console.log('Auth form submitted', data);
+  const phoneField = register('phone');
+
+  const onSubmit = async (data: AuthFormValues) => {
+    setApiError('');
+    setStatus('');
+    try {
+      const response = mode === 'signup'
+        ? await apiJson<AuthResponse>('/auth/register', 'POST', {
+            email: data.email,
+            password: data.password,
+            phone: data.phone,
+          })
+        : await apiJson<AuthResponse>('/auth/login', 'POST', {
+            email: data.email,
+            password: data.password,
+          });
+
+      localStorage.setItem('omran_auth_token', response.token);
+      localStorage.setItem('omran_auth_user', JSON.stringify(response.user));
+      window.dispatchEvent(new Event('omran-auth-changed'));
+      const message = mode === 'signup' ? msgs.authPage.validation.successSignup : msgs.authPage.validation.successLogin;
+      setStatus(message);
+      router.push('/');
+    } catch (error) {
+      setApiError(error instanceof Error ? error.message : msgs.authPage.validation.genericError || 'Authentication failed.');
+    }
   };
 
   return (
@@ -101,7 +131,11 @@ export function AuthForm({ mode }: AuthFormProps) {
                   type="tel"
                   autoComplete="tel"
                   placeholder={msgs.authPage.phonePlaceholder}
-                  {...register('phone')}
+                  {...phoneField}
+                  onChange={(event) => {
+                    event.currentTarget.value = event.currentTarget.value.replace(/(?!^\+)[^\d]/g, '').replace(/^\+{2,}/, '+');
+                    phoneField.onChange(event);
+                  }}
                   aria-invalid={!!errors.phone}
                   className="auth-input"
                 />
@@ -149,6 +183,12 @@ export function AuthForm({ mode }: AuthFormProps) {
             <p className="auth-helper">{msgs.authPage.helperText}</p>
           </div>
       </form>
+
+      {apiError ? (
+        <div className="status-msg" role="alert">
+          {apiError}
+        </div>
+      ) : null}
 
       {status ? (
         <div className="status-msg">

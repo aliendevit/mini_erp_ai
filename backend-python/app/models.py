@@ -39,6 +39,28 @@ class EmployeeSkillKind(str, Enum):
     certification = "certification"
 
 
+class UserAccount(Base):
+    __tablename__ = "UserAccount"
+    __table_args__ = (
+        UniqueConstraint("email", name="UserAccount_email_key"),
+        Index("UserAccount_email_idx", "email"),
+        Index("UserAccount_sessionTokenHash_idx", "sessionTokenHash"),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid4()))
+    email: Mapped[str] = mapped_column(String, nullable=False)
+    password_hash: Mapped[str] = mapped_column("passwordHash", String, nullable=False)
+    phone: Mapped[str | None] = mapped_column(String)
+    session_token_hash: Mapped[str | None] = mapped_column("sessionTokenHash", String)
+    session_created_at: Mapped[datetime | None] = mapped_column("sessionCreatedAt", DateTime(timezone=True))
+    last_login_at: Mapped[datetime | None] = mapped_column("lastLoginAt", DateTime(timezone=True))
+    is_active: Mapped[bool] = mapped_column("isActive", Boolean, nullable=False, default=True, server_default="true")
+    created_at: Mapped[datetime] = mapped_column("createdAt", DateTime(timezone=True), server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(
+        "updatedAt", DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
+    )
+
+
 class Customer(Base):
     __tablename__ = "Customer"
 
