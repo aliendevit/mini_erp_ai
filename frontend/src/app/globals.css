@@ -2346,6 +2346,16 @@ html[data-theme="light"] .dashboard-hero {
   margin-top: 4px;
 }
 
+/* Make hero action buttons smaller and sit side-by-side */
+.dashboard-hero-actions .btn {
+  width: auto; /* override full-width primary elsewhere */
+  min-width: 120px;
+  padding: 0.5rem 0.9rem;
+}
+.dashboard-hero-actions .btn.primary {
+  min-width: 140px;
+}
+
 .dashboard-stats {
   position: relative;
   z-index: 1;
