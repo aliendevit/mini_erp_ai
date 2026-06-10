@@ -68,92 +68,89 @@ export function AuthForm({ mode }: AuthFormProps) {
   };
 
   return (
-    <div className="flex items-center justify-center min-h-screen px-12 py-16 bg-slate-900/5">
-      <div className="w-[33vw] min-w-[340px] max-w-lg bg-white/6 border border-white/20 backdrop-blur-md rounded-3xl p-8 mx-auto shadow-lg">
-        <div className="mb-8 text-center">
-          <p className="text-sm font-semibold uppercase tracking-[0.18em] text-slate-200">{mode === 'login' ? msgs.authPage.loginTitle : msgs.authPage.signupTitle}</p>
-          <h2 className="mt-4 text-2xl font-semibold text-white">{mode === 'login' ? msgs.authPage.loginTitle : msgs.authPage.signupTitle}</h2>
-        </div>
+    <div>
+      <div className="auth-hero">
+        <h2>{mode === 'login' ? msgs.authPage.loginTitle : msgs.authPage.signupTitle}</h2>
+      </div>
 
-        <form className="space-y-6 w-full flex flex-col items-center" onSubmit={handleSubmit(onSubmit)} noValidate>
-          <div className='w-full max-w-[350px] px-4'>
-            <label className="block text-left w-full">
-              <span className="text-sm font-medium text-slate-200">{msgs.authPage.email}</span>
+      <form className="auth-form" onSubmit={handleSubmit(onSubmit)} noValidate>
+          <div className="auth-field">
+            <label>
+              <span>{msgs.authPage.email}</span>
               <input
                 type="email"
                 autoComplete="email"
                 placeholder={msgs.authPage.emailPlaceholder}
                 {...register('email')}
                 aria-invalid={!!errors.email}
-                className="mt-2 w-full max-w-[300px] mx-auto rounded-xl border border-slate-300 bg-white/90 px-3 py-2 text-sm text-slate-900 outline-none transition focus:border-slate-500 focus:ring-2 focus:ring-slate-200"
+                className="auth-input"
               />
-              {errors.email && <p className="mt-2 text-sm text-rose-600">{String(errors.email?.message)}</p>}
+              {errors.email && <p className="auth-error">{String(errors.email?.message)}</p>}
             </label>
           </div>
 
           {mode === 'signup' && (
-            <div >
-              <label className="block text-left w-full">
-                <span className="text-sm font-medium text-slate-200">{msgs.authPage.phone}</span>
+            <div className="auth-field">
+              <label>
+                <span>{msgs.authPage.phone}</span>
                 <input
                   type="tel"
                   autoComplete="tel"
                   placeholder={msgs.authPage.phonePlaceholder}
                   {...register('phone')}
                   aria-invalid={!!errors.phone}
-                  className="m-2 w-48 mx-auto rounded-xl border border-slate-300 bg-white/90 px-3 py-2 text-sm text-slate-900 outline-none transition focus:border-slate-500 focus:ring-2 focus:ring-slate-200"
+                  className="auth-input"
                 />
-                {errors.phone && <p className="mt-2 text-sm text-rose-600">{String(errors.phone?.message)}</p>}
+                {errors.phone && <p className="auth-error">{String(errors.phone?.message)}</p>}
               </label>
             </div>
           )}
 
-          <div >
-            <label className="block text-left w-full">
-              <span className="text-sm font-medium text-slate-200">{msgs.authPage.password}</span>
+          <div className="auth-field">
+            <label>
+              <span>{msgs.authPage.password}</span>
               <input
                 type="password"
                 autoComplete={mode === 'login' ? 'current-password' : 'new-password'}
                 placeholder={msgs.authPage.passwordPlaceholder}
                 {...register('password')}
                 aria-invalid={!!errors.password}
-                className="mt-2 w-48 mx-auto rounded-xl border border-slate-300 bg-white/90 px-3 py-2 text-sm text-slate-900 outline-none transition focus:border-slate-500 focus:ring-2 focus:ring-slate-200"
+                className="auth-input"
               />
-              {errors.password && <p className="mt-2 text-sm text-rose-600">{String(errors.password?.message)}</p>}
+              {errors.password && <p className="auth-error">{String(errors.password?.message)}</p>}
             </label>
           </div>
 
           {mode === 'signup' && (
-            <div >
-              <label className="block text-left w-full">
-                <span className="text-sm font-medium text-slate-200">{msgs.authPage.confirmPassword}</span>
+            <div className="auth-field">
+              <label>
+                <span>{msgs.authPage.confirmPassword}</span>
                 <input
                   type="password"
                   autoComplete="new-password"
                   placeholder={msgs.authPage.confirmPasswordPlaceholder}
                   {...register('confirmPassword')}
                   aria-invalid={!!errors.confirmPassword}
-                  className="mt-2 w-48 mx-auto rounded-xl border border-slate-300 bg-white/90 px-3 py-2 text-sm text-slate-900 outline-none transition focus:border-slate-500 focus:ring-2 focus:ring-slate-200"
+                  className="auth-input"
                 />
-                {errors.confirmPassword && <p className="mt-2 text-sm text-rose-600">{String(errors.confirmPassword?.message)}</p>}
+                {errors.confirmPassword && <p className="auth-error">{String(errors.confirmPassword?.message)}</p>}
               </label>
             </div>
           )}
 
-          <div className="pt-2">
-            <button type="submit" disabled={isSubmitting} className="btn primary w-full py-3 text-sm font-semibold">
+          <div className="auth-actions">
+            <button type="submit" disabled={isSubmitting} className="btn primary">
               {mode === 'login' ? msgs.authPage.submitLogin : msgs.authPage.submitSignup}
             </button>
-            <p className="mt-3 text-xs text-slate-200 text-center">{msgs.authPage.helperText}</p>
+            <p className="auth-helper">{msgs.authPage.helperText}</p>
           </div>
-        </form>
+      </form>
 
-        {status ? (
-          <div className="mt-6 rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-900 text-center w-full">
-            {status}
-          </div>
-        ) : null}
-      </div>
+      {status ? (
+        <div className="status-msg">
+          {status}
+        </div>
+      ) : null}
     </div>
   );
 }
