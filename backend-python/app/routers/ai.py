@@ -8,9 +8,9 @@ from datetime import datetime, timezone
 from collections.abc import Iterable
 from typing import Literal
 
-from fastapi import APIRouter, Depends, File, Form, UploadFile
+from fastapi import APIRouter, Depends, File, Form, Query, UploadFile
 from fastapi.responses import StreamingResponse
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session, selectinload
 
 from ..database import get_db
@@ -59,6 +59,25 @@ SUPPORTED_AUDIO_CONTENT_TYPES = SUPPORTED_WAV_CONTENT_TYPES | {
 }
 MAX_AUDIO_BYTES = 10 * 1024 * 1024
 MAX_AUDIO_DURATION_MS = 90_000
+
+
+def _page_params(page: int, page_size: int) -> tuple[int, int]:
+    safe_page = max(1, int(page or 1))
+    safe_page_size = min(100, max(1, int(page_size or 25)))
+    return safe_page, safe_page_size
+
+
+def _paginated_response(items: list[dict], total: int, page: int, page_size: int) -> dict:
+    total_pages = max(1, (total + page_size - 1) // page_size) if total else 1
+    return {
+        "items": items,
+        "total": total,
+        "page": page,
+        "pageSize": page_size,
+        "totalPages": total_pages,
+        "hasNext": page < total_pages,
+        "hasPrev": page > 1,
+    }
 
 
 def _proposal_query():
@@ -178,9 +197,21 @@ def create_intake(payload: AIIntakeCreatePayload, db: Session = Depends(get_db))
 
 
 @router.get("/ai/intakes")
-def list_intakes(db: Session = Depends(get_db)) -> list[dict]:
-    proposals = db.execute(_proposal_query()).scalars().all()
-    return [proposal_payload(item) for item in proposals]
+def list_intakes(
+    paginated: bool = Query(default=False),
+    page: int = Query(default=1, ge=1),
+    pageSize: int = Query(default=20, ge=1, le=100),
+    db: Session = Depends(get_db),
+) -> list[dict] | dict:
+    if not paginated:
+        proposals = db.execute(_proposal_query()).scalars().all()
+        return [proposal_payload(item) for item in proposals]
+    safe_page, safe_page_size = _page_params(page, pageSize)
+    total = db.scalar(select(func.count()).select_from(Proposal)) or 0
+    proposals = db.execute(
+        _proposal_query().offset((safe_page - 1) * safe_page_size).limit(safe_page_size)
+    ).scalars().all()
+    return _paginated_response([proposal_payload(item) for item in proposals], total, safe_page, safe_page_size)
 
 
 @router.get("/ai/intakes/{proposal_id}")

@@ -6,6 +6,8 @@ import Link from 'next/link';
 
 import { API_BASE, apiForm, apiGet, apiJson } from '../../../lib/api';
 import { useI18n } from '../../../lib/i18n';
+import { ListPager } from '../../ui/ListPager';
+import { useToast } from '../../ui/ToastProvider';
 
 type TrackingPhoto = {
   id: string;
@@ -187,6 +189,7 @@ const issueStatusOptions = ['open', 'in_progress', 'resolved'];
 const issueSeverityOptions = ['low', 'medium', 'high'];
 const materialStatusOptions = ['needed', 'ordered', 'delivered', 'used'];
 const photoTagOptions = ['before', 'during', 'after', 'issue', 'material', 'inspection'];
+const TRACKING_LIST_PAGE_SIZE = 10;
 const backendBase = API_BASE.replace(/\/api$/, '');
 
 const STATUS_STYLES: Record<string, { color: string; background: string; border: string }> = {
@@ -326,6 +329,7 @@ function warningTargetTab(warning: TrackingWarning): TabKey {
 
 export default function ProjectTrackingSection({ orderId }: { orderId: string }) {
   const { locale, messages } = useI18n();
+  const { showToast } = useToast();
   const x = messages.trackingPage;
   const labels = x.labels;
   const [tracking, setTracking] = useState<TrackingPayload | null>(null);
@@ -340,10 +344,29 @@ export default function ProjectTrackingSection({ orderId }: { orderId: string })
   const [materialForm, setMaterialForm] = useState<FormState>(emptyMaterialForm);
   const [photos, setPhotos] = useState<FileList | null>(null);
   const [photoInputKey, setPhotoInputKey] = useState(0);
+  const [timelinePage, setTimelinePage] = useState(1);
+  const [photoPage, setPhotoPage] = useState(1);
+  const [taskPage, setTaskPage] = useState(1);
+  const [issuePage, setIssuePage] = useState(1);
+  const [materialPage, setMaterialPage] = useState(1);
 
   const siteCards = tracking?.siteCards || [];
   const selectedPhotos = useMemo(() => Array.from(photos || []), [photos]);
   const siteOptions = useMemo(() => siteCards.map((site) => ({ id: site.siteId, name: site.siteName })), [siteCards]);
+  const visibleUpdates = useMemo(() => (tracking?.updates || []).slice((timelinePage - 1) * TRACKING_LIST_PAGE_SIZE, timelinePage * TRACKING_LIST_PAGE_SIZE), [tracking?.updates, timelinePage]);
+  const visiblePhotos = useMemo(() => (tracking?.photos || []).slice((photoPage - 1) * TRACKING_LIST_PAGE_SIZE, photoPage * TRACKING_LIST_PAGE_SIZE), [tracking?.photos, photoPage]);
+  const visibleTasks = useMemo(() => (tracking?.tasks || []).slice((taskPage - 1) * TRACKING_LIST_PAGE_SIZE, taskPage * TRACKING_LIST_PAGE_SIZE), [tracking?.tasks, taskPage]);
+  const visibleIssues = useMemo(() => (tracking?.issues || []).slice((issuePage - 1) * TRACKING_LIST_PAGE_SIZE, issuePage * TRACKING_LIST_PAGE_SIZE), [tracking?.issues, issuePage]);
+  const visibleMaterials = useMemo(() => (tracking?.materials || []).slice((materialPage - 1) * TRACKING_LIST_PAGE_SIZE, materialPage * TRACKING_LIST_PAGE_SIZE), [tracking?.materials, materialPage]);
+
+  useEffect(() => {
+    if (!tracking) return;
+    setTimelinePage((value) => Math.min(value, Math.max(1, Math.ceil(tracking.updates.length / TRACKING_LIST_PAGE_SIZE))));
+    setPhotoPage((value) => Math.min(value, Math.max(1, Math.ceil(tracking.photos.length / TRACKING_LIST_PAGE_SIZE))));
+    setTaskPage((value) => Math.min(value, Math.max(1, Math.ceil(tracking.tasks.length / TRACKING_LIST_PAGE_SIZE))));
+    setIssuePage((value) => Math.min(value, Math.max(1, Math.ceil(tracking.issues.length / TRACKING_LIST_PAGE_SIZE))));
+    setMaterialPage((value) => Math.min(value, Math.max(1, Math.ceil(tracking.materials.length / TRACKING_LIST_PAGE_SIZE))));
+  }, [tracking]);
 
   function syncBaselineForms(data: TrackingPayload) {
     setBaselineForms(() => {
@@ -431,8 +454,9 @@ export default function ProjectTrackingSection({ orderId }: { orderId: string })
       setUpdateForm(emptyUpdateForm);
       setPhotos(null);
       setPhotoInputKey((value) => value + 1);
+      showToast(selectedPhotos.length ? `${labels.photos} ${labels.complete}` : `${labels.progress} ${labels.complete}`, 'success');
     } catch (error: any) {
-      alert(error.message);
+      showToast(error.message, 'error');
     } finally {
       setSaving(false);
     }
@@ -450,8 +474,9 @@ export default function ProjectTrackingSection({ orderId }: { orderId: string })
       });
       applyTracking(data);
       setTaskForm(emptyTaskForm);
+      showToast(`${labels.task} ${labels.complete}`, 'success');
     } catch (error: any) {
-      alert(error.message);
+      showToast(error.message, 'error');
     }
   }
 
@@ -461,8 +486,9 @@ export default function ProjectTrackingSection({ orderId }: { orderId: string })
       const data = await apiJson<TrackingPayload>(`/orders/${orderId}/issues`, 'POST', { ...issueForm, siteId: issueForm.siteId || null });
       applyTracking(data);
       setIssueForm(emptyIssueForm);
+      showToast(`${labels.issue} ${labels.complete}`, 'success');
     } catch (error: any) {
-      alert(error.message);
+      showToast(error.message, 'error');
     }
   }
 
@@ -472,8 +498,9 @@ export default function ProjectTrackingSection({ orderId }: { orderId: string })
       const data = await apiJson<TrackingPayload>(`/orders/${orderId}/materials`, 'POST', { ...materialForm, siteId: materialForm.siteId || null });
       applyTracking(data);
       setMaterialForm(emptyMaterialForm);
+      showToast(`${labels.materialName} ${labels.complete}`, 'success');
     } catch (error: any) {
-      alert(error.message);
+      showToast(error.message, 'error');
     }
   }
 
@@ -746,7 +773,7 @@ export default function ProjectTrackingSection({ orderId }: { orderId: string })
             <button className="btn primary" onClick={submitProgressUpdate} disabled={saving}>{saving ? x.actions.saving : x.actions.addUpdate}</button>
           </TrackingFormCard>
 
-          {tracking.updates.map((update) => (
+          {visibleUpdates.map((update) => (
             <div key={update.id} className="card">
               <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12, flexWrap: 'wrap' }}>
                 <div><div style={{ fontWeight: 800 }}>{update.title}</div><div className="muted">{siteName(update, x.generalProjectUpdate)} | {shortDate(update.updateDate, x.none)}</div></div>
@@ -759,6 +786,7 @@ export default function ProjectTrackingSection({ orderId }: { orderId: string })
             </div>
           ))}
           {tracking.updates.length === 0 && <div className="muted">{labels.noProgressUpdates}</div>}
+          <ListPager page={timelinePage} total={tracking.updates.length} pageSize={TRACKING_LIST_PAGE_SIZE} onPageChange={setTimelinePage} />
         </div>
       )}
 
@@ -778,8 +806,9 @@ export default function ProjectTrackingSection({ orderId }: { orderId: string })
             <div className="spacer" />
             <button className="btn primary" onClick={submitProgressUpdate} disabled={saving || selectedPhotos.length === 0}>{saving ? x.actions.uploading : x.actions.uploadPhotos}</button>
           </TrackingFormCard>
-          <PhotoGrid photos={tracking.photos} labels={labels} none={x.none} />
+          <PhotoGrid photos={visiblePhotos} labels={labels} none={x.none} />
           {tracking.photos.length === 0 && <div className="muted">{labels.noPhotos}</div>}
+          <ListPager page={photoPage} total={tracking.photos.length} pageSize={TRACKING_LIST_PAGE_SIZE} onPageChange={setPhotoPage} />
         </div>
       )}
 
@@ -803,7 +832,7 @@ export default function ProjectTrackingSection({ orderId }: { orderId: string })
             <div className="spacer" />
             <button className="btn primary" onClick={createTask}>{x.actions.addTask}</button>
           </TrackingFormCard>
-          <TrackingTable headers={[labels.task, labels.siteArea, labels.status, labels.weightPercent, labels.taskProgressPercent, labels.responsible, labels.dueDate, labels.actions]} emptyLabel={x.noRecords} rows={tracking.tasks.map((task) => {
+          <TrackingTable headers={[labels.task, labels.siteArea, labels.status, labels.weightPercent, labels.taskProgressPercent, labels.responsible, labels.dueDate, labels.actions]} emptyLabel={x.noRecords} rows={visibleTasks.map((task) => {
             const form = taskEditForms[task.id] || {};
             const updateTaskForm = (patch: FormState) => setTaskEditForms({ ...taskEditForms, [task.id]: { ...form, ...patch } });
             return [
@@ -821,6 +850,7 @@ export default function ProjectTrackingSection({ orderId }: { orderId: string })
               </div>,
             ];
           })} />
+          <ListPager page={taskPage} total={tracking.tasks.length} pageSize={TRACKING_LIST_PAGE_SIZE} onPageChange={setTaskPage} />
         </div>
       )}
 
@@ -844,7 +874,7 @@ export default function ProjectTrackingSection({ orderId }: { orderId: string })
             <div className="spacer" />
             <button className="btn primary" onClick={createIssue}>{x.actions.addIssue}</button>
           </TrackingFormCard>
-          <TrackingTable headers={[labels.issue, labels.siteArea, labels.description, labels.severity, labels.status, labels.responsible, labels.notes, labels.actions]} emptyLabel={x.noRecords} rows={tracking.issues.map((issue) => [
+          <TrackingTable headers={[labels.issue, labels.siteArea, labels.description, labels.severity, labels.status, labels.responsible, labels.notes, labels.actions]} emptyLabel={x.noRecords} rows={visibleIssues.map((issue) => [
             issue.title,
             siteName(issue, x.generalProjectUpdate),
             issue.description || x.none,
@@ -859,6 +889,7 @@ export default function ProjectTrackingSection({ orderId }: { orderId: string })
               <button className="btn danger secondary" onClick={() => deleteItem(`/orders/${orderId}/issues/${issue.id}`)}>{x.actions.delete}</button>
             </div>,
           ])} />
+          <ListPager page={issuePage} total={tracking.issues.length} pageSize={TRACKING_LIST_PAGE_SIZE} onPageChange={setIssuePage} />
         </div>
       )}
 
@@ -875,7 +906,7 @@ export default function ProjectTrackingSection({ orderId }: { orderId: string })
             <div className="spacer" />
             <button className="btn primary" onClick={createMaterial}>{x.actions.addMaterial}</button>
           </TrackingFormCard>
-          <TrackingTable headers={[labels.materialName, labels.siteArea, labels.quantity, labels.status, labels.notes, labels.actions]} emptyLabel={x.noRecords} rows={tracking.materials.map((material) => [
+          <TrackingTable headers={[labels.materialName, labels.siteArea, labels.quantity, labels.status, labels.notes, labels.actions]} emptyLabel={x.noRecords} rows={visibleMaterials.map((material) => [
             material.materialName,
             siteName(material, x.generalProjectUpdate),
             material.quantity || x.none,
@@ -883,6 +914,7 @@ export default function ProjectTrackingSection({ orderId }: { orderId: string })
             material.notes || x.none,
             <div key="actions" style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}><button className="btn secondary" onClick={() => updateMaterialStatus(material, 'delivered')}>{x.actions.delivered}</button><button className="btn danger secondary" onClick={() => deleteItem(`/orders/${orderId}/materials/${material.id}`)}>{x.actions.delete}</button></div>,
           ])} />
+          <ListPager page={materialPage} total={tracking.materials.length} pageSize={TRACKING_LIST_PAGE_SIZE} onPageChange={setMaterialPage} />
         </div>
       )}
 

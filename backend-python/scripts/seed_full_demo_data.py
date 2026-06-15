@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import base64
 import json
 from datetime import datetime, timezone
 from decimal import Decimal
@@ -12,7 +13,7 @@ from sqlalchemy import or_, select
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
-from app.database import SessionLocal  # noqa: E402
+from app.database import SessionLocal, init_db  # noqa: E402
 from app.models import (  # noqa: E402
     Customer,
     Employee,
@@ -24,12 +25,25 @@ from app.models import (  # noqa: E402
     Order,
     Proposal,
     ProposalMessage,
+    ProjectIssue,
+    ProjectMaterialLog,
+    ProjectMonitoringAlert,
+    ProjectMonitoringReport,
+    ProjectProgressPhoto,
+    ProjectProgressUpdate,
+    ProjectSiteBaseline,
+    ProjectTask,
     Site,
+    Workshop,
+    WorkshopSiteAssignment,
     WorkEntry,
 )
 
 
 DEMO_TAG = "[demo-seed]"
+DEMO_PHOTO_BYTES = base64.b64decode(
+    "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/p9sAAAAASUVORK5CYII="
+)
 
 
 def utc(year: int, month: int, day: int, hour: int = 8, minute: int = 0) -> datetime:
@@ -528,6 +542,380 @@ WORK_ENTRIES = [
 ]
 
 
+WORKSHOPS = [
+    {
+        "key": "nord-fliesen",
+        "name": "Nord Fliesen & Abdichtung",
+        "contact_name": "Mehmet Kaya",
+        "phone": "0176 22004411",
+        "email": "planung@nord-fliesen.demo",
+        "specialties": ["Fliesen", "Abdichtung", "Bad"],
+        "availability_status": "available",
+        "availability_note": "Kapazitaet fuer Badarbeiten diese Woche bestaetigt.",
+        "notes": f"{DEMO_TAG} Deutsche Demo-Werkstatt fuer Bad und Abdichtung.",
+    },
+    {
+        "key": "weser-maler",
+        "name": "Weser Malerteam GmbH",
+        "contact_name": "Klaus Berger",
+        "phone": "0421 440077",
+        "email": "einsatz@weser-maler.demo",
+        "specialties": ["Malerarbeiten", "Spachteln", "Schleifen"],
+        "availability_status": "available",
+        "availability_note": "Team ist ab 13.05. wieder frei.",
+        "notes": f"{DEMO_TAG} Deutsche Demo-Werkstatt fuer Malerarbeiten.",
+    },
+    {
+        "key": "hanse-trockenbau",
+        "name": "Hanse Trockenbau Service",
+        "contact_name": "Mariam Haddad",
+        "phone": "0172 3004550",
+        "email": "service@hanse-trockenbau.demo",
+        "specialties": ["Trockenbau", "Kellergang", "Feuchtigkeitsschutz"],
+        "availability_status": "available",
+        "availability_note": "Kellergang ist eingeplant, Materialfreigabe offen.",
+        "notes": f"{DEMO_TAG} Deutsche Demo-Werkstatt fuer Trockenbau und Keller.",
+    },
+    {
+        "key": "elektro-bremen",
+        "name": "Elektro Bremen Schnellservice",
+        "contact_name": "Noura Haddad",
+        "phone": "0170 7700990",
+        "email": "kontakt@elektro-bremen.demo",
+        "specialties": ["Elektro", "Pruefung", "Kleinreparaturen"],
+        "availability_status": "unavailable",
+        "availability_note": "Bis 15.05. wegen Notdiensteinsatz nicht verfuegbar.",
+        "notes": f"{DEMO_TAG} Deutsche Demo-Werkstatt mit Warnstatus fuer Monitoring.",
+    },
+]
+
+
+WORKSHOP_ASSIGNMENTS = [
+    {
+        "order_key": "elbe-renovation",
+        "site_name": "Wohnung 2. OG",
+        "workshop_key": "weser-maler",
+        "covered_skills": ["Malerarbeiten", "Spachteln", "Schleifen"],
+        "start_date": utc(2026, 5, 5),
+        "end_date": utc(2026, 5, 18),
+        "status": "assigned",
+        "notes": f"{DEMO_TAG} Wohnbereich priorisieren, Abschluss vor Kundenabnahme.",
+    },
+    {
+        "order_key": "elbe-renovation",
+        "site_name": "Badezimmer",
+        "workshop_key": "nord-fliesen",
+        "covered_skills": ["Fliesen", "Abdichtung", "Bad"],
+        "start_date": utc(2026, 5, 8),
+        "end_date": utc(2026, 5, 20),
+        "status": "assigned",
+        "notes": f"{DEMO_TAG} Abdichtung vor Fliesenfreigabe dokumentieren.",
+    },
+    {
+        "order_key": "hansebau-stairwell",
+        "site_name": "Kellergang",
+        "workshop_key": "hanse-trockenbau",
+        "covered_skills": ["Trockenbau", "Feuchtigkeitsschutz"],
+        "start_date": utc(2026, 5, 6),
+        "end_date": utc(2026, 5, 21),
+        "status": "assigned",
+        "notes": f"{DEMO_TAG} Feuchte Stellen zuerst behandeln, danach Trockenbau schliessen.",
+    },
+    {
+        "order_key": "hansebau-stairwell",
+        "site_name": "Treppenhaus",
+        "workshop_key": "elektro-bremen",
+        "covered_skills": ["Elektro", "Pruefung"],
+        "start_date": utc(2026, 5, 12),
+        "end_date": utc(2026, 5, 13),
+        "status": "assigned",
+        "notes": f"{DEMO_TAG} Bewusst nicht verfuegbar, damit Monitoring eine Warnung zeigt.",
+    },
+]
+
+
+TRACKING_BASELINES = [
+    {
+        "order_key": "elbe-renovation",
+        "site_name": "Wohnung 2. OG",
+        "planned_start_date": utc(2026, 5, 5),
+        "planned_end_date": utc(2026, 5, 18),
+        "baseline_status": "confirmed",
+        "source": "manual",
+        "notes": f"{DEMO_TAG} Geplanter Abschluss Wohnbereich vor Bad-Endmontage.",
+    },
+    {
+        "order_key": "elbe-renovation",
+        "site_name": "Badezimmer",
+        "planned_start_date": utc(2026, 5, 8),
+        "planned_end_date": utc(2026, 5, 20),
+        "baseline_status": "confirmed",
+        "source": "manual",
+        "notes": f"{DEMO_TAG} Bad ist kritisch wegen Abdichtung und Materialfreigabe.",
+    },
+    {
+        "order_key": "hansebau-stairwell",
+        "site_name": "Treppenhaus",
+        "planned_start_date": utc(2026, 5, 6),
+        "planned_end_date": utc(2026, 5, 18),
+        "baseline_status": "confirmed",
+        "source": "manual",
+        "notes": f"{DEMO_TAG} Treppenhaus muss waehrend der Arbeiten begehbar bleiben.",
+    },
+    {
+        "order_key": "hansebau-stairwell",
+        "site_name": "Kellergang",
+        "planned_start_date": utc(2026, 5, 6),
+        "planned_end_date": utc(2026, 5, 22),
+        "baseline_status": "confirmed",
+        "source": "manual",
+        "notes": f"{DEMO_TAG} Monitoring-Demo mit Risiko durch Feuchtigkeit und Material.",
+    },
+]
+
+
+TRACKING_UPDATES = [
+    {
+        "order_key": "elbe-renovation",
+        "site_name": "Wohnung 2. OG",
+        "title": "Wohnbereich vorbereitet",
+        "description": f"{DEMO_TAG} Spachtel- und Schleifarbeiten abgeschlossen, erster Anstrich gestartet.",
+        "status": "in_progress",
+        "progress_percent": 58,
+        "next_action": "Zweiten Anstrich bis Freitag abschliessen und danach Endreinigung einplanen.",
+        "update_date": utc(2026, 5, 12, 15),
+        "photos": [
+            {"filename": "wohnzimmer-fortschritt.png", "tag": "during", "caption": "Wohnbereich nach dem ersten Anstrich."}
+        ],
+    },
+    {
+        "order_key": "elbe-renovation",
+        "site_name": "Badezimmer",
+        "title": "Bad wartet auf Abdichtungsmaterial",
+        "description": f"{DEMO_TAG} Trockenbau ist geschlossen, Abdichtungsmaterial fehlt noch.",
+        "status": "waiting_materials",
+        "progress_percent": 35,
+        "next_action": "Materiallieferung bestaetigen und Abdichtung fotografisch dokumentieren.",
+        "update_date": utc(2026, 5, 13, 14),
+        "photos": [
+            {"filename": "bad-material-wartet.png", "tag": "issue", "caption": "Badbereich vor Abdichtung, Material noch offen."}
+        ],
+    },
+    {
+        "order_key": "hansebau-stairwell",
+        "site_name": "Kellergang",
+        "title": "Feuchtigkeit im Kellergang sichtbar",
+        "description": f"{DEMO_TAG} Grundierung begonnen, Wandbereich bleibt stellenweise feucht.",
+        "status": "blocked",
+        "progress_percent": 28,
+        "next_action": "Feuchtepruefung wiederholen und Materialfreigabe vom Kunden einholen.",
+        "update_date": utc(2026, 5, 14, 10),
+        "photos": [
+            {"filename": "kellergang-feuchte.png", "tag": "issue", "caption": "Feuchter Wandbereich im Kellergang."}
+        ],
+    },
+    {
+        "order_key": "hansebau-stairwell",
+        "site_name": "Treppenhaus",
+        "title": "Treppenhaus teilweise fertig",
+        "description": f"{DEMO_TAG} Zweiter Anstrich in unteren Etagen fertig, Elektropruefung offen.",
+        "status": "needs_review",
+        "progress_percent": 62,
+        "next_action": "Elektropruefung neu terminieren und Restarbeiten oben abschliessen.",
+        "update_date": utc(2026, 5, 14, 16),
+        "photos": [
+            {"filename": "treppenhaus-anstrich.png", "tag": "during", "caption": "Treppenhaus nach zweitem Anstrich."}
+        ],
+    },
+]
+
+
+TRACKING_TASKS = [
+    {
+        "order_key": "elbe-renovation",
+        "site_name": "Wohnung 2. OG",
+        "task_name": "Zweiter Anstrich Wohnbereich",
+        "status": "in_progress",
+        "weight_percent": "35",
+        "progress_percent": 70,
+        "responsible_type": "workshop",
+        "responsible_name": "Weser Malerteam GmbH",
+        "due_date": utc(2026, 5, 15),
+        "notes": f"{DEMO_TAG} Restarbeiten an Fensterlaibungen pruefen.",
+    },
+    {
+        "order_key": "elbe-renovation",
+        "site_name": "Wohnung 2. OG",
+        "task_name": "Endreinigung Wohnbereich",
+        "status": "not_started",
+        "weight_percent": "15",
+        "progress_percent": 0,
+        "responsible_type": "workshop",
+        "responsible_name": "Lina Reinigung",
+        "due_date": utc(2026, 5, 19),
+        "notes": f"{DEMO_TAG} Start erst nach Malerabnahme.",
+    },
+    {
+        "order_key": "elbe-renovation",
+        "site_name": "Badezimmer",
+        "task_name": "Abdichtung Bad dokumentieren",
+        "status": "in_progress",
+        "weight_percent": "30",
+        "progress_percent": 25,
+        "responsible_type": "workshop",
+        "responsible_name": "Nord Fliesen & Abdichtung",
+        "due_date": utc(2026, 5, 12),
+        "notes": f"{DEMO_TAG} Ueberfaellig fuer Warnungs-Demo.",
+    },
+    {
+        "order_key": "hansebau-stairwell",
+        "site_name": "Kellergang",
+        "task_name": "Feuchtigkeitsschutz zweite Lage",
+        "status": "in_progress",
+        "weight_percent": "45",
+        "progress_percent": 30,
+        "responsible_type": "workshop",
+        "responsible_name": "Hanse Trockenbau Service",
+        "due_date": utc(2026, 5, 13),
+        "notes": f"{DEMO_TAG} Kritisch fuer KI-Monitoring.",
+    },
+    {
+        "order_key": "hansebau-stairwell",
+        "site_name": "Treppenhaus",
+        "task_name": "Elektropruefung Treppenhaus",
+        "status": "not_started",
+        "weight_percent": "20",
+        "progress_percent": 0,
+        "responsible_type": "workshop",
+        "responsible_name": "Elektro Bremen Schnellservice",
+        "due_date": utc(2026, 5, 13),
+        "notes": f"{DEMO_TAG} Werkstatt nicht verfuegbar.",
+    },
+]
+
+
+TRACKING_ISSUES = [
+    {
+        "order_key": "elbe-renovation",
+        "site_name": "Badezimmer",
+        "title": "Abdichtungsmaterial fehlt",
+        "description": f"{DEMO_TAG} Lieferung nicht bestaetigt, Bad kann ohne Material nicht weiterlaufen.",
+        "severity": "high",
+        "status": "open",
+        "responsible_type": "workshop",
+        "responsible_name": "Nord Fliesen & Abdichtung",
+        "resolution_note": None,
+    },
+    {
+        "order_key": "hansebau-stairwell",
+        "site_name": "Kellergang",
+        "title": "Feuchte Stelle blockiert Trockenbau",
+        "description": f"{DEMO_TAG} Untergrund bleibt feucht, zweite Lage muss warten.",
+        "severity": "high",
+        "status": "open",
+        "responsible_type": "workshop",
+        "responsible_name": "Hanse Trockenbau Service",
+        "resolution_note": None,
+    },
+    {
+        "order_key": "hansebau-stairwell",
+        "site_name": "Treppenhaus",
+        "title": "Elektropruefung muss neu terminiert werden",
+        "description": f"{DEMO_TAG} Eingeteilte Werkstatt ist aktuell nicht verfuegbar.",
+        "severity": "medium",
+        "status": "in_progress",
+        "responsible_type": "workshop",
+        "responsible_name": "Elektro Bremen Schnellservice",
+        "resolution_note": "Alternativtermin wird mit Kunde abgestimmt.",
+    },
+]
+
+
+TRACKING_MATERIALS = [
+    {
+        "order_key": "elbe-renovation",
+        "site_name": "Badezimmer",
+        "material_name": "Dichtband und Fluessigfolie",
+        "quantity": "12 m Dichtband, 2 Eimer",
+        "status": "ordered",
+        "notes": f"{DEMO_TAG} Lieferstatus offen, beeinflusst Bad-Fortschritt.",
+    },
+    {
+        "order_key": "elbe-renovation",
+        "site_name": "Wohnung 2. OG",
+        "material_name": "Dispersionsfarbe weiss",
+        "quantity": "4 Eimer",
+        "status": "delivered",
+        "notes": f"{DEMO_TAG} Reicht fuer zweiten Anstrich.",
+    },
+    {
+        "order_key": "hansebau-stairwell",
+        "site_name": "Kellergang",
+        "material_name": "Feuchtigkeitssperre",
+        "quantity": "3 Kanister",
+        "status": "needed",
+        "notes": f"{DEMO_TAG} Muss vor Fortsetzung freigegeben werden.",
+    },
+]
+
+
+MONITORING_REPORTS = [
+    {
+        "order_key": "elbe-renovation",
+        "provider": "demo",
+        "health_status": "at_risk",
+        "summary": "Badbereich ist gefaehrdet, weil Abdichtungsmaterial fehlt und eine Aufgabe ueberfaellig ist. Wohnbereich liegt weitgehend im Plan.",
+        "analysis": {
+            "provider": "demo",
+            "healthStatus": "at_risk",
+            "summary": "Badbereich ist gefaehrdet, weil Abdichtungsmaterial fehlt und eine Aufgabe ueberfaellig ist. Wohnbereich liegt weitgehend im Plan.",
+            "risks": [
+                {"title": "Materialrisiko Bad", "severity": "high", "siteName": "Badezimmer", "reason": "Abdichtungsmaterial ist noch nicht geliefert."}
+            ],
+            "delays": [
+                {"siteName": "Badezimmer", "reason": "Abdichtung kann nicht starten.", "impact": "Fliesenarbeiten verschieben sich."}
+            ],
+            "missingInformation": ["Liefertermin fuer Dichtband und Fluessigfolie fehlt."],
+            "recommendedActions": [
+                {"priority": "high", "siteName": "Badezimmer", "action": "Liefertermin klaeren und Ersatzmaterial pruefen."}
+            ],
+            "assumptions": ["Analyse basiert auf Demo-Trackingdaten."],
+        },
+        "warnings": [
+            {"type": "high_issue", "severity": "high", "message": "Abdichtungsmaterial fehlt", "siteName": "Badezimmer"}
+        ],
+    },
+    {
+        "order_key": "hansebau-stairwell",
+        "provider": "demo",
+        "health_status": "blocked",
+        "summary": "Kellergang ist blockiert und das Treppenhaus hat ein Terminrisiko wegen nicht verfuegbarer Elektro-Werkstatt.",
+        "analysis": {
+            "provider": "demo",
+            "healthStatus": "blocked",
+            "summary": "Kellergang ist blockiert und das Treppenhaus hat ein Terminrisiko wegen nicht verfuegbarer Elektro-Werkstatt.",
+            "risks": [
+                {"title": "Blocker Kellergang", "severity": "high", "siteName": "Kellergang", "reason": "Feuchte Stelle verhindert Trockenbau-Fortsetzung."},
+                {"title": "Werkstatt nicht verfuegbar", "severity": "medium", "siteName": "Treppenhaus", "reason": "Elektro-Werkstatt ist aktuell nicht verfuegbar."},
+            ],
+            "delays": [
+                {"siteName": "Kellergang", "reason": "Feuchtigkeitsschutz braucht Freigabe.", "impact": "Fertigstellung kann sich verschieben."}
+            ],
+            "missingInformation": ["Neuer Termin fuer Elektropruefung fehlt."],
+            "recommendedActions": [
+                {"priority": "high", "siteName": "Kellergang", "action": "Feuchtepruefung wiederholen und Freigabe dokumentieren."},
+                {"priority": "medium", "siteName": "Treppenhaus", "action": "Alternative Elektro-Werkstatt oder Ersatztermin festlegen."},
+            ],
+            "assumptions": ["Analyse basiert auf Demo-Trackingdaten."],
+        },
+        "warnings": [
+            {"type": "blocked_site", "severity": "high", "message": "Kellergang ist blockiert", "siteName": "Kellergang"},
+            {"type": "workshop_unavailable", "severity": "high", "message": "Elektro-Werkstatt ist nicht verfuegbar", "siteName": "Treppenhaus"},
+        ],
+    },
+]
+
+
 PROPOSALS = [
     {
         "status": "reviewed",
@@ -701,6 +1089,52 @@ def get_or_create_site(db, order: Order, payload: dict) -> Site:
 
 
 def cleanup_demo_records(db) -> None:
+    demo_alerts = db.scalars(select(ProjectMonitoringAlert).where(ProjectMonitoringAlert.message.contains(DEMO_TAG))).all()
+    for item in demo_alerts:
+        db.delete(item)
+
+    demo_reports = db.scalars(select(ProjectMonitoringReport).where(ProjectMonitoringReport.summary.contains(DEMO_TAG))).all()
+    for item in demo_reports:
+        db.delete(item)
+
+    demo_photos = db.scalars(select(ProjectProgressPhoto).where(ProjectProgressPhoto.caption.contains(DEMO_TAG))).all()
+    for item in demo_photos:
+        try:
+            path = Path(item.storage_path)
+            if path.exists() and path.is_file():
+                path.unlink()
+        except OSError:
+            pass
+        db.delete(item)
+
+    demo_updates = db.scalars(select(ProjectProgressUpdate).where(ProjectProgressUpdate.description.contains(DEMO_TAG))).all()
+    for item in demo_updates:
+        db.delete(item)
+
+    demo_tasks = db.scalars(select(ProjectTask).where(ProjectTask.notes.contains(DEMO_TAG))).all()
+    for item in demo_tasks:
+        db.delete(item)
+
+    demo_issues = db.scalars(select(ProjectIssue).where(ProjectIssue.description.contains(DEMO_TAG))).all()
+    for item in demo_issues:
+        db.delete(item)
+
+    demo_materials = db.scalars(select(ProjectMaterialLog).where(ProjectMaterialLog.notes.contains(DEMO_TAG))).all()
+    for item in demo_materials:
+        db.delete(item)
+
+    demo_baselines = db.scalars(select(ProjectSiteBaseline).where(ProjectSiteBaseline.notes.contains(DEMO_TAG))).all()
+    for item in demo_baselines:
+        db.delete(item)
+
+    demo_workshop_assignments = db.scalars(select(WorkshopSiteAssignment).where(WorkshopSiteAssignment.notes.contains(DEMO_TAG))).all()
+    for item in demo_workshop_assignments:
+        db.delete(item)
+
+    demo_workshops = db.scalars(select(Workshop).where(Workshop.notes.contains(DEMO_TAG))).all()
+    for item in demo_workshops:
+        db.delete(item)
+
     demo_lines = db.scalars(
         select(InvoiceLine).join(WorkEntry, InvoiceLine.work_entry_id == WorkEntry.id).where(WorkEntry.description.contains(DEMO_TAG))
     ).all()
@@ -736,6 +1170,22 @@ def cleanup_demo_records(db) -> None:
     db.flush()
 
 
+def get_or_create_workshop(db, payload: dict) -> Workshop:
+    item = db.execute(select(Workshop).where(Workshop.name == payload["name"])).scalar_one_or_none()
+    if item is None:
+        item = Workshop(name=payload["name"])
+        db.add(item)
+    item.contact_name = payload["contact_name"]
+    item.phone = payload["phone"]
+    item.email = payload["email"]
+    item.specialties_json = dump_json(payload["specialties"])
+    item.availability_status = payload["availability_status"]
+    item.availability_note = payload["availability_note"]
+    item.notes = payload["notes"]
+    item.is_active = True
+    return item
+
+
 def create_assignment(db, employee: Employee, site: Site, payload: dict) -> None:
     db.add(
         EmployeeAssignment(
@@ -746,6 +1196,145 @@ def create_assignment(db, employee: Employee, site: Site, payload: dict) -> None
             notes=payload["notes"],
         )
     )
+
+
+def create_workshop_assignment(db, order: Order, site: Site, workshop: Workshop, payload: dict) -> None:
+    db.add(
+        WorkshopSiteAssignment(
+            order_id=order.id,
+            site_id=site.id,
+            workshop_id=workshop.id,
+            covered_skills_json=dump_json(payload["covered_skills"]),
+            start_date=payload["start_date"],
+            end_date=payload["end_date"],
+            status=payload["status"],
+            notes=payload["notes"],
+        )
+    )
+
+
+def create_tracking_baseline(db, order: Order, site: Site, payload: dict) -> None:
+    db.add(
+        ProjectSiteBaseline(
+            order_id=order.id,
+            site_id=site.id,
+            planned_start_date=payload["planned_start_date"],
+            planned_end_date=payload["planned_end_date"],
+            baseline_status=payload["baseline_status"],
+            source=payload["source"],
+            notes=payload["notes"],
+        )
+    )
+
+
+def create_demo_photo(update: ProjectProgressUpdate, payload: dict) -> ProjectProgressPhoto:
+    target_dir = ROOT / "uploads" / "project-progress" / update.order_id / update.id
+    target_dir.mkdir(parents=True, exist_ok=True)
+    filename = payload["filename"]
+    storage_path = target_dir / filename
+    storage_path.write_bytes(DEMO_PHOTO_BYTES)
+    return ProjectProgressPhoto(
+        update_id=update.id,
+        original_filename=filename,
+        stored_filename=filename,
+        content_type="image/png",
+        size_bytes=len(DEMO_PHOTO_BYTES),
+        storage_path=str(storage_path),
+        tag=payload["tag"],
+        caption=f'{payload["caption"]} {DEMO_TAG}',
+    )
+
+
+def create_tracking_update(db, order: Order, site: Site, payload: dict) -> None:
+    item = ProjectProgressUpdate(
+        order_id=order.id,
+        site_id=site.id,
+        title=payload["title"],
+        description=payload["description"],
+        status=payload["status"],
+        progress_percent=payload["progress_percent"],
+        next_action=payload["next_action"],
+        update_date=payload["update_date"],
+    )
+    db.add(item)
+    db.flush()
+    for photo_payload in payload["photos"]:
+        db.add(create_demo_photo(item, photo_payload))
+
+
+def create_tracking_task(db, order: Order, site: Site, payload: dict) -> None:
+    db.add(
+        ProjectTask(
+            order_id=order.id,
+            site_id=site.id,
+            task_name=payload["task_name"],
+            status=payload["status"],
+            weight_percent=Decimal(payload["weight_percent"]),
+            progress_percent=payload["progress_percent"],
+            responsible_type=payload["responsible_type"],
+            responsible_name=payload["responsible_name"],
+            due_date=payload["due_date"],
+            notes=payload["notes"],
+        )
+    )
+
+
+def create_tracking_issue(db, order: Order, site: Site, payload: dict) -> None:
+    db.add(
+        ProjectIssue(
+            order_id=order.id,
+            site_id=site.id,
+            title=payload["title"],
+            description=payload["description"],
+            severity=payload["severity"],
+            status=payload["status"],
+            responsible_type=payload["responsible_type"],
+            responsible_name=payload["responsible_name"],
+            resolution_note=payload["resolution_note"],
+        )
+    )
+
+
+def create_tracking_material(db, order: Order, site: Site, payload: dict) -> None:
+    db.add(
+        ProjectMaterialLog(
+            order_id=order.id,
+            site_id=site.id,
+            material_name=payload["material_name"],
+            quantity=payload["quantity"],
+            status=payload["status"],
+            notes=payload["notes"],
+        )
+    )
+
+
+def create_monitoring_report(db, order: Order, payload: dict) -> None:
+    summary = f'{payload["summary"]} {DEMO_TAG}'
+    db.add(
+        ProjectMonitoringReport(
+            order_id=order.id,
+            provider=payload["provider"],
+            health_status=payload["health_status"],
+            summary=summary,
+            analysis_json=dump_json(payload["analysis"]),
+            warnings_json=dump_json(payload["warnings"]),
+        )
+    )
+    for warning in payload["warnings"]:
+        site_name = warning.get("siteName")
+        site = next((candidate for candidate in order.sites if candidate.site_name == site_name), None) if site_name else None
+        db.add(
+            ProjectMonitoringAlert(
+                order_id=order.id,
+                site_id=site.id if site else None,
+                alert_type=warning["type"],
+                severity=warning["severity"],
+                status="open",
+                message=f'{warning["message"]} {DEMO_TAG}',
+                recommended_action=warning.get("recommendedAction") or "Bitte im Tracking pruefen und naechste Aktion dokumentieren.",
+                source="demo_seed",
+            )
+        )
 
 
 def create_work_entry(db, employee: Employee, order: Order, site: Site, payload: dict) -> WorkEntry:
@@ -866,6 +1455,7 @@ def create_proposals(db, customers_by_name: dict[str, Customer], orders_by_key: 
 
 
 def main() -> None:
+    init_db()
     db = SessionLocal()
     try:
         cleanup_demo_records(db)
@@ -893,11 +1483,27 @@ def main() -> None:
                 db.flush()
                 sites_by_key[(payload["key"], site_payload["site_name"])] = site
 
+        workshops_by_key: dict[str, Workshop] = {}
+        for payload in WORKSHOPS:
+            workshop = get_or_create_workshop(db, payload)
+            db.flush()
+            workshops_by_key[payload["key"]] = workshop
+
         for payload in ASSIGNMENTS:
             create_assignment(
                 db,
                 employees_by_email[payload["employee_email"]],
                 sites_by_key[(payload["order_key"], payload["site_name"])],
+                payload,
+            )
+        db.flush()
+
+        for payload in WORKSHOP_ASSIGNMENTS:
+            create_workshop_assignment(
+                db,
+                orders_by_key[payload["order_key"]],
+                sites_by_key[(payload["order_key"], payload["site_name"])],
+                workshops_by_key[payload["workshop_key"]],
                 payload,
             )
         db.flush()
@@ -988,6 +1594,50 @@ def main() -> None:
 
         create_proposals(db, customers_by_name, orders_by_key)
 
+        for payload in TRACKING_BASELINES:
+            create_tracking_baseline(
+                db,
+                orders_by_key[payload["order_key"]],
+                sites_by_key[(payload["order_key"], payload["site_name"])],
+                payload,
+            )
+
+        for payload in TRACKING_UPDATES:
+            create_tracking_update(
+                db,
+                orders_by_key[payload["order_key"]],
+                sites_by_key[(payload["order_key"], payload["site_name"])],
+                payload,
+            )
+
+        for payload in TRACKING_TASKS:
+            create_tracking_task(
+                db,
+                orders_by_key[payload["order_key"]],
+                sites_by_key[(payload["order_key"], payload["site_name"])],
+                payload,
+            )
+
+        for payload in TRACKING_ISSUES:
+            create_tracking_issue(
+                db,
+                orders_by_key[payload["order_key"]],
+                sites_by_key[(payload["order_key"], payload["site_name"])],
+                payload,
+            )
+
+        for payload in TRACKING_MATERIALS:
+            create_tracking_material(
+                db,
+                orders_by_key[payload["order_key"]],
+                sites_by_key[(payload["order_key"], payload["site_name"])],
+                payload,
+            )
+
+        db.flush()
+        for payload in MONITORING_REPORTS:
+            create_monitoring_report(db, orders_by_key[payload["order_key"]], payload)
+
         db.commit()
     except Exception:
         db.rollback()
@@ -999,8 +1649,16 @@ def main() -> None:
     print(f"- customers: {len(CUSTOMERS)}")
     print(f"- employees: {len(EMPLOYEES)}")
     print(f"- orders: {len(ORDERS)}")
+    print(f"- workshops: {len(WORKSHOPS)}")
     print(f"- assignments: {len(ASSIGNMENTS)}")
+    print(f"- workshop assignments: {len(WORKSHOP_ASSIGNMENTS)}")
     print(f"- work entries: {len(WORK_ENTRIES)}")
+    print(f"- tracking baselines: {len(TRACKING_BASELINES)}")
+    print(f"- tracking updates: {len(TRACKING_UPDATES)}")
+    print(f"- tracking tasks: {len(TRACKING_TASKS)}")
+    print(f"- tracking issues: {len(TRACKING_ISSUES)}")
+    print(f"- tracking materials: {len(TRACKING_MATERIALS)}")
+    print(f"- monitoring reports: {len(MONITORING_REPORTS)}")
     print("- invoices: 9 (8 draft, 1 paid)")
     print(f"- proposals: {len(PROPOSALS)}")
 

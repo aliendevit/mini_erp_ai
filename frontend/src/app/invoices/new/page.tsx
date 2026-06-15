@@ -6,6 +6,7 @@ import { useRouter } from 'next/navigation';
 
 import { apiGet, apiJson } from '../../../lib/api';
 import { useI18n } from '../../../lib/i18n';
+import { useToast } from '../../ui/ToastProvider';
 
 type Customer = { id: string; companyName: string };
 type WorkshopAssignment = {
@@ -49,6 +50,7 @@ function firstWorkshopName(site?: Site): string {
 export default function NewWorkshopInvoicePage() {
   const router = useRouter();
   const { locale } = useI18n();
+  const { showToast } = useToast();
   const [orders, setOrders] = useState<OrderSummary[]>([]);
   const [selectedOrderId, setSelectedOrderId] = useState('');
   const [order, setOrder] = useState<OrderDetail | null>(null);
@@ -176,9 +178,10 @@ export default function NewWorkshopInvoicePage() {
         notes: notes || null,
         items: cleanItems,
       });
+      showToast(locale === 'de' ? 'Rechnung wurde erstellt.' : locale === 'ar' ? 'تم إنشاء الفاتورة.' : 'Invoice created.', 'success');
       router.push(`/invoices/${response.invoice.id}`);
     } catch (error: any) {
-      alert(error.message);
+      showToast(error.message, 'error');
     } finally {
       setSaving(false);
     }

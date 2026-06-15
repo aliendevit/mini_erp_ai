@@ -8,10 +8,18 @@ import { type BrowserSpeechRecognition } from '../../lib/browser-speech';
 import { type NativeAudioRecordingSession, isNativeAudioRecordingSupported, startNativeAudioRecording } from '../../lib/native-audio-recorder';
 import { useI18n } from '../../lib/i18n';
 import { type WavRecordingSession, isWavRecordingSupported, startMonoWavRecording, transcodeBlobToMonoWav } from '../../lib/wav-recorder';
+import { ListPager } from '../ui/ListPager';
 
 type Customer = {
   id: string;
   companyName: string;
+};
+
+type PaginatedResponse<T> = {
+  items: T[];
+  total: number;
+  page: number;
+  pageSize: number;
 };
 
 type ProposalMessage = {
@@ -777,6 +785,7 @@ function formatDuration(durationMs: number): string {
 
 const INTAKE_LIST_RENDER_LIMIT = 12;
 const MESSAGE_RENDER_LIMIT = 30;
+const INTAKE_PAGE_SIZE = 20;
 
 export default function AIIntakePage() {
   const { locale, messages: m } = useI18n();
@@ -790,6 +799,8 @@ export default function AIIntakePage() {
   const [showAllMessages, setShowAllMessages] = useState(false);
   const [intakeListCollapsed, setIntakeListCollapsed] = useState(false);
   const [showAllIntakes, setShowAllIntakes] = useState(false);
+  const [intakePage, setIntakePage] = useState(1);
+  const [intakeTotal, setIntakeTotal] = useState(0);
   const [recommendations, setRecommendations] = useState<RecommendationPayload | null>(null);
   const [chatInput, setChatInput] = useState('');
   const [busy, setBusy] = useState(false);
@@ -838,12 +849,14 @@ export default function AIIntakePage() {
     return () => document.body.classList.remove('ai-intake-page-active');
   }, []);
 
-  async function loadLists(preferredId?: string) {
-    const [intakeRows, customerRows] = await Promise.all([
-      apiGet<ProposalDraft[]>('/ai/intakes'),
+  async function loadLists(preferredId?: string, pageOverride = intakePage) {
+    const [intakePageData, customerRows] = await Promise.all([
+      apiGet<PaginatedResponse<ProposalDraft>>(`/ai/intakes?paginated=true&page=${pageOverride}&pageSize=${INTAKE_PAGE_SIZE}`),
       apiGet<Customer[]>('/customers'),
     ]);
+    const intakeRows = intakePageData.items;
     setIntakes(intakeRows);
+    setIntakeTotal(intakePageData.total);
     setCustomers(customerRows);
     const storedId = getStoredSelectedIntakeId();
     const rowIds = new Set(intakeRows.map((item) => item.id));
@@ -906,7 +919,7 @@ export default function AIIntakePage() {
   useEffect(() => {
     loadLists().catch((error) => alert(error.message));
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [intakePage]);
 
   useEffect(() => {
     setPortalReady(true);
@@ -1084,7 +1097,8 @@ export default function AIIntakePage() {
     setBusy(true);
     try {
       const created = await createIntakeRecord();
-      await loadLists(created.id);
+      setIntakePage(1);
+      await loadLists(created.id, 1);
       return created.id;
     } catch (error: any) {
       setChatError(error.message || m.aiIntakePage.createIntakeFailed);
@@ -1482,7 +1496,8 @@ export default function AIIntakePage() {
       setRecommendationStatus('idle');
       setProposalGenerationStatus('idle');
       closeRecommendationExplanation();
-      await loadLists(created.id);
+      setIntakePage(1);
+      await loadLists(created.id, 1);
     } catch (error: any) {
       alert(error.message);
     } finally {
@@ -2052,6 +2067,7 @@ export default function AIIntakePage() {
           </button>
         )}
         {intakes.length === 0 && <div className="muted">{m.aiIntakePage.noIntakes}</div>}
+        <ListPager page={intakePage} total={intakeTotal} pageSize={INTAKE_PAGE_SIZE} onPageChange={setIntakePage} />
       </div>
     )}
       </div>

@@ -431,7 +431,7 @@ export const messages: Record<Locale, Messages> = {
   de: {
     app: {
       brand: 'Omran Portal',
-      title: 'Geschaeftsfuehrer-Portal',
+      title: 'Verwaltungsportal',
     },
     nav: {
       dashboard: 'Dashboard',
@@ -896,7 +896,7 @@ export const messages: Record<Locale, Messages> = {
   en: {
     app: {
       brand: 'Omran Billing',
-      title: 'Manager Portal',
+      title: 'Management Portal',
     },
     nav: {
       dashboard: 'Dashboard',

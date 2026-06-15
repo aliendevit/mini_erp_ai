@@ -1,3 +1,11 @@
+# Construction ERP - MozaicAI Internship 2026
+
+This is the starter template for the Construction ERP project.
+
+## Team Name
+
+Team-1.
+
 # Mini ERP AI Prototype
 
 Mini ERP AI is a prototype ERP for a renovation/construction company. It combines classic ERP workflows with AI-assisted project intake, proposal generation, staffing recommendations, speech-to-text, and professional PDF exports.

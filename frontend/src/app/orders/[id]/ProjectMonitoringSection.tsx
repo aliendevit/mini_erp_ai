@@ -6,6 +6,7 @@ import Link from 'next/link';
 
 import { apiGet, apiJson } from '../../../lib/api';
 import { useI18n } from '../../../lib/i18n';
+import { useToast } from '../../ui/ToastProvider';
 
 type TrackingWarning = {
   type: string;
@@ -358,6 +359,7 @@ function HistoryPanel({ reports, labels, none }: { reports: MonitoringReport[]; 
 
 export default function ProjectMonitoringSection({ orderId }: { orderId: string }) {
   const { messages, locale } = useI18n();
+  const { showToast } = useToast();
   const x = messages.trackingPage;
   const labels = x.labels;
   const [tracking, setTracking] = useState<TrackingPayload | null>(null);
@@ -365,11 +367,13 @@ export default function ProjectMonitoringSection({ orderId }: { orderId: string 
   const [history, setHistory] = useState<MonitoringReport[]>([]);
   const [alerts, setAlerts] = useState<MonitoringAlert[]>([]);
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
   const [analyzing, setAnalyzing] = useState(false);
   const [resolvingAlertId, setResolvingAlertId] = useState<string | null>(null);
 
   async function loadTracking() {
     setLoading(true);
+    setLoadError(null);
     try {
       const [data, historyData, alertData] = await Promise.all([
         apiGet<TrackingPayload>(`/orders/${orderId}/tracking`),
@@ -379,10 +383,17 @@ export default function ProjectMonitoringSection({ orderId }: { orderId: string 
       setTracking(data);
       setHistory(historyData.items || []);
       setAlerts(alertData.items || []);
+    } catch (error: any) {
+      setLoadError(error?.message || x.noRecords);
     } finally {
       setLoading(false);
     }
   }
+
+  useEffect(() => {
+    loadTracking();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [orderId]);
 
   async function analyzeProjectTracking() {
     setAnalyzing(true);
@@ -392,8 +403,9 @@ export default function ProjectMonitoringSection({ orderId }: { orderId: string 
       setAlerts(data.alerts || []);
       const historyData = await apiGet<{ items: MonitoringReport[] }>(`/orders/${orderId}/tracking/monitoring-history`);
       setHistory(historyData.items || []);
+      showToast(locale === 'de' ? 'KI-Analyse abgeschlossen.' : locale === 'ar' ? 'تم اكتمال تحليل المراقبة.' : 'AI analysis completed.', 'success');
     } catch (error: any) {
-      alert(error.message);
+      showToast(error.message, 'error');
     } finally {
       setAnalyzing(false);
     }
@@ -411,14 +423,16 @@ export default function ProjectMonitoringSection({ orderId }: { orderId: string 
             : 'Alert resolved from monitoring.',
       });
       await loadTracking();
+      showToast(locale === 'de' ? 'Warnung geschlossen.' : locale === 'ar' ? 'تم إغلاق التنبيه.' : 'Alert resolved.', 'success');
     } catch (error: any) {
-      alert(error.message);
+      showToast(error.message, 'error');
     } finally {
       setResolvingAlertId(null);
     }
   }
 
   if (loading && !tracking) return <div className="card">{x.loading}</div>;
+  if (loadError && !tracking) return <div className="card monitoring-warning monitoring-warning-high">{loadError}</div>;
   if (!tracking) return <div className="card">{x.noRecords}</div>;
 
   const actionCopy = locale === 'ar'

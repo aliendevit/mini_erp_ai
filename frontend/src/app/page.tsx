@@ -26,6 +26,8 @@ function dashboardLabels(locale: string) {
       quickAccess: '\u0648\u0635\u0648\u0644 \u0633\u0631\u064a\u0639',
       billingSetup: '\u0625\u0639\u062f\u0627\u062f \u0627\u0644\u0641\u0648\u062a\u0631\u0629',
       billingDesc: '\u0625\u062f\u0627\u0631\u0629 \u0631\u0642\u0645 \u0627\u0644\u0641\u0627\u062a\u0648\u0631\u0629 \u0627\u0644\u062a\u0627\u0644\u064a \u0628\u0634\u0643\u0644 \u0645\u0646\u0641\u0635\u0644 \u0648\u0645\u0646\u0638\u0645.',
+      setupTitle: '\u0628\u064a\u0627\u0646\u0627\u062a \u0627\u0644\u0634\u0631\u0643\u0629',
+      setupDesc: '\u0623\u0636\u0641 \u0623\u0648 \u062d\u062f\u0651\u062b \u0628\u064a\u0627\u0646\u0627\u062a \u0627\u0644\u0634\u0631\u0643\u0629 \u0627\u0644\u0645\u0631\u062a\u0628\u0637\u0629 \u0628\u0627\u0644\u062d\u0633\u0627\u0628.',
       launch: '\u0641\u062a\u062d',
       stats: [
         { value: '8', label: '\u0635\u0641\u062d\u0627\u062a \u062a\u0634\u063a\u064a\u0644 \u0631\u0626\u064a\u0633\u064a\u0629' },
@@ -54,6 +56,8 @@ function dashboardLabels(locale: string) {
       quickAccess: 'Quick Access',
       billingSetup: 'Billing Setup',
       billingDesc: 'Manage the next invoice sequence in a dedicated control panel.',
+      setupTitle: 'Company info',
+      setupDesc: 'Add or update the company profile connected to this account.',
       launch: 'Open',
       stats: [
         { value: '8', label: 'Core operation pages' },
@@ -81,6 +85,8 @@ function dashboardLabels(locale: string) {
     quickAccess: 'Schnellzugriff',
     billingSetup: 'Rechnungseinstellung',
     billingDesc: 'Naechste Rechnungsnummer in einem separaten Kontrollbereich verwalten.',
+    setupTitle: 'Firmendaten',
+    setupDesc: 'Firmendaten fuer dieses Konto anlegen oder aktualisieren.',
     launch: 'Oeffnen',
     stats: [
       { value: '8', label: 'Kernseiten fuer Betrieb' },
@@ -168,6 +174,14 @@ export default function Page() {
             <b>{labels.launch}</b>
           </Link>
         ))}
+        <Link href="/setup" className="dashboard-module-card card">
+          <span>SET</span>
+          <div>
+            <strong>{labels.setupTitle}</strong>
+            <small>{labels.setupDesc}</small>
+          </div>
+          <b>{labels.launch}</b>
+        </Link>
       </section>
 
       <section className="dashboard-billing-panel">

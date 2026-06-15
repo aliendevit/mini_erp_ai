@@ -28,6 +28,7 @@ type AuthResponse = {
     id: string;
     email: string;
     phone?: string | null;
+    companyProfileComplete?: boolean;
   };
 };
 
@@ -95,7 +96,7 @@ export function AuthForm({ mode }: AuthFormProps) {
       window.dispatchEvent(new Event('omran-auth-changed'));
       const message = mode === 'signup' ? msgs.authPage.validation.successSignup : msgs.authPage.validation.successLogin;
       setStatus(message);
-      router.push('/');
+      router.push(response.user.companyProfileComplete ? '/' : '/setup');
     } catch (error) {
       setApiError(error instanceof Error ? error.message : msgs.authPage.validation.genericError || 'Authentication failed.');
     }

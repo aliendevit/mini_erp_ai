@@ -7,6 +7,7 @@ import { useI18n } from '../../lib/i18n';
 import { apiGet, apiJson } from '../../lib/api';
 import { toYMD } from '../../lib/date';
 import { DateInput } from '../ui/DateInput';
+import { ListPager } from '../ui/ListPager';
 
 type Customer = { id: string; companyName: string };
 
@@ -21,9 +22,20 @@ type Invoice = {
   pauschalAmount?: string | number | null;
 };
 
+type PaginatedResponse<T> = {
+  items: T[];
+  total: number;
+  page: number;
+  pageSize: number;
+};
+
+const LIST_PAGE_SIZE = 12;
+
 export default function InvoicesPage() {
   const { locale, messages: m } = useI18n();
   const [items, setItems] = useState<Invoice[]>([]);
+  const [totalItems, setTotalItems] = useState(0);
+  const [page, setPage] = useState(1);
   const [status, setStatus] = useState<string>('');
   const [from, setFrom] = useState<Date | undefined>(undefined);
   const [to, setTo] = useState<Date | undefined>(undefined);
@@ -38,12 +50,17 @@ export default function InvoicesPage() {
     if (status) params.set('status', status);
     if (from) params.set('from', toYMD(from));
     if (to) params.set('to', toYMD(to));
+    params.set('paginated', 'true');
+    params.set('page', String(page));
+    params.set('pageSize', String(LIST_PAGE_SIZE));
     const search = params.toString();
     return search ? `?${search}` : '';
-  }, [status, from, to]);
+  }, [status, from, to, page]);
 
   async function load() {
-    setItems(await apiGet<Invoice[]>(`/invoices${query}`));
+    const data = await apiGet<PaginatedResponse<Invoice>>(`/invoices${query}`);
+    setItems(data.items);
+    setTotalItems(data.total);
   }
 
   useEffect(() => {
@@ -61,6 +78,17 @@ export default function InvoicesPage() {
     }
   }
 
+  function resetPageAndSetStatus(value: string) {
+    setPage(1);
+    setStatus(value);
+  }
+
+  function resetDateRange() {
+    setPage(1);
+    setFrom(undefined);
+    setTo(undefined);
+  }
+
   function statusLabel(statusValue?: string | null) {
     if (!statusValue) return m.common.none;
     return m.statuses.invoice[statusValue as keyof typeof m.statuses.invoice] ?? statusValue;
@@ -75,7 +103,7 @@ export default function InvoicesPage() {
           <p>{pageCopy.description}</p>
         </div>
         <div className="entity-hero-stats">
-            <div className="entity-stat"><strong>{items.length}</strong><span>{m.nav.invoices}</span></div>
+            <div className="entity-stat"><strong>{totalItems}</strong><span>{m.nav.invoices}</span></div>
             <div className="entity-stat"><strong>{items.filter((item) => item.status === 'draft').length}</strong><span>{m.statuses.invoice.draft}</span></div>
             <div className="entity-stat"><strong>{items.filter((item) => item.status === 'paid').length}</strong><span>{m.statuses.invoice.paid}</span></div>
         </div>
@@ -87,7 +115,7 @@ export default function InvoicesPage() {
       <div className="row">
         <div>
           <label>{m.invoicesPage.statusFilter}</label>
-          <select value={status} onChange={(event) => setStatus(event.target.value)}>
+          <select value={status} onChange={(event) => resetPageAndSetStatus(event.target.value)}>
             <option value="">{m.invoicesPage.all}</option>
             <option value="draft">{m.statuses.invoice.draft}</option>
             <option value="final">{m.statuses.invoice.final}</option>
@@ -97,11 +125,11 @@ export default function InvoicesPage() {
           </select>
         </div>
 
-        <DateInput label={m.common.start} value={from} onChange={setFrom} />
-        <DateInput label={m.common.end} value={to} onChange={setTo} />
+        <DateInput label={m.common.start} value={from} onChange={(value) => { setPage(1); setFrom(value); }} />
+        <DateInput label={m.common.end} value={to} onChange={(value) => { setPage(1); setTo(value); }} />
 
         <div style={{ alignSelf: 'end' }}>
-          <button className="btn" type="button" onClick={() => { setFrom(undefined); setTo(undefined); }}>
+          <button className="btn" type="button" onClick={resetDateRange}>
             {m.common.reset}
           </button>
         </div>
@@ -165,6 +193,7 @@ export default function InvoicesPage() {
           )}
         </tbody>
       </table>
+      <ListPager page={page} total={totalItems} pageSize={LIST_PAGE_SIZE} onPageChange={setPage} />
 
       <div className="spacer" />
       <div className="muted">{m.invoicesPage.deleteHint}</div>

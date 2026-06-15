@@ -17,12 +17,34 @@ class AuthLoginPayload(BaseModel):
     password: str
 
 
+class CompanyProfilePayload(BaseModel):
+    companyName: str
+    legalName: str | None = None
+    street: str | None = None
+    zipCode: str | None = None
+    city: str | None = None
+    country: str | None = "DE"
+    vatId: str | None = None
+    phone: str | None = None
+    email: str | None = None
+    website: str | None = None
+    notes: str | None = None
+
+
+class CompanyProfileResponse(CompanyProfilePayload):
+    id: str
+    ownerUserId: str
+    createdAt: datetime | None = None
+    updatedAt: datetime | None = None
+
+
 class AuthUserResponse(BaseModel):
     id: str
     email: str
     phone: str | None = None
     createdAt: datetime | None = None
     lastLoginAt: datetime | None = None
+    companyProfileComplete: bool = False
 
 
 class AuthResponse(BaseModel):

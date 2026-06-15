@@ -14,6 +14,12 @@ async function safeMessage(res: Response): Promise<string> {
   return `${res.status} ${res.statusText}`;
 }
 
+function authHeaders(): Record<string, string> {
+  if (typeof window === 'undefined') return {};
+  const token = localStorage.getItem('omran_auth_token');
+  return token ? { Authorization: `Bearer ${token}` } : {};
+}
+
 export async function apiGet<T>(path: string): Promise<T> {
   const res = await fetch(`${API_BASE}${path}`, { cache: 'no-store' });
   if (!res.ok) {
@@ -21,6 +27,22 @@ export async function apiGet<T>(path: string): Promise<T> {
     throw new Error(msg);
   }
   return res.json();
+}
+
+export async function apiAuthGet<T>(path: string): Promise<T> {
+  const res = await fetch(`${API_BASE}${path}`, {
+    cache: 'no-store',
+    headers: authHeaders(),
+  });
+  if (!res.ok) {
+    const msg = await safeMessage(res);
+    throw new Error(msg);
+  }
+  try {
+    return (await res.json()) as T;
+  } catch {
+    return {} as T;
+  }
 }
 
 export async function apiJson<T>(
@@ -42,6 +64,60 @@ export async function apiJson<T>(
   } catch {
     return {} as T;
   }
+}
+
+export async function apiAuthJson<T>(
+  path: string,
+  method: 'POST' | 'PUT' | 'PATCH' | 'DELETE',
+  body?: any
+): Promise<T> {
+  const res = await fetch(`${API_BASE}${path}`, {
+    method,
+    headers: { 'Content-Type': 'application/json', ...authHeaders() },
+    body: body ? JSON.stringify(body) : undefined,
+  });
+  if (!res.ok) {
+    const msg = await safeMessage(res);
+    throw new Error(msg);
+  }
+  try {
+    return (await res.json()) as T;
+  } catch {
+    return {} as T;
+  }
+}
+
+export async function apiAuthForm<T>(
+  path: string,
+  method: 'POST' | 'PATCH',
+  body: FormData
+): Promise<T> {
+  const res = await fetch(`${API_BASE}${path}`, {
+    method,
+    headers: authHeaders(),
+    body,
+  });
+  if (!res.ok) {
+    const msg = await safeMessage(res);
+    throw new Error(msg);
+  }
+  try {
+    return (await res.json()) as T;
+  } catch {
+    return {} as T;
+  }
+}
+
+export async function apiAuthBlob(path: string): Promise<Blob> {
+  const res = await fetch(`${API_BASE}${path}`, {
+    cache: 'no-store',
+    headers: authHeaders(),
+  });
+  if (!res.ok) {
+    const msg = await safeMessage(res);
+    throw new Error(msg);
+  }
+  return res.blob();
 }
 
 

@@ -8,7 +8,7 @@ import { zodResolver } from '@hookform/resolvers/zod';
 import { useI18n } from '../../lib/i18n';
 import { apiGet, apiJson } from '../../lib/api';
 import { fieldClass, OrderFormData, orderSchema, sanitizeDecimalInput, validationCopy } from '../../lib/form-validation';
-import { getPageSlice, ListPager } from '../ui/ListPager';
+import { ListPager } from '../ui/ListPager';
 
 type Customer = { id: string; companyName: string };
 
@@ -22,6 +22,13 @@ type Order = {
   status: string;
   defaultHourlyRate?: string | null;
   createdAt?: string;
+};
+
+type PaginatedResponse<T> = {
+  items: T[];
+  total: number;
+  page: number;
+  pageSize: number;
 };
 
 const LIST_PAGE_SIZE = 12;
@@ -47,6 +54,7 @@ export default function OrdersPage() {
   const { locale, messages: m } = useI18n();
   const [customers, setCustomers] = useState<Customer[]>([]);
   const [items, setItems] = useState<Order[]>([]);
+  const [totalItems, setTotalItems] = useState(0);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [page, setPage] = useState(1);
   const [loading, setLoading] = useState(false);
@@ -75,10 +83,11 @@ export default function OrdersPage() {
   async function load() {
     const [nextCustomers, nextOrders] = await Promise.all([
       apiGet<Customer[]>('/customers'),
-      apiGet<Order[]>('/orders'),
+      apiGet<PaginatedResponse<Order>>(`/orders?paginated=true&page=${page}&pageSize=${LIST_PAGE_SIZE}`),
     ]);
     setCustomers(nextCustomers);
-    setItems(nextOrders);
+    setItems(nextOrders.items);
+    setTotalItems(nextOrders.total);
     if (!editingId && !getValues('customerId') && nextCustomers.length > 0) {
       setValue('customerId', nextCustomers[0].id, { shouldValidate: true });
     }
@@ -87,7 +96,7 @@ export default function OrdersPage() {
   useEffect(() => {
     load().catch((error) => alert(error.message));
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [page]);
 
   function startNew() {
     setEditingId(null);
@@ -143,8 +152,6 @@ export default function OrdersPage() {
     }
   }
 
-  const pagedItems = getPageSlice(items, page, LIST_PAGE_SIZE);
-
   return (
     <div className="entity-page orders-page">
       <section className="entity-hero card">
@@ -154,7 +161,7 @@ export default function OrdersPage() {
           <p>{pageCopy.description}</p>
         </div>
         <div className="entity-hero-stats">
-          <div className="entity-stat"><strong>{items.length}</strong><span>{m.nav.orders}</span></div>
+          <div className="entity-stat"><strong>{totalItems}</strong><span>{m.nav.orders}</span></div>
           <div className="entity-stat"><strong>{items.filter((item) => item.status === 'open').length}</strong><span>{m.statuses.order.open}</span></div>
           <div className="entity-stat"><strong>{customers.length}</strong><span>{m.nav.customers}</span></div>
         </div>
@@ -238,7 +245,7 @@ export default function OrdersPage() {
             </tr>
           </thead>
           <tbody>
-            {pagedItems.map((order) => (
+            {items.map((order) => (
               <tr key={order.id}>
                 <td>{order.title}</td>
                 <td>{order.customer?.companyName || m.common.none}</td>
@@ -252,10 +259,10 @@ export default function OrdersPage() {
                 </td>
               </tr>
             ))}
-            {items.length === 0 && <tr><td colSpan={4} className="muted">{m.ordersPage.noOrders}</td></tr>}
+            {totalItems === 0 && <tr><td colSpan={4} className="muted">{m.ordersPage.noOrders}</td></tr>}
           </tbody>
         </table>
-        <ListPager page={page} total={items.length} pageSize={LIST_PAGE_SIZE} onPageChange={setPage} />
+        <ListPager page={page} total={totalItems} pageSize={LIST_PAGE_SIZE} onPageChange={setPage} />
         <div className="spacer" />
         <div className="muted">{m.ordersPage.deleteHint}</div>
       </div>

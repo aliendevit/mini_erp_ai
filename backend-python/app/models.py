@@ -60,6 +60,38 @@ class UserAccount(Base):
         "updatedAt", DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
     )
 
+    company_profile: Mapped["CompanyProfile | None"] = relationship(
+        back_populates="owner", uselist=False, cascade="all, delete-orphan"
+    )
+
+
+class CompanyProfile(Base):
+    __tablename__ = "CompanyProfile"
+    __table_args__ = (
+        UniqueConstraint("ownerUserId", name="CompanyProfile_ownerUserId_key"),
+        Index("CompanyProfile_ownerUserId_idx", "ownerUserId"),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid4()))
+    owner_user_id: Mapped[str] = mapped_column("ownerUserId", String(36), ForeignKey("UserAccount.id"), nullable=False)
+    company_name: Mapped[str] = mapped_column("companyName", String, nullable=False)
+    legal_name: Mapped[str | None] = mapped_column("legalName", String)
+    street: Mapped[str | None] = mapped_column(String)
+    zip_code: Mapped[str | None] = mapped_column("zipCode", String)
+    city: Mapped[str | None] = mapped_column(String)
+    country: Mapped[str] = mapped_column(String, nullable=False, default="DE", server_default="DE")
+    vat_id: Mapped[str | None] = mapped_column("vatId", String)
+    phone: Mapped[str | None] = mapped_column(String)
+    email: Mapped[str | None] = mapped_column(String)
+    website: Mapped[str | None] = mapped_column(String)
+    notes: Mapped[str | None] = mapped_column(Text)
+    created_at: Mapped[datetime] = mapped_column("createdAt", DateTime(timezone=True), server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(
+        "updatedAt", DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
+    )
+
+    owner: Mapped[UserAccount] = relationship(back_populates="company_profile")
+
 
 class Customer(Base):
     __tablename__ = "Customer"

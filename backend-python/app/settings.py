@@ -27,6 +27,7 @@ if not load_dotenv(ENV_FILE):
 class Settings(BaseModel):
     database_url: str = os.getenv("DATABASE_URL", "sqlite:///./app.db")
     cors_origin: str = os.getenv("CORS_ORIGIN", "http://localhost:3000")
+    log_level: str = os.getenv("LOG_LEVEL", "INFO").strip().upper()
     gemini_api_key: str = os.getenv("GEMINI_API_KEY", "").strip()
     gemini_model: str = os.getenv("GEMINI_MODEL", "gemini-1.5-flash").strip()
     assemblyai_api_key: str = os.getenv("ASSEMBLYAI_API_KEY", "").strip()

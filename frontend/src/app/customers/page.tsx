@@ -13,7 +13,7 @@ import {
   sanitizePhoneInput,
   validationCopy,
 } from '../../lib/form-validation';
-import { getPageSlice, ListPager } from '../ui/ListPager';
+import { ListPager } from '../ui/ListPager';
 
 type Customer = {
   id: string;
@@ -27,6 +27,13 @@ type Customer = {
   contactPhone?: string | null;
   contactEmail?: string | null;
   notes?: string | null;
+};
+
+type PaginatedResponse<T> = {
+  items: T[];
+  total: number;
+  page: number;
+  pageSize: number;
 };
 
 const LIST_PAGE_SIZE = 12;
@@ -70,6 +77,7 @@ function FieldError({ message }: { message?: string }) {
 export default function CustomersPage() {
   const { locale, messages: m } = useI18n();
   const [items, setItems] = useState<Customer[]>([]);
+  const [totalItems, setTotalItems] = useState(0);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [page, setPage] = useState(1);
   const [loading, setLoading] = useState(false);
@@ -100,13 +108,14 @@ export default function CustomersPage() {
   const phoneField = register('contactPhone');
 
   async function load() {
-    const data = await apiGet<Customer[]>('/customers');
-    setItems(data);
+    const data = await apiGet<PaginatedResponse<Customer>>(`/customers?paginated=true&page=${page}&pageSize=${LIST_PAGE_SIZE}`);
+    setItems(data.items);
+    setTotalItems(data.total);
   }
 
   useEffect(() => {
     load().catch((error) => alert(error.message));
-  }, []);
+  }, [page]);
 
   function startNew() {
     setEditingId(null);
@@ -151,8 +160,6 @@ export default function CustomersPage() {
     }
   }
 
-  const pagedItems = getPageSlice(items, page, LIST_PAGE_SIZE);
-
   return (
     <div className="entity-page customers-page">
       <section className="entity-hero card">
@@ -162,7 +169,7 @@ export default function CustomersPage() {
           <p>{pageCopy.description}</p>
         </div>
         <div className="entity-hero-stats">
-          <div className="entity-stat"><strong>{items.length}</strong><span>{m.nav.customers}</span></div>
+          <div className="entity-stat"><strong>{totalItems}</strong><span>{m.nav.customers}</span></div>
           <div className="entity-stat"><strong>{items.filter((item) => item.contactEmail || item.contactPhone).length}</strong><span>{m.common.contact}</span></div>
           <div className="entity-stat"><strong>{editingId ? pageCopy.edit : pageCopy.new}</strong><span>{m.common.status}</span></div>
         </div>
@@ -270,7 +277,7 @@ export default function CustomersPage() {
             </tr>
           </thead>
           <tbody>
-            {pagedItems.map((customer) => (
+            {items.map((customer) => (
               <tr key={customer.id}>
                 <td>{customer.companyName}</td>
                 <td>{[customer.zipCode, customer.city].filter(Boolean).join(' ') || m.common.none}</td>
@@ -283,14 +290,14 @@ export default function CustomersPage() {
                 </td>
               </tr>
             ))}
-            {items.length === 0 && (
+            {totalItems === 0 && (
               <tr>
                 <td colSpan={4} className="muted">{m.customersPage.noCustomers}</td>
               </tr>
             )}
           </tbody>
         </table>
-        <ListPager page={page} total={items.length} pageSize={LIST_PAGE_SIZE} onPageChange={setPage} />
+        <ListPager page={page} total={totalItems} pageSize={LIST_PAGE_SIZE} onPageChange={setPage} />
       </div>
     </div>
   );

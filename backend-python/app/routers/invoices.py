@@ -30,6 +30,25 @@ from ..utils import (
 router = APIRouter()
 
 
+def _page_params(page: int, page_size: int) -> tuple[int, int]:
+    safe_page = max(1, int(page or 1))
+    safe_page_size = min(100, max(1, int(page_size or 25)))
+    return safe_page, safe_page_size
+
+
+def _paginated_response(items: list[dict], total: int, page: int, page_size: int) -> dict:
+    total_pages = max(1, (total + page_size - 1) // page_size) if total else 1
+    return {
+        "items": items,
+        "total": total,
+        "page": page,
+        "pageSize": page_size,
+        "totalPages": total_pages,
+        "hasNext": page < total_pages,
+        "hasPrev": page > 1,
+    }
+
+
 def _sum_hours(lines: list[InvoiceLine]) -> float:
     return round(sum(float(line.hours_allocated or 0) for line in lines), 2)
 
@@ -388,8 +407,11 @@ def list_invoices(
     status: str | None = Query(default=None),
     from_date: str | None = Query(default=None, alias="from"),
     to_date: str | None = Query(default=None, alias="to"),
+    paginated: bool = Query(default=False),
+    page: int = Query(default=1, ge=1),
+    pageSize: int = Query(default=25, ge=1, le=100),
     db: Session = Depends(get_db),
-) -> list[dict]:
+) -> list[dict] | dict:
     from_dt, to_dt = _service_date_bounds(from_date, to_date)
     stmt = (
         select(Invoice)
@@ -401,7 +423,18 @@ def list_invoices(
     else:
         stmt = stmt.where(Invoice.status != "draft")
 
-    invoices = db.execute(stmt).unique().scalars().all()
+    if paginated and not (from_dt or to_dt):
+        count_stmt = select(func.count()).select_from(Invoice)
+        if status:
+            count_stmt = count_stmt.where(Invoice.status == status)
+        else:
+            count_stmt = count_stmt.where(Invoice.status != "draft")
+        safe_page, safe_page_size = _page_params(page, pageSize)
+        total = db.scalar(count_stmt) or 0
+        invoices = db.execute(stmt.offset((safe_page - 1) * safe_page_size).limit(safe_page_size)).unique().scalars().all()
+    else:
+        safe_page, safe_page_size, total = 1, pageSize, 0
+        invoices = db.execute(stmt).unique().scalars().all()
     out = []
     for invoice in invoices:
         if from_dt or to_dt:
@@ -418,6 +451,13 @@ def list_invoices(
         payload["totalHours"] = totals["totalHours"] if not (from_dt or to_dt) else _sum_hours(filtered_lines)
         payload["lineCount"] = len(filtered_lines)
         out.append(payload)
+    if paginated:
+        if from_dt or to_dt:
+            safe_page, safe_page_size = _page_params(page, pageSize)
+            total = len(out)
+            start = (safe_page - 1) * safe_page_size
+            out = out[start:start + safe_page_size]
+        return _paginated_response(out, total, safe_page, safe_page_size)
     return out
 
 

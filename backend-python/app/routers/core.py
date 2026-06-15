@@ -9,7 +9,7 @@ from uuid import uuid4
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, Response, UploadFile
 from fastapi.responses import FileResponse
-from sqlalchemy import func, select
+from sqlalchemy import func, or_, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, joinedload, selectinload
 
@@ -105,6 +105,25 @@ UPLOAD_ROOT = Path(__file__).resolve().parents[2] / "uploads" / "project-progres
 ALLOWED_PROGRESS_PHOTO_TYPES = {"image/jpeg": ".jpg", "image/png": ".png", "image/webp": ".webp"}
 MAX_PROGRESS_PHOTO_BYTES = 8 * 1024 * 1024
 MAX_PROGRESS_PHOTOS_PER_UPDATE = 10
+
+
+def _page_params(page: int, page_size: int) -> tuple[int, int]:
+    safe_page = max(1, int(page or 1))
+    safe_page_size = min(100, max(1, int(page_size or 25)))
+    return safe_page, safe_page_size
+
+
+def _paginated_response(items: list[dict], total: int, page: int, page_size: int) -> dict:
+    total_pages = max(1, ceil(total / page_size)) if total else 1
+    return {
+        "items": items,
+        "total": total,
+        "page": page,
+        "pageSize": page_size,
+        "totalPages": total_pages,
+        "hasNext": page < total_pages,
+        "hasPrev": page > 1,
+    }
 
 
 def _apply_workshop_payload(item: CustomerWorkshop, payload: CustomerWorkshopPayload) -> CustomerWorkshop:
@@ -971,9 +990,20 @@ def _can_modify_work_entry(db: Session, work_entry_id: str) -> dict:
 
 
 @router.get("/customers")
-def list_customers(db: Session = Depends(get_db)) -> list[dict]:
-    items = db.scalars(select(Customer).order_by(Customer.company_name.asc())).all()
-    return [customer_payload(item) for item in items]
+def list_customers(
+    paginated: bool = Query(default=False),
+    page: int = Query(default=1, ge=1),
+    pageSize: int = Query(default=25, ge=1, le=100),
+    db: Session = Depends(get_db),
+) -> list[dict] | dict:
+    stmt = select(Customer).order_by(Customer.company_name.asc())
+    if not paginated:
+        items = db.scalars(stmt).all()
+        return [customer_payload(item) for item in items]
+    safe_page, safe_page_size = _page_params(page, pageSize)
+    total = db.scalar(select(func.count()).select_from(Customer)) or 0
+    items = db.scalars(stmt.offset((safe_page - 1) * safe_page_size).limit(safe_page_size)).all()
+    return _paginated_response([customer_payload(item) for item in items], total, safe_page, safe_page_size)
 
 
 @router.get("/customers/{customer_id}")
@@ -1323,9 +1353,36 @@ def delete_employee(employee_id: str, db: Session = Depends(get_db)) -> dict:
 
 
 @router.get("/orders")
-def list_orders(db: Session = Depends(get_db)) -> list[dict]:
-    items = db.scalars(select(Order).options(joinedload(Order.customer)).order_by(Order.created_at.desc())).all()
-    return [order_payload(item, include_customer=True) for item in items]
+def list_orders(
+    q: str | None = Query(default=None),
+    status: str | None = Query(default=None),
+    paginated: bool = Query(default=False),
+    page: int = Query(default=1, ge=1),
+    pageSize: int = Query(default=25, ge=1, le=100),
+    db: Session = Depends(get_db),
+) -> list[dict] | dict:
+    stmt = select(Order).options(joinedload(Order.customer)).order_by(Order.created_at.desc())
+    count_stmt = select(func.count()).select_from(Order).join(Customer, Order.customer_id == Customer.id)
+    if status and status != "all":
+        stmt = stmt.where(Order.status == status)
+        count_stmt = count_stmt.where(Order.status == status)
+    if q and q.strip():
+        needle = f"%{q.strip().lower()}%"
+        condition = or_(
+            func.lower(Order.title).like(needle),
+            func.lower(Order.order_number).like(needle),
+            func.lower(Order.description).like(needle),
+            func.lower(Customer.company_name).like(needle),
+        )
+        stmt = stmt.join(Customer, Order.customer_id == Customer.id).where(condition)
+        count_stmt = count_stmt.where(condition)
+    if not paginated:
+        items = db.scalars(stmt).all()
+        return [order_payload(item, include_customer=True) for item in items]
+    safe_page, safe_page_size = _page_params(page, pageSize)
+    total = db.scalar(count_stmt) or 0
+    items = db.scalars(stmt.offset((safe_page - 1) * safe_page_size).limit(safe_page_size)).all()
+    return _paginated_response([order_payload(item, include_customer=True) for item in items], total, safe_page, safe_page_size)
 
 
 @router.get("/orders/{order_id}")
@@ -1544,15 +1601,26 @@ def analyze_order_tracking(order_id: str, locale: str = Query(default="en"), db:
 
 
 @router.get("/orders/{order_id}/tracking/monitoring-history")
-def list_order_monitoring_history(order_id: str, db: Session = Depends(get_db)) -> dict:
+def list_order_monitoring_history(
+    order_id: str,
+    page: int = 1,
+    pageSize: int = 20,
+    db: Session = Depends(get_db),
+) -> dict:
     if not db.get(Order, order_id):
         raise not_found()
+    safe_page, safe_page_size = _page_params(page, pageSize)
+    total = db.scalar(
+        select(func.count()).select_from(ProjectMonitoringReport).where(ProjectMonitoringReport.order_id == order_id)
+    ) or 0
     reports = db.scalars(
         select(ProjectMonitoringReport)
         .where(ProjectMonitoringReport.order_id == order_id)
         .order_by(ProjectMonitoringReport.created_at.desc())
+        .offset((safe_page - 1) * safe_page_size)
+        .limit(safe_page_size)
     ).all()
-    return {"items": [project_monitoring_report_payload(report) for report in reports]}
+    return _paginated_response([project_monitoring_report_payload(report) for report in reports], total, safe_page, safe_page_size)
 
 
 @router.get("/orders/{order_id}/tracking/alerts")
@@ -1560,6 +1628,8 @@ def list_order_monitoring_alerts(
     order_id: str,
     status: str | None = Query(default=None),
     syncCurrent: bool = Query(default=True),
+    page: int = 1,
+    pageSize: int = 50,
     db: Session = Depends(get_db),
 ) -> dict:
     if not db.get(Order, order_id):
@@ -1576,8 +1646,13 @@ def list_order_monitoring_alerts(
     )
     if status:
         stmt = stmt.where(ProjectMonitoringAlert.status == status)
-    alerts = db.scalars(stmt).all()
-    return {"items": [project_monitoring_alert_payload(alert) for alert in alerts]}
+    safe_page, safe_page_size = _page_params(page, pageSize)
+    count_stmt = select(func.count()).select_from(ProjectMonitoringAlert).where(ProjectMonitoringAlert.order_id == order_id)
+    if status:
+        count_stmt = count_stmt.where(ProjectMonitoringAlert.status == status)
+    total = db.scalar(count_stmt) or 0
+    alerts = db.scalars(stmt.offset((safe_page - 1) * safe_page_size).limit(safe_page_size)).all()
+    return _paginated_response([project_monitoring_alert_payload(alert) for alert in alerts], total, safe_page, safe_page_size)
 
 
 @router.patch("/orders/{order_id}/tracking/alerts/{alert_id}")
