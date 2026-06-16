@@ -14,14 +14,38 @@ async function safeMessage(res: Response): Promise<string> {
   return `${res.status} ${res.statusText}`;
 }
 
-function authHeaders(): Record<string, string> {
+export function authHeaders(): Record<string, string> {
   if (typeof window === 'undefined') return {};
   const token = localStorage.getItem('omran_auth_token');
   return token ? { Authorization: `Bearer ${token}` } : {};
 }
 
+function downloadFileName(path: string, fallback = 'download') {
+  const cleanPath = path.split('?')[0] || '';
+  return cleanPath.split('/').filter(Boolean).pop() || fallback;
+}
+
+export async function openAuthBlob(path: string, fileName?: string): Promise<void> {
+  const blob = await apiAuthBlob(path);
+  const url = URL.createObjectURL(blob);
+  window.open(url, '_blank', 'noopener,noreferrer');
+  setTimeout(() => URL.revokeObjectURL(url), 60_000);
+}
+
+export async function downloadAuthBlob(path: string, fileName?: string): Promise<void> {
+  const blob = await apiAuthBlob(path);
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement('a');
+  link.href = url;
+  link.download = fileName || downloadFileName(path);
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  URL.revokeObjectURL(url);
+}
+
 export async function apiGet<T>(path: string): Promise<T> {
-  const res = await fetch(`${API_BASE}${path}`, { cache: 'no-store' });
+  const res = await fetch(`${API_BASE}${path}`, { cache: 'no-store', headers: authHeaders() });
   if (!res.ok) {
     const msg = await safeMessage(res);
     throw new Error(msg);
@@ -52,7 +76,7 @@ export async function apiJson<T>(
 ): Promise<T> {
   const res = await fetch(`${API_BASE}${path}`, {
     method,
-    headers: { 'Content-Type': 'application/json' },
+    headers: { 'Content-Type': 'application/json', ...authHeaders() },
     body: body ? JSON.stringify(body) : undefined,
   });
   if (!res.ok) {
@@ -128,6 +152,7 @@ export async function apiForm<T>(
 ): Promise<T> {
   const res = await fetch(`${API_BASE}${path}`, {
     method,
+    headers: authHeaders(),
     body,
   });
   if (!res.ok) {

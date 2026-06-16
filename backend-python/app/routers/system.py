@@ -1,19 +1,23 @@
 from __future__ import annotations
 
 import json
+import os
 import shutil
+import subprocess
 import zipfile
 from datetime import datetime, timezone
 from pathlib import Path
+from urllib.parse import unquote, urlparse
 from uuid import uuid4
 
 from fastapi import APIRouter, Depends, File, Form, Header, HTTPException, UploadFile, status
 from fastapi.responses import FileResponse
 from sqlalchemy import select
 
-from ..database import SessionLocal, engine
+from ..database import SessionLocal, engine, init_db
 from ..models import UserAccount
 from ..routers.auth import _bearer_token, _hash_token, get_current_user
+from ..services.audit import record_audit
 from ..settings import get_settings
 
 router = APIRouter(prefix="/system", tags=["system"])
@@ -30,11 +34,100 @@ def _sqlite_path() -> Path:
     if not database_url.startswith("sqlite:///"):
         raise HTTPException(
             status.HTTP_400_BAD_REQUEST,
-            "UI backup/restore is available only for local SQLite deployments.",
+            "Current database is not SQLite.",
         )
     raw = database_url.replace("sqlite:///", "", 1)
     path = Path(raw)
     return path if path.is_absolute() else ROOT / path
+
+
+def _database_url() -> str:
+    return get_settings().database_url
+
+
+def _database_kind(database_url: str | None = None) -> str:
+    url = database_url or _database_url()
+    if url.startswith("sqlite:///"):
+        return "sqlite"
+    if url.startswith("postgresql://") or url.startswith("postgresql+pg8000://"):
+        return "postgresql"
+    raise HTTPException(status.HTTP_400_BAD_REQUEST, "Unsupported database type for backup/restore.")
+
+
+def _postgres_connection_parts(database_url: str | None = None) -> dict[str, str]:
+    url = (database_url or _database_url()).replace("postgresql+pg8000://", "postgresql://", 1)
+    parsed = urlparse(url)
+    database = parsed.path.lstrip("/")
+    if parsed.scheme != "postgresql" or not parsed.hostname or not parsed.username or not database:
+        raise HTTPException(status.HTTP_500_INTERNAL_SERVER_ERROR, "PostgreSQL DATABASE_URL is incomplete.")
+    return {
+        "host": parsed.hostname,
+        "port": str(parsed.port or 5432),
+        "user": unquote(parsed.username),
+        "password": unquote(parsed.password or ""),
+        "database": unquote(database),
+    }
+
+
+def _run_postgres_tool(args: list[str], password: str) -> None:
+    env = os.environ.copy()
+    if password:
+        env["PGPASSWORD"] = password
+    try:
+        subprocess.run(args, check=True, capture_output=True, text=True, env=env)
+    except FileNotFoundError as exc:
+        raise HTTPException(
+            status.HTTP_500_INTERNAL_SERVER_ERROR,
+            "PostgreSQL backup tools are not installed. Install pg_dump/pg_restore or use the Docker backend image.",
+        ) from exc
+    except subprocess.CalledProcessError as exc:
+        detail = (exc.stderr or exc.stdout or str(exc)).strip()
+        raise HTTPException(status.HTTP_500_INTERNAL_SERVER_ERROR, f"PostgreSQL backup command failed: {detail}") from exc
+
+
+def _dump_postgres_database(target: Path) -> None:
+    parts = _postgres_connection_parts()
+    _run_postgres_tool(
+        [
+            "pg_dump",
+            "--format=custom",
+            "--no-owner",
+            "--host",
+            parts["host"],
+            "--port",
+            parts["port"],
+            "--username",
+            parts["user"],
+            "--dbname",
+            parts["database"],
+            "--file",
+            str(target),
+        ],
+        parts["password"],
+    )
+
+
+def _restore_postgres_database(source: Path) -> None:
+    parts = _postgres_connection_parts()
+    engine.dispose()
+    _run_postgres_tool(
+        [
+            "pg_restore",
+            "--clean",
+            "--if-exists",
+            "--no-owner",
+            "--host",
+            parts["host"],
+            "--port",
+            parts["port"],
+            "--username",
+            parts["user"],
+            "--dbname",
+            parts["database"],
+            str(source),
+        ],
+        parts["password"],
+    )
 
 
 def _zip_directory(source: Path, target: Path) -> int:
@@ -71,15 +164,14 @@ def _backup_info(archive_path: Path) -> dict:
         "fileName": archive_path.name,
         "sizeBytes": archive_path.stat().st_size,
         "createdAt": manifest.get("createdAt"),
+        "databaseUrlKind": manifest.get("databaseUrlKind"),
         "databaseFile": manifest.get("databaseFile"),
         "uploadFileCount": manifest.get("uploadFileCount", 0),
     }
 
 
 def _create_backup_archive(label: str = "backup") -> dict:
-    db_path = _sqlite_path()
-    if not db_path.exists():
-        raise HTTPException(status.HTTP_404_NOT_FOUND, f"Database file not found: {db_path}")
+    database_kind = _database_kind()
 
     BACKUP_ROOT.mkdir(parents=True, exist_ok=True)
     stamp = datetime.now(timezone.utc).strftime("%Y%m%d-%H%M%S")
@@ -89,8 +181,15 @@ def _create_backup_archive(label: str = "backup") -> dict:
     work_dir.mkdir(parents=True, exist_ok=False)
 
     try:
-        db_target = work_dir / db_path.name
-        shutil.copy2(db_path, db_target)
+        if database_kind == "sqlite":
+            db_path = _sqlite_path()
+            if not db_path.exists():
+                raise HTTPException(status.HTTP_404_NOT_FOUND, f"Database file not found: {db_path}")
+            db_target = work_dir / db_path.name
+            shutil.copy2(db_path, db_target)
+        else:
+            db_target = work_dir / "database.dump"
+            _dump_postgres_database(db_target)
 
         upload_file_count = 0
         uploads_zip = work_dir / "uploads.zip"
@@ -101,7 +200,7 @@ def _create_backup_archive(label: str = "backup") -> dict:
 
         manifest = {
             "createdAt": datetime.now(timezone.utc).isoformat(),
-            "databaseUrlKind": "sqlite",
+            "databaseUrlKind": database_kind,
             "databaseFile": db_target.name,
             "uploadsArchive": uploads_zip.name,
             "uploadFileCount": upload_file_count,
@@ -163,7 +262,7 @@ def download_backup(file_name: str, _: UserAccount = Depends(get_current_user)) 
 async def restore_backup(
     backupFile: UploadFile = File(...),
     confirmation: str = Form(...),
-    _: str = Depends(_require_authenticated_user_id),
+    current_user_id: str = Depends(_require_authenticated_user_id),
 ) -> dict:
     if confirmation != "RESTORE":
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "Restore confirmation is required.")
@@ -185,16 +284,27 @@ async def restore_backup(
             _safe_extract(archive, extract_dir)
 
         manifest = json.loads((extract_dir / "manifest.json").read_text(encoding="utf-8"))
+        archive_database_kind = manifest.get("databaseUrlKind", "sqlite")
+        current_database_kind = _database_kind()
+        if archive_database_kind != current_database_kind:
+            raise HTTPException(
+                status.HTTP_400_BAD_REQUEST,
+                f"Backup database type is {archive_database_kind}, but current database is {current_database_kind}.",
+            )
         source_db = extract_dir / manifest.get("databaseFile", "")
         uploads_archive = extract_dir / manifest.get("uploadsArchive", "uploads.zip")
         if not source_db.exists():
             raise HTTPException(status.HTTP_400_BAD_REQUEST, "Backup database file is missing.")
 
         safety_backup = _create_backup_archive("pre-restore")
-        db_path = _sqlite_path()
-        db_path.parent.mkdir(parents=True, exist_ok=True)
-        engine.dispose()
-        shutil.copy2(source_db, db_path)
+        if current_database_kind == "sqlite":
+            db_path = _sqlite_path()
+            db_path.parent.mkdir(parents=True, exist_ok=True)
+            engine.dispose()
+            shutil.copy2(source_db, db_path)
+        else:
+            _restore_postgres_database(source_db)
+        init_db()
 
         if uploads_archive.exists():
             if UPLOADS_ROOT.exists():
@@ -202,6 +312,21 @@ async def restore_backup(
             UPLOADS_ROOT.mkdir(parents=True, exist_ok=True)
             with zipfile.ZipFile(uploads_archive, "r") as uploads_zip:
                 _safe_extract(uploads_zip, UPLOADS_ROOT)
+
+        audit_db = SessionLocal()
+        try:
+            record_audit(
+                audit_db,
+                action="backup.restored",
+                entity_type="SystemBackup",
+                entity_id=backupFile.filename,
+                actor_user_id=current_user_id,
+                summary="Backup restored from uploaded archive",
+                details={"fileName": backupFile.filename, "safetyBackup": safety_backup.get("fileName")},
+            )
+            audit_db.commit()
+        finally:
+            audit_db.close()
 
         return {"ok": True, "safetyBackup": safety_backup}
     finally:

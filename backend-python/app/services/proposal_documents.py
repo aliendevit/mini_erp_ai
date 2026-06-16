@@ -83,6 +83,20 @@ def _is_arabic_char(char: str) -> bool:
     return "\u0600" <= char <= "\u06ff" or "\u0750" <= char <= "\u077f" or "\u08a0" <= char <= "\u08ff"
 
 
+def _contains_arabic_text(text: str) -> bool:
+    return any(_is_arabic_char(char) for char in text)
+
+
+def _contains_arabic_value(value: Any) -> bool:
+    if isinstance(value, str):
+        return _contains_arabic_text(value)
+    if isinstance(value, Mapping):
+        return any(_contains_arabic_value(item) for item in value.values())
+    if isinstance(value, list):
+        return any(_contains_arabic_value(item) for item in value)
+    return False
+
+
 def _can_connect_to_previous(char: str) -> bool:
     return len(_ARABIC_FORMS.get(char, ())) >= 2
 
@@ -153,7 +167,7 @@ def _arabic_visual_text(text: str) -> str:
 
 def _display_text(value: Any, locale: str) -> str:
     text = _safe_text(value)
-    if locale == "ar":
+    if locale == "ar" or _contains_arabic_text(text):
         return _arabic_visual_text(text)
     return text
 
@@ -300,12 +314,13 @@ def _resolve_font_paths() -> tuple[Path, Path] | None:
     return None
 
 
-def _font_names(locale: str) -> tuple[str, str]:
-    if locale in _FONT_REGISTRY:
-        return _FONT_REGISTRY[locale]
+def _font_names(locale: str, force_unicode: bool = False) -> tuple[str, str]:
+    registry_key = f"{locale}:{int(force_unicode)}"
+    if registry_key in _FONT_REGISTRY:
+        return _FONT_REGISTRY[registry_key]
     regular_name = "Helvetica"
     bold_name = "Helvetica-Bold"
-    if _is_rtl(locale):
+    if _is_rtl(locale) or force_unicode:
         try:
             from reportlab.pdfbase import pdfmetrics
             from reportlab.pdfbase.ttfonts import TTFont
@@ -322,8 +337,8 @@ def _font_names(locale: str) -> tuple[str, str]:
         except Exception:
             regular_name = "Helvetica"
             bold_name = "Helvetica-Bold"
-    _FONT_REGISTRY[locale] = (regular_name, bold_name)
-    return _FONT_REGISTRY[locale]
+    _FONT_REGISTRY[registry_key] = (regular_name, bold_name)
+    return _FONT_REGISTRY[registry_key]
 
 
 def _key_value_table(rows: list[tuple[str, str]], normal_style, bold_style, rtl: bool, locale: str = "en"):
@@ -367,6 +382,9 @@ def build_proposal_pdf(payload: Mapping[str, Any], locale: str = "en") -> bytes:
             "commercial": "Kommerzielle Uebersicht",
             "scopeMatrix": "Leistungsuebersicht",
             "detailedScope": "Detaillierter Leistungsumfang",
+            "projectDescription": "Projektbeschreibung",
+            "siteScope": "Leistungsumfang",
+            "siteLocation": "Ort",
             "execution": "Ausfuehrung",
             "selectedHeadcount": "Finale interne Anzahl",
             "remainingInternalSkills": "Verbleibende interne Skills",
@@ -386,6 +404,9 @@ def build_proposal_pdf(payload: Mapping[str, Any], locale: str = "en") -> bytes:
             "commercial": "\u0645\u0644\u062e\u0635 \u0645\u0627\u0644\u064a",
             "scopeMatrix": "\u0645\u0644\u062e\u0635 \u0646\u0637\u0627\u0642 \u0627\u0644\u0639\u0645\u0644",
             "detailedScope": "\u062a\u0641\u0627\u0635\u064a\u0644 \u0646\u0637\u0627\u0642 \u0627\u0644\u062a\u0646\u0641\u064a\u0630",
+            "projectDescription": "\u0648\u0635\u0641 \u0627\u0644\u0645\u0634\u0631\u0648\u0639",
+            "siteScope": "\u0646\u0637\u0627\u0642 \u0627\u0644\u0639\u0645\u0644",
+            "siteLocation": "\u0627\u0644\u0645\u0648\u0642\u0639",
             "execution": "\u0627\u0644\u062a\u0646\u0641\u064a\u0630",
             "selectedHeadcount": "\u0627\u0644\u0639\u062f\u062f \u0627\u0644\u062f\u0627\u062e\u0644\u064a \u0627\u0644\u0646\u0647\u0627\u0626\u064a",
             "remainingInternalSkills": "\u0627\u0644\u0645\u0647\u0627\u0631\u0627\u062a \u0627\u0644\u062f\u0627\u062e\u0644\u064a\u0629 \u0627\u0644\u0645\u062a\u0628\u0642\u064a\u0629",
@@ -405,6 +426,9 @@ def build_proposal_pdf(payload: Mapping[str, Any], locale: str = "en") -> bytes:
             "commercial": "Commercial Summary",
             "scopeMatrix": "Scope Matrix",
             "detailedScope": "Detailed Scope of Work",
+            "projectDescription": "Project Description",
+            "siteScope": "Scope of Work",
+            "siteLocation": "Location",
             "execution": "Execution",
             "selectedHeadcount": "Final Internal Count",
             "remainingInternalSkills": "Remaining Internal Skills",
@@ -421,7 +445,7 @@ def build_proposal_pdf(payload: Mapping[str, Any], locale: str = "en") -> bytes:
     }.get(locale, {})
     fallback = labels["notMentioned"]
     rtl = _is_rtl(locale)
-    regular_font, bold_font = _font_names(locale)
+    regular_font, bold_font = _font_names(locale, force_unicode=_contains_arabic_value(payload))
     alignment = TA_RIGHT if rtl else TA_LEFT
     navy = colors.HexColor("#12344d")
     blue = colors.HexColor("#2563eb")
@@ -462,6 +486,94 @@ def build_proposal_pdf(payload: Mapping[str, Any], locale: str = "en") -> bytes:
             return fallback
         currency_text = _safe_text(currency or payload.get("currency"))
         return f"{number} {currency_text}".strip()
+
+    def meaningful(value: Any) -> str:
+        text = _safe_text(value)
+        return "" if text in {"-", "None", "null"} else text
+
+    def normalized_words(value: str) -> set[str]:
+        return {
+            word.strip(".,;:!?()[]{}\"'،؛؟")
+            for word in value.lower().split()
+            if len(word.strip(".,;:!?()[]{}\"'،؛؟")) > 2
+        }
+
+    def is_similar_text(left: str, right: str) -> bool:
+        left_clean = meaningful(left)
+        right_clean = meaningful(right)
+        if not left_clean or not right_clean:
+            return False
+        if left_clean in right_clean or right_clean in left_clean:
+            return True
+        left_words = normalized_words(left_clean)
+        right_words = normalized_words(right_clean)
+        if not left_words or not right_words:
+            return False
+        overlap = len(left_words & right_words)
+        return overlap / max(1, min(len(left_words), len(right_words))) >= 0.65
+
+    def list_or_empty(values: Any) -> list[str]:
+        if not isinstance(values, list):
+            return []
+        return [meaningful(item) for item in values if meaningful(item)]
+
+    def sentence_join(parts: list[str]) -> str:
+        cleaned: list[str] = []
+        for part in parts:
+            text = meaningful(part)
+            if not text:
+                continue
+            cleaned.append(text if text.endswith((".", "!", "?", "۔")) else f"{text}.")
+        return " ".join(cleaned)
+
+    def site_location(site_map: Mapping[str, Any]) -> str:
+        return " ".join(
+            part
+            for part in [
+                meaningful(site_map.get("street")),
+                meaningful(site_map.get("zipCode")),
+                meaningful(site_map.get("city")),
+            ]
+            if part
+        )
+
+    def site_scope_text(site_map: Mapping[str, Any]) -> str:
+        notes = meaningful(site_map.get("notes"))
+        skills = list_or_empty(site_map.get("requiredSkills"))
+        certifications = list_or_empty(site_map.get("requiredCertifications"))
+        parts = []
+        if notes:
+            parts.append(notes)
+        if skills:
+            parts.append(f"{labels['skills']}: {', '.join(skills)}")
+        if certifications:
+            parts.append(f"{labels['certifications']}: {', '.join(certifications)}")
+        return sentence_join(parts) or fallback
+
+    def build_document_summary(sites: list[Any]) -> str:
+        explicit = meaningful(payload.get("summary"))
+        if len(explicit.split()) >= 7:
+            return explicit
+        site_names = [
+            meaningful(site.get("siteName"))
+            for site in sites
+            if isinstance(site, Mapping) and meaningful(site.get("siteName"))
+        ]
+        skill_names: list[str] = []
+        for site in sites:
+            if isinstance(site, Mapping):
+                for skill in list_or_empty(site.get("requiredSkills")):
+                    if skill not in skill_names:
+                        skill_names.append(skill)
+        generated = sentence_join(
+            [
+                meaningful(payload.get("orderTitle")),
+                meaningful(payload.get("orderDescription")),
+                f"{labels['sites']}: {', '.join(site_names)}" if site_names else "",
+                f"{labels['skills']}: {', '.join(skill_names)}" if skill_names else "",
+            ]
+        )
+        return generated or explicit or fallback
 
     def section(title: str):
         return [Spacer(1, 7), P(title, section_style), Spacer(1, 3)]
@@ -562,6 +674,8 @@ def build_proposal_pdf(payload: Mapping[str, Any], locale: str = "en") -> bytes:
     paid_total = sum(number_value((p if isinstance(p, Mapping) else {}).get("amount")) or 0 for p in payments if isinstance(p, Mapping) and str(p.get("status") or "").lower() in {"received", "paid", "completed"})
     planned_total = sum(number_value((p if isinstance(p, Mapping) else {}).get("amount")) or 0 for p in payments if isinstance(p, Mapping))
     remaining = estimated_price - paid_total if estimated_price is not None else None
+    sites = payload.get("proposedSites") if isinstance(payload.get("proposedSites"), list) else []
+    recommended_team = payload.get("recommendedTeam") if isinstance(payload.get("recommendedTeam"), Mapping) else {}
 
     overview_cards = table_values([
         [P(labels["customer"], card_label), P(_safe_text(payload.get("customerCompanyName")) or fallback, card_value)],
@@ -594,7 +708,8 @@ def build_proposal_pdf(payload: Mapping[str, Any], locale: str = "en") -> bytes:
     project_rows = [
         table_values([P(labels["orderTitle"], bold), P(_safe_text(payload.get("orderTitle")) or fallback, normal)]),
         table_values([P(labels["period"], bold), P(period_value or fallback, normal)]),
-        table_values([P(labels["description"], bold), P(payload.get("orderDescription") or fallback, normal)]),
+        table_values([P(labels["status"], bold), P(status, normal)]),
+        table_values([P(labels["proposalId"], bold), P(_safe_text(payload.get("id")) or fallback, normal)]),
     ]
     two_col = Table([[styled_table(customer_rows, [37 * mm, 48 * mm], compact=True), styled_table(project_rows, [37 * mm, 48 * mm], compact=True)]], colWidths=[87 * mm, 87 * mm])
     two_col.setStyle(TableStyle([("VALIGN", (0, 0), (-1, -1), "TOP"), ("LEFTPADDING", (0, 0), (-1, -1), 0), ("RIGHTPADDING", (0, 0), (-1, -1), 5)]))
@@ -602,10 +717,11 @@ def build_proposal_pdf(payload: Mapping[str, Any], locale: str = "en") -> bytes:
         two_col = Table([[styled_table(project_rows, [48 * mm, 37 * mm], compact=True), styled_table(customer_rows, [48 * mm, 37 * mm], compact=True)]], colWidths=[87 * mm, 87 * mm])
         two_col.setStyle(TableStyle([("VALIGN", (0, 0), (-1, -1), "TOP"), ("LEFTPADDING", (0, 0), (-1, -1), 5), ("RIGHTPADDING", (0, 0), (-1, -1), 0)]))
     story.append(two_col)
+    document_summary = build_document_summary(sites)
     summary_card = Table(
         [
             [H(labels["summary"])],
-            [P(payload.get("summary") or payload.get("orderDescription") or fallback, normal)],
+            [P(document_summary, normal)],
         ],
         colWidths=[176 * mm],
         hAlign="RIGHT" if rtl else "LEFT",
@@ -622,10 +738,35 @@ def build_proposal_pdf(payload: Mapping[str, Any], locale: str = "en") -> bytes:
         ("TOPPADDING", (0, 1), (-1, 1), 9),
         ("BOTTOMPADDING", (0, 1), (-1, 1), 9),
     ]))
-    story.extend([Spacer(1, 10), summary_card, Spacer(1, 16)])
+    story.extend([Spacer(1, 10), summary_card])
 
-    sites = payload.get("proposedSites") if isinstance(payload.get("proposedSites"), list) else []
-    recommended_team = payload.get("recommendedTeam") if isinstance(payload.get("recommendedTeam"), Mapping) else {}
+    description_text = meaningful(payload.get("orderDescription"))
+    if is_similar_text(description_text, document_summary):
+        description_text = ""
+    if description_text:
+        description_card = Table(
+            [
+                [H(tr("projectDescription"))],
+                [P(description_text, normal)],
+            ],
+            colWidths=[176 * mm],
+            hAlign="RIGHT" if rtl else "LEFT",
+        )
+        description_card.setStyle(TableStyle([
+            ("BACKGROUND", (0, 0), (-1, 0), navy),
+            ("BACKGROUND", (0, 1), (-1, 1), colors.white),
+            ("BOX", (0, 0), (-1, -1), 0.8, border),
+            ("VALIGN", (0, 0), (-1, -1), "TOP"),
+            ("LEFTPADDING", (0, 0), (-1, -1), 8),
+            ("RIGHTPADDING", (0, 0), (-1, -1), 8),
+            ("TOPPADDING", (0, 0), (-1, 0), 6),
+            ("BOTTOMPADDING", (0, 0), (-1, 0), 6),
+            ("TOPPADDING", (0, 1), (-1, 1), 9),
+            ("BOTTOMPADDING", (0, 1), (-1, 1), 9),
+        ]))
+        story.extend([Spacer(1, 8), description_card])
+    story.append(Spacer(1, 16))
+
     recommended_sites: dict[int, Mapping[str, Any]] = {}
     for site_rec in recommended_team.get("sites", []) if isinstance(recommended_team.get("sites"), list) else []:
         if isinstance(site_rec, Mapping):
@@ -636,18 +777,18 @@ def build_proposal_pdf(payload: Mapping[str, Any], locale: str = "en") -> bytes:
 
     story.extend(section(tr("scopeMatrix")))
     if sites:
-        headings = table_values([H(labels["sites"]), H(labels["skills"]), H(labels["coverage"]), H(labels["siteHours"])])
+        headings = table_values([H(labels["sites"]), H(tr("siteScope")), H(labels["coverage"]), H(labels["siteHours"])])
         rows = [headings]
         for index, site in enumerate(sites, start=1):
             site_map = site if isinstance(site, Mapping) else {}
             rec_map = recommended_sites.get(index - 1, {})
             rows.append(table_values([
                 P(f"{index}. {_safe_text(site_map.get('siteName')) or fallback}", normal),
-                P(_list_text(site_map.get("requiredSkills")), normal),
+                P(site_scope_text(site_map), normal),
                 P(_safe_text(site_map.get("coverageType") or rec_map.get("coverageType") or fallback), normal),
                 P(_safe_number(site_map.get("estimatedHours") or rec_map.get("estimatedHours")), normal),
             ]))
-        story.append(styled_table(rows, [58 * mm, 58 * mm, 40 * mm, 20 * mm], header=True, compact=True))
+        story.append(styled_table(rows, [42 * mm, 78 * mm, 36 * mm, 20 * mm], header=True, compact=True))
     else:
         story.append(P(fallback, normal))
 
@@ -657,6 +798,9 @@ def build_proposal_pdf(payload: Mapping[str, Any], locale: str = "en") -> bytes:
             site_map = site if isinstance(site, Mapping) else {}
             rec_map = recommended_sites.get(index - 1, {})
             site_title = f"{index}. {_safe_text(site_map.get('siteName')) or fallback}"
+            workshop_summary = rec_map.get("workshopSummary") if isinstance(rec_map.get("workshopSummary"), Mapping) else {}
+            workshop_name = meaningful(site_map.get("assignedWorkshopName")) or meaningful(workshop_summary.get("name"))
+            workshop_skills = list_or_empty(site_map.get("workshopCoveredSkills")) or list_or_empty(workshop_summary.get("coveredSkills"))
             selected_names: list[str] = []
             selected_ids = set(str(value) for value in rec_map.get("autoSelectedEmployeeIds", []) if value)
             candidate_lists = []
@@ -673,17 +817,21 @@ def build_proposal_pdf(payload: Mapping[str, Any], locale: str = "en") -> bytes:
                     if name and (not selected_ids or employee_id in selected_ids or candidate_list is rec_map.get("recommendedTeam")):
                         selected_names.append(name)
             detail_rows = [
-                table_values([P(labels["notes"], bold), P(site_map.get("notes") or rec_map.get("coverageNote") or fallback, normal)]),
+                table_values([P(tr("siteLocation"), bold), P(site_location(site_map) or fallback, normal)]),
+                table_values([P(tr("siteScope"), bold), P(site_scope_text(site_map), normal)]),
                 table_values([P(labels["skills"], bold), P(_list_text(site_map.get("requiredSkills")), normal)]),
                 table_values([P(labels["certifications"], bold), P(_list_text(site_map.get("requiredCertifications")), normal)]),
                 table_values([P(labels["coverage"], bold), P(_safe_text(site_map.get("coverageType") or rec_map.get("coverageType") or fallback), normal)]),
-                table_values([P(labels["workshop"], bold), P(_safe_text(site_map.get("assignedWorkshopName") or (rec_map.get("workshopSummary") or {}).get("name") if isinstance(rec_map.get("workshopSummary"), Mapping) else "") or fallback, normal)]),
-                table_values([P(labels["workshopSkills"], bold), P(_list_text(site_map.get("workshopCoveredSkills") or ((rec_map.get("workshopSummary") or {}).get("coveredSkills") if isinstance(rec_map.get("workshopSummary"), Mapping) else [])), normal)]),
+                table_values([P(labels["workshop"], bold), P(workshop_name or fallback, normal)]),
+                table_values([P(labels["workshopSkills"], bold), P(", ".join(workshop_skills) if workshop_skills else fallback, normal)]),
                 table_values([P(labels["headcount"], bold), P(_safe_number(rec_map.get("recommendedHeadcount") if rec_map else site_map.get("recommendedHeadcount")), normal)]),
                 table_values([P(tr("selectedHeadcount"), bold), P(_safe_number(site_map.get("selectedInternalHeadcount") or rec_map.get("selectedInternalHeadcount")), normal)]),
                 table_values([P(tr("remainingInternalSkills"), bold), P(_list_text(rec_map.get("internalRequiredSkills")), normal)]),
                 table_values([P(labels["team"], bold), P(", ".join(dict.fromkeys(selected_names)) if selected_names else fallback, normal)]),
             ]
+            coverage_note = meaningful(rec_map.get("coverageNote"))
+            if coverage_note and coverage_note != meaningful(site_map.get("notes")):
+                detail_rows.append(table_values([P(labels["notes"], bold), P(coverage_note, normal)]))
             warning = _safe_text(rec_map.get("staffingWarning"))
             if warning:
                 detail_rows.append(table_values([P(tr("warning"), bold), P(warning, normal)]))

@@ -14,7 +14,7 @@ The active stack is:
 
 - `frontend/` - Next.js + React + TypeScript UI (For Now)
 - `backend-python/` - FastAPI + SQLAlchemy backend
-- SQLite by default for local development, PostgreSQL optional through Docker
+- PostgreSQL for Docker/deployment runtime; SQLite only as a local/test fallback
 - Gemini / OpenRouter for text AI workflows
 - AssemblyAI for speech-to-text
 - ReportLab / python-docx for document exports
@@ -94,7 +94,7 @@ flowchart LR
     U[Manager / Browser] --> F[Next.js Frontend]
     F -->|REST /api/*| B[FastAPI Backend]
     B --> S[Business Services]
-    S --> DB[(SQLite local / PostgreSQL optional)]
+    S --> DB[(PostgreSQL runtime / SQLite local fallback)]
     S --> AI[Gemini / OpenRouter]
     S --> STT[AssemblyAI]
     S --> DOC[PDF and Word Services]
@@ -105,7 +105,7 @@ Layers:
 - Presentation layer: Next.js UI, AI Intake page, proposal editing, staffing selection, voice controls
 - API/application layer: FastAPI routers for ERP, invoices, AI, and documents
 - Business logic layer: proposal extraction, staffing recommendation, PDF generation, transcription integration
-- Persistence layer: SQLAlchemy models and SQLite/PostgreSQL
+- Persistence layer: SQLAlchemy models on PostgreSQL, with SQLite fallback for local/test runs
 - External AI integration layer: Gemini/OpenRouter for text, AssemblyAI for speech-to-text
 
 ---
@@ -117,6 +117,7 @@ Layers:
 Requirements:
 
 - Python 3.12+
+- SQLite is used automatically if `DATABASE_URL` is not changed from the local default
 
 ```powershell
 cd backend-python
@@ -154,10 +155,23 @@ Default frontend URL:
 
 ## Local Development With Docker
 
-Use the Python backend compose file:
+Use the Python backend compose file. This starts PostgreSQL, the FastAPI backend, and the Next.js frontend:
 
 ```powershell
+$env:POSTGRES_PASSWORD="choose-a-real-password"
 docker compose -f docker-compose.python.yml up --build
+```
+
+Default URLs:
+
+- Frontend: `http://localhost:3000`
+- Backend: `http://localhost:3001`
+- Health check: `http://localhost:3001/api/health`
+
+Expected health response includes the active database type:
+
+```json
+{ "ok": true, "database": "postgresql" }
 ```
 
 Reset Docker data:
@@ -175,13 +189,19 @@ Do not use the default `docker-compose.yml` for the current AI prototype unless 
 Backend (`backend-python/.env`):
 
 ```env
-DATABASE_URL=sqlite:///./app.db
+DATABASE_URL=postgresql://omran:change-me-local@localhost:5432/omran
 CORS_ORIGIN=http://localhost:3000
 GEMINI_API_KEY=
 GEMINI_MODEL=gemini-1.5-flash
 OPENROUTER_API_KEY=
 OPENROUTER_MODEL=openrouter/free
 ASSEMBLYAI_API_KEY=
+```
+
+Local-only SQLite fallback:
+
+```env
+DATABASE_URL=sqlite:///./app.db
 ```
 
 Frontend (`frontend/.env.local`):
@@ -289,10 +309,10 @@ Recently verified areas include:
 ## Current Constraints
 
 - Prototype is single-tenant.
-- Authentication, authorization, roles, and audit logs are not implemented yet.
+- Login, backend endpoint protection, and audit logs are implemented. Role-based permissions still need production hardening.
 - AI is assistive, not authoritative.
 - Progress tracking with photos, OCR, OCR + RAG, and Progress Monitoring AI are planned ideas, not fully implemented.
-- SQLite is convenient for local development; PostgreSQL is preferred for multi-user deployment.
+- Docker/deployment should use PostgreSQL. SQLite is only for local demos and automated tests.
 
 ---
 

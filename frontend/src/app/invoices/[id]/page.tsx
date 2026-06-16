@@ -5,7 +5,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 
 import { useI18n } from '../../../lib/i18n';
-import { API_BASE, apiGet, apiJson } from '../../../lib/api';
+import { apiGet, apiJson, openAuthBlob, downloadAuthBlob } from '../../../lib/api';
 
 type Customer = { id: string; companyName: string };
 type Employee = { id: string; firstName: string; lastName: string };
@@ -109,6 +109,18 @@ export default function InvoiceDetailPage() {
     }
   }
 
+  async function openDocument(path: string, downloadName?: string) {
+    try {
+      if (path.endsWith('/word') || path.endsWith('/word/pauschal')) {
+        await downloadAuthBlob(path, downloadName);
+      } else {
+        await openAuthBlob(path);
+      }
+    } catch (error: any) {
+      alert(error.message);
+    }
+  }
+
   if (!invoice) {
     return <div className="card"><div className="muted">{m.common.loading}</div></div>;
   }
@@ -125,10 +137,10 @@ export default function InvoiceDetailPage() {
           <Link className="btn" href="/invoices">{m.common.back}</Link>
           {invoice.status !== 'draft' && (
             <>
-              <a className="btn" href={`${API_BASE}/invoices/${invoice.id}/pdf`} target="_blank" rel="noreferrer">{m.invoiceDetailPage.detailedPdf}</a>
-              <a className="btn" href={`${API_BASE}/invoices/${invoice.id}/pdf/pauschal`} target="_blank" rel="noreferrer">{m.invoiceDetailPage.fixedPdf}</a>
-              <a className="btn" href={`${API_BASE}/invoices/${invoice.id}/word`} target="_blank" rel="noreferrer">{m.invoiceDetailPage.detailedWord}</a>
-              <a className="btn" href={`${API_BASE}/invoices/${invoice.id}/word/pauschal`} target="_blank" rel="noreferrer">{m.invoiceDetailPage.fixedWord}</a>
+              <button className="btn" type="button" onClick={() => openDocument(`/invoices/${invoice.id}/pdf`)}>{m.invoiceDetailPage.detailedPdf}</button>
+              <button className="btn" type="button" onClick={() => openDocument(`/invoices/${invoice.id}/pdf/pauschal`)}>{m.invoiceDetailPage.fixedPdf}</button>
+              <button className="btn" type="button" onClick={() => openDocument(`/invoices/${invoice.id}/word`, `invoice-${invoice.id}.docx`)}>{m.invoiceDetailPage.detailedWord}</button>
+              <button className="btn" type="button" onClick={() => openDocument(`/invoices/${invoice.id}/word/pauschal`, `invoice-${invoice.id}-fixed.docx`)}>{m.invoiceDetailPage.fixedWord}</button>
             </>
           )}
           {invoice.status === 'draft' && <button className="btn danger" onClick={del}>{m.common.delete}</button>}

@@ -39,6 +39,7 @@ from ..models import (
     WorkshopSiteAssignment,
     WorkEntry,
 )
+from ..routers.auth import get_current_user
 from ..schemas import (
     AssignmentPayload,
     AssignmentUpdatePayload,
@@ -59,6 +60,7 @@ from ..schemas import (
     WorkshopSiteAssignmentPayload,
     WorkEntryPayload,
 )
+from ..services.audit import actor_id, record_audit
 from ..services.tracking_ai import analyze_tracking
 from ..services.timesheets import compute_timesheet_data
 from ..services.timesheet_documents import build_timesheet_docx, build_timesheet_pdf
@@ -99,7 +101,7 @@ from ..utils import (
     json_dumps,
 )
 
-router = APIRouter()
+router = APIRouter(dependencies=[Depends(get_current_user)])
 
 UPLOAD_ROOT = Path(__file__).resolve().parents[2] / "uploads" / "project-progress"
 ALLOWED_PROGRESS_PHOTO_TYPES = {"image/jpeg": ".jpg", "image/png": ".png", "image/webp": ".webp"}
@@ -1403,7 +1405,11 @@ def get_order(order_id: str, db: Session = Depends(get_db)) -> dict:
 
 
 @router.post("/orders", status_code=201)
-def create_order(payload: OrderPayload, db: Session = Depends(get_db)) -> dict:
+def create_order(
+    payload: OrderPayload,
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+) -> dict:
     item = Order(
         customer_id=payload.customerId,
         order_number=payload.orderNumber or None,
@@ -1416,6 +1422,16 @@ def create_order(payload: OrderPayload, db: Session = Depends(get_db)) -> dict:
         currency=payload.currency or "EUR",
     )
     db.add(item)
+    db.flush()
+    record_audit(
+        db,
+        action="order.created",
+        entity_type="Order",
+        entity_id=item.id,
+        actor_user_id=actor_id(current_user),
+        summary=f"Order created: {item.title}",
+        details={"customerId": item.customer_id, "status": item.status},
+    )
     db.commit()
     db.refresh(item)
     return order_payload(item)
@@ -1441,11 +1457,24 @@ def update_order(order_id: str, payload: OrderPayload, db: Session = Depends(get
 
 
 @router.delete("/orders/{order_id}")
-def delete_order(order_id: str, db: Session = Depends(get_db)) -> dict:
+def delete_order(
+    order_id: str,
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+) -> dict:
     item = db.get(Order, order_id)
     if not item:
         raise not_found()
     try:
+        record_audit(
+            db,
+            action="order.deleted",
+            entity_type="Order",
+            entity_id=item.id,
+            actor_user_id=actor_id(current_user),
+            summary=f"Order deleted: {item.title}",
+            details={"customerId": item.customer_id, "status": item.status},
+        )
         db.delete(item)
         db.commit()
         return {"ok": True}
@@ -1661,6 +1690,7 @@ def update_order_monitoring_alert(
     alert_id: str,
     payload: ProjectMonitoringAlertUpdatePayload,
     db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
 ) -> dict:
     alert = db.get(ProjectMonitoringAlert, alert_id)
     if not alert or alert.order_id != order_id:
@@ -1668,6 +1698,20 @@ def update_order_monitoring_alert(
     alert.status = payload.status
     alert.resolution_note = _normalize_optional_text(payload.resolutionNote)
     alert.resolved_at = datetime.now(timezone.utc) if payload.status in {"resolved", "dismissed"} else None
+    record_audit(
+        db,
+        action="monitoring_alert.updated",
+        entity_type="ProjectMonitoringAlert",
+        entity_id=alert.id,
+        actor_user_id=actor_id(current_user),
+        summary=f"Monitoring alert marked {alert.status}",
+        details={
+            "orderId": order_id,
+            "alertType": alert.alert_type,
+            "severity": alert.severity,
+            "resolutionNote": alert.resolution_note,
+        },
+    )
     db.commit()
     db.refresh(alert)
     return project_monitoring_alert_payload(alert)

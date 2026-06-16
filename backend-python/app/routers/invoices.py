@@ -10,7 +10,9 @@ from sqlalchemy.orm import Session, joinedload, selectinload
 
 from ..database import get_db
 from ..models import Invoice, InvoiceLine, Order, WorkEntry
+from ..routers.auth import get_current_user
 from ..schemas import InvoiceMergePayload, InvoiceUpdatePayload, WorkshopInvoiceCreatePayload
+from ..services.audit import actor_id, record_audit
 from ..services.invoice_documents import build_invoice_docx, build_invoice_pdf
 from ..services.invoice_totals import recalc_invoice_totals
 from ..utils import (
@@ -27,7 +29,7 @@ from ..utils import (
     work_entry_payload,
 )
 
-router = APIRouter()
+router = APIRouter(dependencies=[Depends(get_current_user)])
 
 
 def _page_params(page: int, page_size: int) -> tuple[int, int]:
@@ -520,7 +522,12 @@ def get_invoice(invoice_id: str, db: Session = Depends(get_db)) -> dict:
 
 
 @router.put("/invoices/{invoice_id}")
-def update_invoice(invoice_id: str, payload: InvoiceUpdatePayload, db: Session = Depends(get_db)) -> dict:
+def update_invoice(
+    invoice_id: str,
+    payload: InvoiceUpdatePayload,
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+) -> dict:
     invoice = db.get(Invoice, invoice_id)
     if not invoice:
         raise not_found()
@@ -534,6 +541,15 @@ def update_invoice(invoice_id: str, payload: InvoiceUpdatePayload, db: Session =
         db.flush()
         if invoice.status != "draft" and (not invoice.invoice_number or not invoice.issue_date):
             ensure_invoice_has_number_and_date(db, invoice.id)
+        record_audit(
+            db,
+            action="invoice.updated",
+            entity_type="Invoice",
+            entity_id=invoice.id,
+            actor_user_id=actor_id(current_user),
+            summary=f"Invoice updated: {invoice.invoice_number or invoice.id}",
+            details={"status": invoice.status, "customerId": invoice.customer_id},
+        )
         db.commit()
         db.refresh(invoice)
         return invoice_payload(invoice)
@@ -543,13 +559,26 @@ def update_invoice(invoice_id: str, payload: InvoiceUpdatePayload, db: Session =
 
 
 @router.delete("/invoices/{invoice_id}")
-def delete_invoice(invoice_id: str, db: Session = Depends(get_db)) -> dict:
+def delete_invoice(
+    invoice_id: str,
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+) -> dict:
     invoice = db.get(Invoice, invoice_id)
     if not invoice:
         raise not_found()
     ensure(invoice.status == "draft", "Nur Entwurf-Rechnungen koennen geloescht werden.", 409)
 
     try:
+        record_audit(
+            db,
+            action="invoice.deleted",
+            entity_type="Invoice",
+            entity_id=invoice.id,
+            actor_user_id=actor_id(current_user),
+            summary=f"Invoice deleted: {invoice.invoice_number or invoice.id}",
+            details={"status": invoice.status, "customerId": invoice.customer_id},
+        )
         db.query(InvoiceLine).filter(InvoiceLine.invoice_id == invoice_id).delete(synchronize_session=False)
         db.delete(invoice)
         db.commit()

@@ -15,6 +15,7 @@ from sqlalchemy.orm import Session, selectinload
 
 from ..database import get_db
 from ..models import Proposal, ProposalMessage, Workshop
+from ..routers.auth import get_current_user
 from ..schemas import (
     AIIntakeConfirmPayload,
     AIIntakeCreatePayload,
@@ -22,6 +23,7 @@ from ..schemas import (
     AIWorkSummaryPayload,
     ProposalDraftPayload,
 )
+from ..services.audit import actor_id, record_audit
 from ..services.ai_summary import build_work_summary
 from ..services.assemblyai_client import transcribe_audio
 from ..services.gemini_client import ensure_gemini_ready, stream_text
@@ -40,7 +42,7 @@ from ..services.proposals import (
 )
 from ..utils import as_datetime, end_of_utc_day, ensure, json_dumps, json_loads, not_found, proposal_payload
 
-router = APIRouter()
+router = APIRouter(dependencies=[Depends(get_current_user)])
 logger = logging.getLogger(__name__)
 
 SUPPORTED_WAV_CONTENT_TYPES = {
@@ -661,7 +663,12 @@ def explain_recommendation_stream(
 
 
 @router.post("/ai/intakes/{proposal_id}/confirm")
-def confirm_intake(proposal_id: str, payload: AIIntakeConfirmPayload, db: Session = Depends(get_db)) -> dict:
+def confirm_intake(
+    proposal_id: str,
+    payload: AIIntakeConfirmPayload,
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+) -> dict:
     proposal = _get_proposal(db, proposal_id)
     site_assignments = {item.siteIndex: item.employeeIds for item in payload.siteAssignments}
     result = confirm_proposal(
@@ -671,6 +678,15 @@ def confirm_intake(proposal_id: str, payload: AIIntakeConfirmPayload, db: Sessio
         site_assignments=site_assignments,
         manual_estimated_price=payload.manualEstimatedPrice,
         payment_drafts=[item.model_dump() for item in payload.paymentDrafts] if payload.paymentDrafts is not None else None,
+    )
+    record_audit(
+        db,
+        action="ai_intake.confirmed",
+        entity_type="Proposal",
+        entity_id=proposal.id,
+        actor_user_id=actor_id(current_user),
+        summary=f"AI intake confirmed: {proposal.order_title or proposal.id}",
+        details={"orderId": result.get("orderId"), "customerId": result.get("customerId")},
     )
     db.commit()
     db.refresh(proposal)

@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useState } from 'react';
 
 import { useI18n } from '../../lib/i18n';
-import { API_BASE, apiGet } from '../../lib/api';
+import { API_BASE, apiGet, downloadAuthBlob, openAuthBlob } from '../../lib/api';
 
 type Employee = { id: string; firstName: string; lastName: string };
 
@@ -69,17 +69,29 @@ export default function StundenTabellePage() {
     }
   }
 
-  const pdfHref = useMemo(() => {
-    if (!employeeId) return '#';
+  const documentQuery = useMemo(() => {
+    if (!employeeId) return '';
     const query = new URLSearchParams({ employeeId, month: String(month), year: String(year) });
-    return `${API_BASE}/timesheets/pdf?${query.toString()}`;
+    return query.toString();
   }, [employeeId, month, year]);
 
-  const wordHref = useMemo(() => {
-    if (!employeeId) return '#';
-    const query = new URLSearchParams({ employeeId, month: String(month), year: String(year) });
-    return `${API_BASE}/timesheets/word?${query.toString()}`;
-  }, [employeeId, month, year]);
+  async function openTimesheetPdf() {
+    if (!documentQuery) return;
+    try {
+      await openAuthBlob(`/timesheets/pdf?${documentQuery}`);
+    } catch (error: any) {
+      alert(error.message);
+    }
+  }
+
+  async function downloadTimesheetWord() {
+    if (!documentQuery) return;
+    try {
+      await downloadAuthBlob(`/timesheets/word?${documentQuery}`, `timesheet-${year}-${month}.docx`);
+    } catch (error: any) {
+      alert(error.message);
+    }
+  }
 
   return (
     <div className="card">
@@ -128,12 +140,12 @@ export default function StundenTabellePage() {
             {loading ? m.common.loading : m.timesheetPage.loadTable}
           </button>
 
-          <a className="btn" href={pdfHref} target="_blank" rel="noreferrer" onClick={(event) => !employeeId && event.preventDefault()}>
+          <button className="btn" type="button" disabled={!employeeId} onClick={openTimesheetPdf}>
             PDF
-          </a>
-          <a className="btn" href={wordHref} target="_blank" rel="noreferrer" onClick={(event) => !employeeId && event.preventDefault()}>
+          </button>
+          <button className="btn" type="button" disabled={!employeeId} onClick={downloadTimesheetWord}>
             Word
-          </a>
+          </button>
         </div>
       </div>
 

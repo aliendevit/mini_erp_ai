@@ -65,7 +65,7 @@ class SystemBackupTests(unittest.TestCase):
         (self.uploads_dir / "photo.txt").write_text("changed upload", encoding="utf-8")
 
         upload = UploadFile(file=io.BytesIO(archive_bytes), filename=backup["fileName"])
-        result = asyncio.run(system.restore_backup(backupFile=upload, confirmation="RESTORE", _="user-id"))
+        result = asyncio.run(system.restore_backup(backupFile=upload, confirmation="RESTORE", current_user_id="user-id"))
 
         self.assertTrue(result["ok"])
         self.assertEqual(self.db_path.read_bytes(), b"original database")
@@ -75,7 +75,7 @@ class SystemBackupTests(unittest.TestCase):
     def test_restore_backup_requires_confirmation(self) -> None:
         upload = UploadFile(file=io.BytesIO(b"not used"), filename="omran-backup-test.zip")
         with self.assertRaises(HTTPException) as caught:
-            asyncio.run(system.restore_backup(backupFile=upload, confirmation="NO", _="user-id"))
+            asyncio.run(system.restore_backup(backupFile=upload, confirmation="NO", current_user_id="user-id"))
 
         self.assertEqual(caught.exception.status_code, 400)
 

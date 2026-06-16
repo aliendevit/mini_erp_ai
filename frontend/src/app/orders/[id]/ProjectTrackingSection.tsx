@@ -4,7 +4,7 @@ import { useEffect, useMemo, useState } from 'react';
 import type { ReactNode } from 'react';
 import Link from 'next/link';
 
-import { API_BASE, apiForm, apiGet, apiJson } from '../../../lib/api';
+import { API_BASE, apiAuthBlob, apiForm, apiGet, apiJson } from '../../../lib/api';
 import { useI18n } from '../../../lib/i18n';
 import { ListPager } from '../../ui/ListPager';
 import { useToast } from '../../ui/ToastProvider';
@@ -286,7 +286,13 @@ function dateInputValue(value: string | null | undefined) {
   return value ? value.substring(0, 10) : '';
 }
 
-function photoSrc(photo: TrackingPhoto) {
+function photoApiPath(photo: TrackingPhoto) {
+  if (photo.photoUrl.startsWith('/api')) return photo.photoUrl.replace(/^\/api/, '') || photo.photoUrl;
+  if (photo.photoUrl.startsWith(API_BASE)) return photo.photoUrl.substring(API_BASE.length) || photo.photoUrl;
+  return null;
+}
+
+function photoPublicSrc(photo: TrackingPhoto) {
   return photo.photoUrl.startsWith('/api') ? `${backendBase}${photo.photoUrl}` : photo.photoUrl;
 }
 
@@ -1051,13 +1057,56 @@ function PhotoGrid({ photos, labels, none }: { photos: TrackingPhoto[]; labels: 
   return (
     <div className="tracking-photo-grid">
       {photos.map((photo) => (
-        <a key={photo.id} href={photoSrc(photo)} target="_blank" rel="noreferrer" className="card tracking-photo-card">
-          <img src={photoSrc(photo)} alt={photo.caption || photo.originalFilename || labels.projectPhoto} style={{ width: '100%', height: 110, objectFit: 'cover', borderRadius: 8 }} />
-          <div className="muted" style={{ marginTop: 6 }}>{displayLabel(photo.tag, labels, none)}</div>
-          {photo.caption && <div>{photo.caption}</div>}
-        </a>
+        <AuthenticatedPhotoCard key={photo.id} photo={photo} labels={labels} none={none} />
       ))}
     </div>
+  );
+}
+
+function AuthenticatedPhotoCard({ photo, labels, none }: { photo: TrackingPhoto; labels: Labels; none: string }) {
+  const [src, setSrc] = useState<string>(() => (photoApiPath(photo) ? '' : photoPublicSrc(photo)));
+  const [failed, setFailed] = useState(false);
+
+  useEffect(() => {
+    const apiPath = photoApiPath(photo);
+    if (!apiPath) {
+      setSrc(photoPublicSrc(photo));
+      setFailed(false);
+      return;
+    }
+    let active = true;
+    let objectUrl = '';
+    setSrc('');
+    setFailed(false);
+    apiAuthBlob(apiPath)
+      .then((blob) => {
+        if (!active) return;
+        objectUrl = URL.createObjectURL(blob);
+        setSrc(objectUrl);
+      })
+      .catch(() => {
+        if (active) setFailed(true);
+      });
+    return () => {
+      active = false;
+      if (objectUrl) URL.revokeObjectURL(objectUrl);
+    };
+  }, [photo.id, photo.photoUrl]);
+
+  const label = photo.caption || photo.originalFilename || labels.projectPhoto;
+
+  return (
+    <a href={src || '#'} target="_blank" rel="noreferrer" className="card tracking-photo-card" onClick={(event) => !src && event.preventDefault()}>
+      {src ? (
+        <img src={src} alt={label} style={{ width: '100%', height: 110, objectFit: 'cover', borderRadius: 8 }} />
+      ) : (
+        <div className="muted" style={{ height: 110, display: 'grid', placeItems: 'center' }}>
+          {failed ? labels.error || 'Error' : labels.loading || 'Loading'}
+        </div>
+      )}
+      <div className="muted" style={{ marginTop: 6 }}>{displayLabel(photo.tag, labels, none)}</div>
+      {photo.caption && <div>{photo.caption}</div>}
+    </a>
   );
 }
 

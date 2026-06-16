@@ -93,6 +93,25 @@ class CompanyProfile(Base):
     owner: Mapped[UserAccount] = relationship(back_populates="company_profile")
 
 
+class AuditLog(Base):
+    __tablename__ = "AuditLog"
+    __table_args__ = (
+        Index("AuditLog_action_idx", "action"),
+        Index("AuditLog_entity_idx", "entityType", "entityId"),
+        Index("AuditLog_actorUserId_idx", "actorUserId"),
+        Index("AuditLog_createdAt_idx", "createdAt"),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid4()))
+    action: Mapped[str] = mapped_column(String, nullable=False)
+    entity_type: Mapped[str] = mapped_column("entityType", String, nullable=False)
+    entity_id: Mapped[str | None] = mapped_column("entityId", String)
+    actor_user_id: Mapped[str | None] = mapped_column("actorUserId", String(36))
+    summary: Mapped[str | None] = mapped_column(Text)
+    details_json: Mapped[str | None] = mapped_column("detailsJson", Text)
+    created_at: Mapped[datetime] = mapped_column("createdAt", DateTime(timezone=True), server_default=func.now())
+
+
 class Customer(Base):
     __tablename__ = "Customer"
 

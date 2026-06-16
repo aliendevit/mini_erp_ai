@@ -3,7 +3,7 @@
 import Link from 'next/link';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
-import { API_BASE, apiGet, apiJson } from '../../lib/api';
+import { API_BASE, apiGet, apiJson, authHeaders } from '../../lib/api';
 import { type BrowserSpeechRecognition } from '../../lib/browser-speech';
 import { type NativeAudioRecordingSession, isNativeAudioRecordingSupported, startNativeAudioRecording } from '../../lib/native-audio-recorder';
 import { useI18n } from '../../lib/i18n';
@@ -1337,6 +1337,7 @@ export default function AIIntakePage() {
       setTranscribing(true);
       const res = await fetch(`${API_BASE}/ai/intakes/${intakeId}/messages/transcribe`, {
         method: 'POST',
+        headers: authHeaders(),
         body: formData,
       });
       if (!res.ok) throw new Error(await safeMessage(res));
@@ -1557,7 +1558,7 @@ export default function AIIntakePage() {
     try {
       await persistDraftSnapshot();
       const url = `${API_BASE}/ai/intakes/${selectedId}/pdf?locale=${encodeURIComponent(locale)}`;
-      const res = await fetch(url);
+      const res = await fetch(url, { headers: authHeaders() });
       if (!res.ok) {
         throw new Error(await safeMessage(res));
       }
@@ -1606,7 +1607,7 @@ export default function AIIntakePage() {
     try {
       const res = await fetch(`${API_BASE}/ai/intakes/${intakeId}/messages/stream`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', ...authHeaders() },
         body: JSON.stringify({ content }),
       });
       if (!res.ok) {
@@ -1701,7 +1702,7 @@ export default function AIIntakePage() {
       await persistDraftSnapshot();
       const response = await fetch(
         `${API_BASE}/ai/intakes/${selectedId}/recommend-assignments/${siteIndex}/explain/stream?locale=${encodeURIComponent(locale)}`,
-        { method: 'POST' }
+        { method: 'POST', headers: authHeaders() }
       );
       if (!response.ok) {
         throw new Error(await safeMessage(response));
