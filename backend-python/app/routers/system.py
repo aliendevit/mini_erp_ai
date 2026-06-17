@@ -12,10 +12,10 @@ from uuid import uuid4
 
 from fastapi import APIRouter, Depends, File, Form, Header, HTTPException, UploadFile, status
 from fastapi.responses import FileResponse
-from sqlalchemy import select
+from sqlalchemy import desc, func, or_, select
 
 from ..database import SessionLocal, engine, init_db
-from ..models import UserAccount
+from ..models import AuditLog, UserAccount
 from ..routers.auth import _bearer_token, _hash_token, get_current_user
 from ..services.audit import record_audit
 from ..settings import get_settings
@@ -27,6 +27,15 @@ BACKUP_ROOT = ROOT / "backups"
 UPLOADS_ROOT = ROOT / "uploads"
 BACKUP_PREFIX = "omran-backup-"
 BACKUP_SUFFIX = ".zip"
+AUDIT_ACTIONS = {
+    "invoice.updated",
+    "invoice.deleted",
+    "order.created",
+    "order.deleted",
+    "ai.proposal.confirmed",
+    "backup.restored",
+    "monitoring.alert.updated",
+}
 
 
 def _sqlite_path() -> Path:
@@ -240,11 +249,108 @@ def _require_authenticated_user_id(authorization: str | None = Header(default=No
         db.close()
 
 
+def _parse_positive_int(value: int, fallback: int, *, minimum: int = 1, maximum: int = 100) -> int:
+    if value < minimum:
+        return fallback
+    return min(value, maximum)
+
+
+def _audit_log_payload(item: AuditLog, actor_email: str | None) -> dict:
+    try:
+        details = json.loads(item.details_json or "{}")
+    except Exception:
+        details = {}
+    return {
+        "id": item.id,
+        "action": item.action,
+        "entityType": item.entity_type,
+        "entityId": item.entity_id,
+        "actorUserId": item.actor_user_id,
+        "actorEmail": actor_email,
+        "summary": item.summary,
+        "details": details,
+        "createdAt": item.created_at.isoformat() if item.created_at else None,
+    }
+
+
 @router.get("/backups")
 def list_backups(_: UserAccount = Depends(get_current_user)) -> dict:
     BACKUP_ROOT.mkdir(parents=True, exist_ok=True)
     backups = sorted(BACKUP_ROOT.glob(f"{BACKUP_PREFIX}*{BACKUP_SUFFIX}"), key=lambda item: item.stat().st_mtime, reverse=True)
     return {"items": [_backup_info(item) for item in backups[:20]]}
+
+
+@router.get("/audit-logs")
+def list_audit_logs(
+    page: int = 1,
+    pageSize: int = 20,
+    action: str | None = None,
+    entityType: str | None = None,
+    q: str | None = None,
+    _: UserAccount = Depends(get_current_user),
+) -> dict:
+    page = max(page, 1)
+    page_size = _parse_positive_int(pageSize, 20, maximum=50)
+    db = SessionLocal()
+    try:
+        filters = []
+        if action and action != "all":
+            filters.append(AuditLog.action == action)
+        if entityType and entityType != "all":
+            filters.append(AuditLog.entity_type == entityType)
+        if q and q.strip():
+            pattern = f"%{q.strip()}%"
+            filters.append(
+                or_(
+                    AuditLog.action.ilike(pattern),
+                    AuditLog.entity_type.ilike(pattern),
+                    AuditLog.entity_id.ilike(pattern),
+                    AuditLog.summary.ilike(pattern),
+                    AuditLog.actor_user_id.ilike(pattern),
+                    UserAccount.email.ilike(pattern),
+                )
+            )
+
+        base_query = select(AuditLog, UserAccount.email).outerjoin(UserAccount, AuditLog.actor_user_id == UserAccount.id)
+        count_query = select(func.count(AuditLog.id)).outerjoin(UserAccount, AuditLog.actor_user_id == UserAccount.id)
+        if filters:
+            base_query = base_query.where(*filters)
+            count_query = count_query.where(*filters)
+
+        total = db.scalar(count_query) or 0
+        rows = db.execute(
+            base_query.order_by(desc(AuditLog.created_at))
+            .offset((page - 1) * page_size)
+            .limit(page_size)
+        ).all()
+
+        stats = {
+            "total": db.scalar(select(func.count(AuditLog.id))) or 0,
+            "invoiceChanges": db.scalar(
+                select(func.count(AuditLog.id)).where(AuditLog.action.in_(["invoice.updated", "invoice.deleted"]))
+            )
+            or 0,
+            "backupRestores": db.scalar(select(func.count(AuditLog.id)).where(AuditLog.action == "backup.restored")) or 0,
+            "monitoringResolutions": db.scalar(
+                select(func.count(AuditLog.id)).where(AuditLog.action == "monitoring.alert.updated")
+            )
+            or 0,
+            "aiConfirmations": db.scalar(
+                select(func.count(AuditLog.id)).where(AuditLog.action == "ai.proposal.confirmed")
+            )
+            or 0,
+        }
+
+        return {
+            "items": [_audit_log_payload(item, actor_email) for item, actor_email in rows],
+            "total": total,
+            "page": page,
+            "pageSize": page_size,
+            "actions": sorted(AUDIT_ACTIONS),
+            "stats": stats,
+        }
+    finally:
+        db.close()
 
 
 @router.post("/backups", status_code=status.HTTP_201_CREATED)

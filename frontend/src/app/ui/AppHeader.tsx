@@ -92,10 +92,10 @@ export function AppHeader() {
   }, [authUser?.id, authUser?.companyProfileComplete]);
 
   const headerCopy = locale === 'ar'
-    ? { brand: 'بوابة عمران الإدارية المدعومة بالذكاء الاصطناعي', powered: 'مدعوم بالذكاء الاصطناعي', menu: 'القائمة', nav: 'التنقل الرئيسي', account: 'الحساب', signedIn: 'مسجل الدخول', signIn: 'تسجيل الدخول', logout: 'تسجيل الخروج', phone: 'الهاتف', company: 'الشركة', completeCompany: 'إكمال بيانات الشركة', loadingCompany: 'جار تحميل بيانات الشركة' }
+    ? { brand: 'بوابة عمران الإدارية المدعومة بالذكاء الاصطناعي', powered: 'مدعوم بالذكاء الاصطناعي', menu: 'القائمة', nav: 'التنقل الرئيسي', account: 'الحساب', signedIn: 'مسجل الدخول', signIn: 'تسجيل الدخول', logout: 'تسجيل الخروج', phone: 'الهاتف', company: 'الشركة', completeCompany: 'إكمال بيانات الشركة', loadingCompany: 'جار تحميل بيانات الشركة', auditLog: 'سجل التدقيق' }
     : locale === 'de'
-      ? { brand: 'Omran Verwaltungsportal mit KI', powered: 'Powered by AI', menu: 'Menü', nav: 'Hauptnavigation', account: 'Konto', signedIn: 'Angemeldet', signIn: 'Anmelden', logout: 'Abmelden', phone: 'Telefon', company: 'Firma', completeCompany: 'Firmendaten ergaenzen', loadingCompany: 'Firmendaten werden geladen' }
-      : { brand: 'Omran management portal powered by AI', powered: 'Powered by AI', menu: 'Menu', nav: 'Main navigation', account: 'Account', signedIn: 'Signed in', signIn: 'Sign in', logout: 'Logout', phone: 'Phone', company: 'Company', completeCompany: 'Complete company info', loadingCompany: 'Loading company info' };
+      ? { brand: 'Omran Verwaltungsportal mit KI', powered: 'Powered by AI', menu: 'Menü', nav: 'Hauptnavigation', account: 'Konto', signedIn: 'Angemeldet', signIn: 'Anmelden', logout: 'Abmelden', phone: 'Telefon', company: 'Firma', completeCompany: 'Firmendaten ergaenzen', loadingCompany: 'Firmendaten werden geladen', auditLog: 'Audit Log' }
+      : { brand: 'Omran management portal powered by AI', powered: 'Powered by AI', menu: 'Menu', nav: 'Main navigation', account: 'Account', signedIn: 'Signed in', signIn: 'Sign in', logout: 'Logout', phone: 'Phone', company: 'Company', completeCompany: 'Complete company info', loadingCompany: 'Loading company info', auditLog: 'Audit Log' };
 
   function isActive(href: string) {
     if (href === '/') return pathname === '/';
@@ -131,99 +131,27 @@ export function AppHeader() {
     : '';
 
   return (
-    <header className="app-header">
-      <div className="app-header-brand">
-        <Link href="/" className="brand-logo-link" aria-label={messages.app.title}>
-          <img className="brand-logo-image" src="/omran-logo.png" alt={messages.app.title} />
-        </Link>
-        <div className="brand-copy brand-copy-compact" aria-label={headerCopy.brand}>
-          <div className="brand-title-small">{messages.app.title}</div>
-          <div className="brand-powered">{headerCopy.powered}</div>
-        </div>
-      </div>
-
-      <div className="app-header-actions">
-        <div className="app-header-toggles">
-          <button
-            type="button"
-            className="btn app-mobile-menu-button"
-            onClick={() => setMobileNavOpen((current) => !current)}
-            aria-expanded={mobileNavOpen}
-            aria-controls="app-mobile-nav"
-          >
-            <span className="app-mobile-menu-icon" aria-hidden="true" />
-            {headerCopy.menu}
-          </button>
-          <div className="app-account-menu">
-            <button
-              type="button"
-              className={`btn app-account-trigger ${authUser ? 'signed-in' : ''}`}
-              onClick={() => {
-                setAccountOpen((current) => {
-                  const nextOpen = !current;
-                  if (nextOpen) setSettingsOpen(false);
-                  return nextOpen;
-                });
-              }}
-              aria-haspopup="menu"
-              aria-expanded={accountOpen}
-            >
-              <span className="app-account-avatar" aria-hidden="true">{authUser ? accountInitial : '↗'}</span>
-              <span className="app-account-label">{authUser?.email || headerCopy.account}</span>
-            </button>
-            {accountOpen ? (
-              <div className="app-account-panel" role="menu">
-                {authUser ? (
-                  <>
-                    <div className="app-account-user">
-                      <span>{headerCopy.signedIn}</span>
-                      <strong>{authUser.email}</strong>
-                      {authUser.phone ? <small>{headerCopy.phone}: {authUser.phone}</small> : null}
-                    </div>
-                    {companyProfile?.companyName ? (
-                      <div className="app-account-company">
-                        <span>{headerCopy.company}</span>
-                        <strong>{companyProfile.companyName}</strong>
-                        {companyAddress ? <small>{companyAddress}</small> : null}
-                        {companyContact ? <small>{companyContact}</small> : null}
-                      </div>
-                    ) : companyLoaded ? (
-                      <Link href="/setup" className="app-account-company app-account-company-empty">
-                        <span>{headerCopy.company}</span>
-                        <strong>{headerCopy.completeCompany}</strong>
-                      </Link>
-                    ) : (
-                      <div className="app-account-company">
-                        <span>{headerCopy.company}</span>
-                        <strong>{headerCopy.loadingCompany}</strong>
-                      </div>
-                    )}
-                    <button type="button" className="btn danger app-account-action" onClick={logout}>
-                      {headerCopy.logout}
-                    </button>
-                  </>
-                ) : (
-                  <>
-                    <div className="app-account-user">
-                      <span>{headerCopy.account}</span>
-                      <strong>{headerCopy.signIn}</strong>
-                    </div>
-                    <Link href="/auth" className="btn primary app-account-action">
-                      {headerCopy.signIn}
-                    </Link>
-                  </>
-                )}
-              </div>
-            ) : null}
+    <>
+      <header className="app-header">
+        <div className="app-header-brand">
+          <Link href="/" className="brand-logo-link" aria-label={messages.app.title}>
+            <img className="brand-logo-image" src="/omran-logo.png" alt={messages.app.title} />
+          </Link>
+          <div className="brand-copy brand-copy-compact" aria-label={headerCopy.brand}>
+            <div className="brand-title-small">{messages.app.title}</div>
+            <div className="brand-powered">{headerCopy.powered}</div>
           </div>
-          <AppSettingsMenu
-            open={settingsOpen}
-            onOpenChange={(nextOpen) => {
-              setSettingsOpen(nextOpen);
-              if (nextOpen) setAccountOpen(false);
-            }}
-          />
         </div>
+        <button
+          type="button"
+          className="btn app-mobile-menu-button"
+          onClick={() => setMobileNavOpen((current) => !current)}
+          aria-expanded={mobileNavOpen}
+          aria-controls="app-mobile-nav"
+        >
+          <span className="app-mobile-menu-icon" aria-hidden="true" />
+          {headerCopy.menu}
+        </button>
         <nav id="app-mobile-nav" className={`app-nav ${mobileNavOpen ? 'open' : ''}`} aria-label={headerCopy.nav}>
           {navItems.map((item) => (
             <Link key={item.href} href={item.href} className={isActive(item.href) ? 'active' : undefined}>
@@ -231,8 +159,86 @@ export function AppHeader() {
             </Link>
           ))}
         </nav>
-      </div>
-    </header>
+
+        <div className="app-utility-dock" aria-label={headerCopy.account}>
+          <div className="app-header-toggles">
+            <div className="app-account-menu">
+              <button
+                type="button"
+                className={`btn app-account-trigger ${authUser ? 'signed-in' : ''}`}
+                onClick={() => {
+                  setAccountOpen((current) => {
+                    const nextOpen = !current;
+                    if (nextOpen) setSettingsOpen(false);
+                    return nextOpen;
+                  });
+                }}
+                aria-haspopup="menu"
+                aria-expanded={accountOpen}
+              >
+                <span className="app-account-avatar" aria-hidden="true">{authUser ? accountInitial : '↗'}</span>
+                <span className="app-account-label">{authUser?.email || headerCopy.account}</span>
+              </button>
+              {accountOpen ? (
+                <div className="app-account-panel" role="menu">
+                  {authUser ? (
+                    <>
+                      <div className="app-account-user">
+                        <span>{headerCopy.signedIn}</span>
+                        <strong>{authUser.email}</strong>
+                        {authUser.phone ? <small>{headerCopy.phone}: {authUser.phone}</small> : null}
+                      </div>
+                      {companyProfile?.companyName ? (
+                        <div className="app-account-company">
+                          <span>{headerCopy.company}</span>
+                          <strong>{companyProfile.companyName}</strong>
+                          {companyAddress ? <small>{companyAddress}</small> : null}
+                          {companyContact ? <small>{companyContact}</small> : null}
+                        </div>
+                      ) : companyLoaded ? (
+                        <Link href="/setup" className="app-account-company app-account-company-empty">
+                          <span>{headerCopy.company}</span>
+                          <strong>{headerCopy.completeCompany}</strong>
+                        </Link>
+                      ) : (
+                        <div className="app-account-company">
+                          <span>{headerCopy.company}</span>
+                          <strong>{headerCopy.loadingCompany}</strong>
+                        </div>
+                      )}
+                      <Link href="/audit-log" className="app-account-company app-account-audit-link">
+                        <span>{headerCopy.auditLog}</span>
+                        <strong>{headerCopy.auditLog}</strong>
+                      </Link>
+                      <button type="button" className="btn danger app-account-action" onClick={logout}>
+                        {headerCopy.logout}
+                      </button>
+                    </>
+                  ) : (
+                    <>
+                      <div className="app-account-user">
+                        <span>{headerCopy.account}</span>
+                        <strong>{headerCopy.signIn}</strong>
+                      </div>
+                      <Link href="/auth" className="btn primary app-account-action">
+                        {headerCopy.signIn}
+                      </Link>
+                    </>
+                  )}
+                </div>
+              ) : null}
+            </div>
+            <AppSettingsMenu
+              open={settingsOpen}
+              onOpenChange={(nextOpen) => {
+                setSettingsOpen(nextOpen);
+                if (nextOpen) setAccountOpen(false);
+              }}
+            />
+          </div>
+        </div>
+      </header>
+    </>
   );
 }
 
