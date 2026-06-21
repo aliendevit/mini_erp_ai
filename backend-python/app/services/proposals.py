@@ -44,6 +44,35 @@ def _contains_arabic(text: str) -> bool:
     return False
 
 
+def _script_counts(text: str) -> tuple[int, int]:
+    arabic = 0
+    latin = 0
+    for char in text:
+        codepoint = ord(char)
+        if (0x0600 <= codepoint <= 0x06FF) or (0x0750 <= codepoint <= 0x077F) or (0x08A0 <= codepoint <= 0x08FF):
+            arabic += 1
+        elif ("a" <= char.lower() <= "z") or (0x00C0 <= codepoint <= 0x024F):
+            latin += 1
+    return arabic, latin
+
+
+_ARABIC_LANGUAGE_REQUEST_RE = re.compile(r"\b(?:in\s+arabic|arabic\s+reply)\b|(?:باللغة\s+العربية|بالعربي|عربي)", re.IGNORECASE)
+_GERMAN_LANGUAGE_REQUEST_RE = re.compile(r"\b(?:in\s+german|german\s+reply|auf\s+deutsch|deutsch)\b", re.IGNORECASE)
+
+
+def _arabic_is_dominant(text: str) -> bool:
+    arabic, latin = _script_counts(text)
+    if arabic < 12:
+        return False
+    total_script = arabic + latin
+    return latin == 0 or (total_script > 0 and arabic / total_script >= 0.35)
+
+
+def _english_is_dominant(text: str) -> bool:
+    arabic, latin = _script_counts(text)
+    return latin >= 12 and (arabic == 0 or latin >= arabic * 3)
+
+
 def _manager_messages(messages: list[ProposalMessage]) -> list[str]:
     return [message.content for message in messages if message.role == "user" and message.content]
 
@@ -64,11 +93,21 @@ _GERMAN_HINT_RE = re.compile(
 def _conversation_language_mode(messages: list[ProposalMessage]) -> str:
     latest_manager_message = _latest_manager_message(messages)
     manager_text = "\n".join(_manager_messages(messages))
+    if _ARABIC_LANGUAGE_REQUEST_RE.search(latest_manager_message):
+        return "arabic"
+    if _GERMAN_LANGUAGE_REQUEST_RE.search(latest_manager_message):
+        return "german"
+    if _arabic_is_dominant(latest_manager_message):
+        return "arabic"
+    if _english_is_dominant(latest_manager_message):
+        return "english"
     combined_text = f"{latest_manager_message}\n{manager_text}"
-    if _contains_arabic(combined_text):
+    if _arabic_is_dominant(combined_text):
         return "arabic"
     if re.search(r"[\u00e4\u00f6\u00fc\u00c4\u00d6\u00dc\u00df]", combined_text) or _GERMAN_HINT_RE.search(combined_text):
-        return "german"
+        latest_arabic, latest_latin = _script_counts(latest_manager_message)
+        if latest_arabic < 12 or latest_latin >= latest_arabic:
+            return "german"
     return "english"
 
 
@@ -1139,6 +1178,7 @@ def build_intake_chat_prompt(
     proposal: Proposal,
     messages: list[ProposalMessage],
     known_available_workshops: list[dict[str, Any]] | None = None,
+    rag_context_chunks: list[dict[str, Any]] | None = None,
 ) -> str:
     known_customer = proposal.customer_company_name or "unknown"
     known_title = proposal.order_title or "unknown"
@@ -1161,6 +1201,7 @@ def build_intake_chat_prompt(
     payment_drafts = _safe_json(proposal.payment_drafts_json, [])
     external_workshops = _safe_json(proposal.external_workshops_json, [])
     known_available_workshops = known_available_workshops or []
+    rag_context_chunks = rag_context_chunks or []
     latest_turn_guidance = _latest_scope_turn_guidance(messages, language_mode)
 
     return "\n".join(
@@ -1169,6 +1210,7 @@ def build_intake_chat_prompt(
             "Your job is to help a manager capture one client project intake as clearly as possible.",
             "Memory isolation rules:",
             "- Use only the current proposal fields, facts, memory summary, and transcript below.",
+            "- You may also use the scoped RAG retrieval snippets below when they belong to this proposal/order.",
             "- Never use customer, payment, workshop, or project facts from another chat.",
             "- If the manager starts a different project in a new intake, treat it as empty memory.",
             "Contractor and workshop rules:",
@@ -1239,6 +1281,9 @@ def build_intake_chat_prompt(
             "",
             "Known available workshop partners:",
             json.dumps(known_available_workshops, ensure_ascii=True),
+            "",
+            "Scoped RAG retrieval snippets for this intake/order:",
+            json.dumps(rag_context_chunks, ensure_ascii=True),
             "",
             "Conversation so far for this intake only:",
             _chat_lines(messages),

@@ -26,17 +26,13 @@ Required environment:
 - `DATABASE_URL=postgresql://omran:change-me-local@localhost:5432/omran`
 - `CORS_ORIGIN=http://localhost:3000`
 - `GEMINI_API_KEY=...`
-- `GEMINI_MODEL=gemini-1.5-flash`
+- `GEMINI_MODEL=gemini-2.5-flash`
 
 Docker/deployment should use PostgreSQL. The app automatically rewrites `postgresql://` to SQLAlchemy's `postgresql+pg8000://`.
 
-SQLite still works for local demos and automated tests:
-
-- `DATABASE_URL=sqlite:///./app.db`
-
 ## Run without Docker
 
-You can run the project completely outside Docker with SQLite and no database server. For deployment-like testing, run PostgreSQL locally and set `DATABASE_URL` to the PostgreSQL connection string.
+You can run the project outside Docker, but PostgreSQL is still required. Start PostgreSQL locally and set `DATABASE_URL` to the PostgreSQL connection string.
 
 Backend prerequisites:
 
@@ -72,8 +68,6 @@ Then open:
 - Frontend: `http://localhost:3000`
 - Backend health: `http://localhost:3001/api/health`
 
-With the local SQLite fallback, the database file is created automatically as `backend-python/app.db`.
-
 ## PostgreSQL and backups
 
 The Docker compose file starts PostgreSQL and passes a PostgreSQL `DATABASE_URL` to the backend. Configure these values before real deployment:
@@ -83,10 +77,9 @@ The Docker compose file starts PostgreSQL and passes a PostgreSQL `DATABASE_URL`
 - `POSTGRES_DB`
 - `POSTGRES_PORT`
 
-Backup and restore support both database modes:
+Backup and restore are PostgreSQL-only:
 
 - PostgreSQL backups use `pg_dump` and restore with `pg_restore`.
-- SQLite backups copy `app.db`.
 - Uploaded files are included in `uploads.zip`.
 
 The backend Docker image installs `postgresql-client` so UI backup/restore works against PostgreSQL inside Docker. If you run backup scripts outside Docker, install PostgreSQL client tools on that machine first.

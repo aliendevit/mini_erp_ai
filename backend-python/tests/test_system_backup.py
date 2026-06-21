@@ -20,8 +20,6 @@ class SystemBackupTests(unittest.TestCase):
     def setUp(self) -> None:
         self.temp_dir = tempfile.TemporaryDirectory()
         self.root = Path(self.temp_dir.name)
-        self.db_path = self.root / "app.db"
-        self.db_path.write_bytes(b"original database")
         self.uploads_dir = self.root / "uploads"
         self.uploads_dir.mkdir()
         (self.uploads_dir / "photo.txt").write_text("original upload", encoding="utf-8")
@@ -30,7 +28,11 @@ class SystemBackupTests(unittest.TestCase):
         self.patches = [
             patch.object(system, "BACKUP_ROOT", self.backups_dir),
             patch.object(system, "UPLOADS_ROOT", self.uploads_dir),
-            patch.object(system, "get_settings", lambda: SimpleNamespace(database_url=f"sqlite:///{self.db_path}")),
+            patch.object(
+                system,
+                "get_settings",
+                lambda: SimpleNamespace(database_url="postgresql://omran:change-me-local@localhost:5432/omran_test"),
+            ),
         ]
         for item in self.patches:
             item.start()
@@ -41,34 +43,48 @@ class SystemBackupTests(unittest.TestCase):
         self.temp_dir.cleanup()
 
     def test_create_backup_archive_contains_database_uploads_and_manifest(self) -> None:
-        backup = system._create_backup_archive()
+        with patch.object(system, "_dump_postgres_database", side_effect=lambda target: target.write_bytes(b"pg dump")):
+            backup = system._create_backup_archive()
         archive_path = self.backups_dir / backup["fileName"]
 
         self.assertTrue(archive_path.exists())
         with zipfile.ZipFile(archive_path, "r") as archive:
             names = set(archive.namelist())
             self.assertIn("manifest.json", names)
-            self.assertIn("app.db", names)
+            self.assertIn("database.dump", names)
             self.assertIn("uploads.zip", names)
             manifest = json.loads(archive.read("manifest.json").decode("utf-8"))
 
-        self.assertEqual(manifest["databaseFile"], "app.db")
+        self.assertEqual(manifest["databaseUrlKind"], "postgresql")
+        self.assertEqual(manifest["databaseFile"], "database.dump")
         self.assertEqual(manifest["uploadsArchive"], "uploads.zip")
         self.assertEqual(manifest["uploadFileCount"], 1)
         self.assertEqual(backup["uploadFileCount"], 1)
 
     def test_restore_backup_replaces_database_and_uploads_after_confirmation(self) -> None:
-        backup = system._create_backup_archive()
+        class FakeSession:
+            def commit(self) -> None:
+                pass
+
+            def close(self) -> None:
+                pass
+
+        with patch.object(system, "_dump_postgres_database", side_effect=lambda target: target.write_bytes(b"pg dump")):
+            backup = system._create_backup_archive()
         archive_bytes = (self.backups_dir / backup["fileName"]).read_bytes()
 
-        self.db_path.write_bytes(b"changed database")
         (self.uploads_dir / "photo.txt").write_text("changed upload", encoding="utf-8")
 
         upload = UploadFile(file=io.BytesIO(archive_bytes), filename=backup["fileName"])
-        result = asyncio.run(system.restore_backup(backupFile=upload, confirmation="RESTORE", current_user_id="user-id"))
+        with patch.object(system, "_dump_postgres_database", side_effect=lambda target: target.write_bytes(b"pg dump")), patch.object(
+            system, "_restore_postgres_database"
+        ) as restore_postgres, patch.object(system, "init_db"), patch.object(system, "record_audit"), patch.object(
+            system, "SessionLocal", return_value=FakeSession()
+        ):
+            result = asyncio.run(system.restore_backup(backupFile=upload, confirmation="RESTORE", current_user_id="user-id"))
 
         self.assertTrue(result["ok"])
-        self.assertEqual(self.db_path.read_bytes(), b"original database")
+        restore_postgres.assert_called_once()
         self.assertEqual((self.uploads_dir / "photo.txt").read_text(encoding="utf-8"), "original upload")
         self.assertTrue(result["safetyBackup"]["fileName"].startswith("omran-backup-pre-restore-"))
 

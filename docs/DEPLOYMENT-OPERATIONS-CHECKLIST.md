@@ -30,10 +30,6 @@ Stop the backend first, then run:
 
 Restore uses `pg_restore --clean --if-exists --no-owner` and overwrites uploaded files. Test restore on a copied/staging database before using it on real production data.
 
-### SQLite local demo backup
-
-SQLite is still supported for local demos and automated tests. When `DATABASE_URL=sqlite:///./app.db`, backups contain `app.db` instead of `database.dump`.
-
 ### Production backup requirement
 
 For a real deployment, use PostgreSQL managed backups in addition to the app backup feature. Uploaded project photos and generated documents must also be backed up through server storage snapshots or object-storage versioning.

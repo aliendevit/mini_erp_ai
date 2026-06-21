@@ -14,7 +14,7 @@ The active stack is:
 
 - `frontend/` - Next.js + React + TypeScript UI (For Now)
 - `backend-python/` - FastAPI + SQLAlchemy backend
-- PostgreSQL for Docker/deployment runtime; SQLite only as a local/test fallback
+- PostgreSQL + pgvector for all runtime and test database work
 - Gemini / OpenRouter for text AI workflows
 - AssemblyAI for speech-to-text
 - ReportLab / python-docx for document exports
@@ -94,7 +94,7 @@ flowchart LR
     U[Manager / Browser] --> F[Next.js Frontend]
     F -->|REST /api/*| B[FastAPI Backend]
     B --> S[Business Services]
-    S --> DB[(PostgreSQL runtime / SQLite local fallback)]
+    S --> DB[(PostgreSQL + pgvector)]
     S --> AI[Gemini / OpenRouter]
     S --> STT[AssemblyAI]
     S --> DOC[PDF and Word Services]
@@ -105,7 +105,7 @@ Layers:
 - Presentation layer: Next.js UI, AI Intake page, proposal editing, staffing selection, voice controls
 - API/application layer: FastAPI routers for ERP, invoices, AI, and documents
 - Business logic layer: proposal extraction, staffing recommendation, PDF generation, transcription integration
-- Persistence layer: SQLAlchemy models on PostgreSQL, with SQLite fallback for local/test runs
+- Persistence layer: SQLAlchemy models on PostgreSQL
 - External AI integration layer: Gemini/OpenRouter for text, AssemblyAI for speech-to-text
 
 ---
@@ -117,7 +117,7 @@ Layers:
 Requirements:
 
 - Python 3.12+
-- SQLite is used automatically if `DATABASE_URL` is not changed from the local default
+- PostgreSQL 16+ with pgvector
 
 ```powershell
 cd backend-python
@@ -126,6 +126,12 @@ python -m venv .venv
 pip install -r requirements.txt
 Copy-Item .env.example .env
 uvicorn app.main:app --reload --port 3001
+```
+
+For local development outside Docker, run PostgreSQL locally and set:
+
+```env
+DATABASE_URL=postgresql://omran:change-me-local@localhost:5432/omran
 ```
 
 Default backend URL:
@@ -192,16 +198,10 @@ Backend (`backend-python/.env`):
 DATABASE_URL=postgresql://omran:change-me-local@localhost:5432/omran
 CORS_ORIGIN=http://localhost:3000
 GEMINI_API_KEY=
-GEMINI_MODEL=gemini-1.5-flash
+GEMINI_MODEL=gemini-2.5-flash
 OPENROUTER_API_KEY=
 OPENROUTER_MODEL=openrouter/free
 ASSEMBLYAI_API_KEY=
-```
-
-Local-only SQLite fallback:
-
-```env
-DATABASE_URL=sqlite:///./app.db
 ```
 
 Frontend (`frontend/.env.local`):
@@ -312,7 +312,7 @@ Recently verified areas include:
 - Login, backend endpoint protection, and audit logs are implemented. Role-based permissions still need production hardening.
 - AI is assistive, not authoritative.
 - Progress tracking with photos, OCR, OCR + RAG, and Progress Monitoring AI are planned ideas, not fully implemented.
-- Docker/deployment should use PostgreSQL. SQLite is only for local demos and automated tests.
+- PostgreSQL is the only supported database runtime.
 
 ---
 

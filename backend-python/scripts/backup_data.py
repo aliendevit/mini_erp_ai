@@ -18,20 +18,10 @@ sys.path.insert(0, str(ROOT))
 from app.settings import get_settings  # noqa: E402
 
 
-def sqlite_path(database_url: str) -> Path | None:
-    if not database_url.startswith("sqlite:///"):
-        return None
-    raw = database_url.replace("sqlite:///", "", 1)
-    path = Path(raw)
-    return path if path.is_absolute() else ROOT / path
-
-
 def database_kind(database_url: str) -> str:
-    if database_url.startswith("sqlite:///"):
-        return "sqlite"
     if database_url.startswith("postgresql://") or database_url.startswith("postgresql+pg8000://"):
         return "postgresql"
-    raise SystemExit(f"Unsupported DATABASE_URL: {database_url}")
+    raise SystemExit(f"PostgreSQL DATABASE_URL is required: {database_url}")
 
 
 def postgres_connection_parts(database_url: str) -> dict[str, str]:
@@ -92,7 +82,7 @@ def zip_directory(source: Path, target: Path) -> int:
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Create an OMRAN backup for SQLite/PostgreSQL data and uploaded files.")
+    parser = argparse.ArgumentParser(description="Create an OMRAN backup for PostgreSQL data and uploaded files.")
     parser.add_argument("--output-dir", default=str(ROOT / "backups"), help="Directory where backup folders are written.")
     args = parser.parse_args()
 
@@ -105,15 +95,8 @@ def main() -> None:
     backup_dir = backup_root / f"omran-backup-{stamp}"
     backup_dir.mkdir(parents=True, exist_ok=False)
 
-    if kind == "sqlite":
-        db_path = sqlite_path(settings.database_url)
-        if db_path is None or not db_path.exists():
-            raise SystemExit(f"Database file not found: {db_path}")
-        db_target = backup_dir / db_path.name
-        shutil.copy2(db_path, db_target)
-    else:
-        db_target = backup_dir / "database.dump"
-        dump_postgres(settings.database_url, db_target)
+    db_target = backup_dir / "database.dump"
+    dump_postgres(settings.database_url, db_target)
 
     upload_file_count = 0
     uploads_zip = backup_dir / "uploads.zip"

@@ -8,10 +8,10 @@ import sys
 from unittest.mock import patch
 
 from fastapi import HTTPException
-from sqlalchemy import create_engine
-from sqlalchemy.orm import Session, sessionmaker
+from sqlalchemy.orm import Session
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from app.database import Base
 from app.models import Customer, CustomerWorkshop, Employee, EmployeeAvailabilityBlock, EmployeeSkill, Order, PaymentRecord, ProjectIssue, ProjectMonitoringAlert, ProjectMonitoringReport, ProjectProgressUpdate, ProjectSiteBaseline, ProjectTask, Proposal, ProposalFact, ProposalMessage, Site, Workshop, WorkshopSiteAssignment
@@ -33,6 +33,7 @@ from app.services.proposals import (
 )
 from app.services.staffing import build_staffing_explanation_context, format_staffing_explanation, recommend_staff_for_proposal
 from app.routers.ai import _workshop_recommendations_for_proposal
+from postgres_test_utils import create_session
 
 
 def build_employee(name: str, skill: str, rate: str = "50", capacity: str = "40") -> Employee:
@@ -50,13 +51,12 @@ def build_employee(name: str, skill: str, rate: str = "50", capacity: str = "40"
 
 class ProposalAndStaffingTests(unittest.TestCase):
     def setUp(self) -> None:
-        engine = create_engine("sqlite:///:memory:", future=True)
-        TestingSession = sessionmaker(bind=engine, autoflush=False, autocommit=False, future=True)
-        Base.metadata.create_all(bind=engine)
-        self.db: Session = TestingSession()
+        self.engine, _TestingSession, self.db = create_session()
 
     def tearDown(self) -> None:
         self.db.close()
+        Base.metadata.drop_all(bind=self.engine)
+        self.engine.dispose()
 
     def _workshop_order_fixture(self):
         customer = Customer(company_name="Tracking Customer")
@@ -693,6 +693,19 @@ class ProposalAndStaffingTests(unittest.TestCase):
 
         self.assertIn("reply entirely in Arabic", chat_prompt)
         self.assertIn("Write all human-readable proposal values in Arabic", proposal_prompt)
+
+    def test_one_arabic_name_in_english_conversation_does_not_switch_reply_language(self) -> None:
+        messages = [
+            ProposalMessage(role="user", content="I have a garden renovation project with fencing and solar lighting."),
+            ProposalMessage(role="assistant", content="Which workshop handles the fence?"),
+            ProposalMessage(role="user", content="The fence should be handled by \u0627\u0644\u0635\u062f\u0627\u0642\u0629, and the solar lighting by Solarna COM."),
+        ]
+
+        prompt = build_intake_chat_prompt(Proposal(status="intake"), messages)
+
+        self.assertIn("current manager language is English", prompt)
+        self.assertNotIn("current manager language is Arabic", prompt)
+        self.assertNotIn("full reply must be Arabic", prompt)
 
     def test_intake_chat_prompt_forbids_self_dialogue(self) -> None:
         prompt = build_intake_chat_prompt(Proposal(status="intake"), [ProposalMessage(role="user", content="Please update the kitchen site.")])

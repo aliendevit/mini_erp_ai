@@ -19,7 +19,7 @@ The project has evolved from a basic accounting/ERP prototype into a constructio
 
 ## Backend Achievements
 - FastAPI backend with modular routers and service layer.
-- SQLAlchemy + SQLite persistence for prototype ERP entities.
+- SQLAlchemy + PostgreSQL persistence for ERP entities.
 - REST APIs for customers, orders, sites, workshops, invoices, work entries, payments, tracking, AI intake, and documents.
 - Workshop partner model with specialties, contact data, active state, and availability state.
 - Site-level workshop assignment with covered trades, status, notes, start date, and end date.

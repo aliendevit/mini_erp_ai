@@ -10,7 +10,7 @@ flowchart LR
     Browser[Browser]
     Frontend[Next.js Frontend]
     Backend[FastAPI Backend]
-    DB[(SQLite or PostgreSQL)]
+    DB[(PostgreSQL + pgvector)]
     Gemini[Gemini API]
     Docs[PDF / Word Generators]
 
@@ -41,8 +41,7 @@ flowchart TB
     end
 
     subgraph Persistence
-        I[(SQLite app.db)]
-        J[(PostgreSQL optional)]
+        I[(PostgreSQL)]
     end
 
     subgraph External
@@ -60,7 +59,6 @@ flowchart TB
     F --> G
     G --> H
     H --> I
-    H --> J
     F --> K
     E --> L
     D --> L

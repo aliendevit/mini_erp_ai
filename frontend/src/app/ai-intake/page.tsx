@@ -1,9 +1,10 @@
 'use client';
 
 import Link from 'next/link';
+import { useRouter } from 'next/navigation';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
-import { API_BASE, apiGet, apiJson, authHeaders } from '../../lib/api';
+import { API_BASE, apiGet, apiJson, authHeaders, clearStoredAuth, hasAuthToken } from '../../lib/api';
 import { type BrowserSpeechRecognition } from '../../lib/browser-speech';
 import { type NativeAudioRecordingSession, isNativeAudioRecordingSupported, startNativeAudioRecording } from '../../lib/native-audio-recorder';
 import { useI18n } from '../../lib/i18n';
@@ -27,6 +28,21 @@ type ProposalMessage = {
   role: 'user' | 'assistant';
   content: string;
   createdAt: string;
+};
+
+type StructuredQuestionKind = 'text' | 'number' | 'phone' | 'date' | 'single' | 'multiple';
+
+type StructuredQuestion = {
+  id: string;
+  text: string;
+  kind: StructuredQuestionKind;
+  options: string[];
+};
+
+type StructuredAnswer = {
+  value?: string;
+  values?: string[];
+  other?: string;
 };
 
 type ProposalCoverageType = 'internal_only' | 'mixed_with_workshop' | 'workshop_only';
@@ -786,10 +802,93 @@ function formatDuration(durationMs: number): string {
 const INTAKE_LIST_RENDER_LIMIT = 12;
 const MESSAGE_RENDER_LIMIT = 30;
 const INTAKE_PAGE_SIZE = 20;
+const AI_INTAKE_SIGN_IN_REQUIRED = 'Please sign in to use AI Intake.';
+const AI_INTAKE_SIGN_IN_AGAIN = 'Please sign in again to use AI Intake.';
+
+function cleanQuestionText(value: string): string {
+  return value
+    .replace(/^\s*(?:[-*•]|\d+[\).:-])\s*/, '')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+function splitAssistantQuestions(content: string): string[] {
+  const lines = content
+    .split(/\n+/)
+    .map(cleanQuestionText)
+    .filter(Boolean);
+  const candidates: string[] = [];
+
+  for (const line of lines) {
+    if (line.includes('?') || line.includes('؟')) {
+      const parts = line
+        .split(/(?<=[?؟])\s+/)
+        .map(cleanQuestionText)
+        .filter((part) => part.includes('?') || part.includes('؟'));
+      candidates.push(...parts);
+    }
+  }
+
+  return Array.from(new Set(candidates)).slice(0, 6);
+}
+
+function optionsFromExamples(question: string): string[] {
+  const match = question.match(/\((?:e\.g\.|eg|examples?:)?\s*([^)]+)\)/i);
+  if (!match) return [];
+  return match[1]
+    .replace(/\bor\b/gi, ',')
+    .replace(/\band\b/gi, ',')
+    .split(',')
+    .map((item) => item.trim().replace(/[?.]$/, ''))
+    .filter((item) => item.length > 1)
+    .slice(0, 6);
+}
+
+function inferStructuredQuestion(question: string, index: number): StructuredQuestion {
+  const lower = question.toLowerCase();
+  const exampleOptions = optionsFromExamples(question);
+  const yesNo = /\b(?:do|does|did|is|are|was|were|will|would|should|can|could|has|have)\b/.test(lower);
+  const asksChoice = /\b(?:which|choose|select|preference|prefer|type|types|kind|kinds|option|options)\b/.test(lower);
+  const asksDate = /\b(?:date|deadline|start|end|when|schedule|due|timeline|period|window)\b/.test(lower);
+  const asksPhone = /\b(?:phone|mobile|contact number|telephone|whatsapp)\b/.test(lower);
+  const asksNumber = /\b(?:how many|how much|number|count|height|width|length|diameter|perimeter|meter|meters|m2|sqm|hours|budget|amount|price|cost|quantity|size|dimension)\b/.test(lower);
+
+  if (asksPhone) return { id: `q-${index}`, text: question, kind: 'phone', options: [] };
+  if (asksDate) return { id: `q-${index}`, text: question, kind: 'date', options: [] };
+  if (asksNumber) return { id: `q-${index}`, text: question, kind: 'number', options: [] };
+  if (exampleOptions.length > 0) return { id: `q-${index}`, text: question, kind: 'multiple', options: exampleOptions };
+  if (yesNo) return { id: `q-${index}`, text: question, kind: 'single', options: ['Yes', 'No'] };
+  if (asksChoice) {
+    return {
+      id: `q-${index}`,
+      text: question,
+      kind: 'multiple',
+      options: ['Fencing', 'Landscaping', 'Paving', 'Lighting', 'Benches', 'Demolition'],
+    };
+  }
+  return { id: `q-${index}`, text: question, kind: 'text', options: [] };
+}
+
+function structuredQuestionsFromMessage(message?: ProposalMessage): StructuredQuestion[] {
+  if (!message || message.role !== 'assistant' || !message.content.trim()) return [];
+  return splitAssistantQuestions(message.content).map(inferStructuredQuestion);
+}
+
+function answerTextForQuestion(question: StructuredQuestion, answer: StructuredAnswer): string {
+  const baseValues = question.kind === 'multiple' ? answer.values || [] : answer.value ? [answer.value] : [];
+  const values = [...baseValues];
+  const other = (answer.other || '').trim();
+  if (other) values.push(`Other: ${other}`);
+  const valueText = values.map((value) => value.trim()).filter(Boolean).join(', ');
+  return valueText ? `${question.text}\nAnswer: ${valueText}` : '';
+}
 
 export default function AIIntakePage() {
+  const router = useRouter();
   const { locale, messages: m } = useI18n();
   const x = useMemo(() => extraLabels(locale), [locale]);
+  const [authReady, setAuthReady] = useState(false);
+  const [hasAuth, setHasAuth] = useState(false);
   const [intakes, setIntakes] = useState<ProposalDraft[]>([]);
   const [customers, setCustomers] = useState<Customer[]>([]);
   const [selectedId, setSelectedId] = useState<string>('');
@@ -803,6 +902,7 @@ export default function AIIntakePage() {
   const [intakeTotal, setIntakeTotal] = useState(0);
   const [recommendations, setRecommendations] = useState<RecommendationPayload | null>(null);
   const [chatInput, setChatInput] = useState('');
+  const [structuredAnswers, setStructuredAnswers] = useState<Record<string, StructuredAnswer>>({});
   const [busy, setBusy] = useState(false);
   const [deletingMessageId, setDeletingMessageId] = useState<string | null>(null);
   const [deletingIntakeId, setDeletingIntakeId] = useState<string | null>(null);
@@ -834,6 +934,8 @@ export default function AIIntakePage() {
   const [supportsNativeRecording, setSupportsNativeRecording] = useState(false);
   const [supportsWavRecording, setSupportsWavRecording] = useState(false);
   const [voiceSupportChecked, setVoiceSupportChecked] = useState(false);
+  const chatThreadRef = useRef<HTMLDivElement | null>(null);
+  const chatEndRef = useRef<HTMLDivElement | null>(null);
   const [explanationSite, setExplanationSite] = useState<{ siteIndex: number; siteName: string } | null>(null);
   const [explanationText, setExplanationText] = useState('');
   const [explanationStatus, setExplanationStatus] = useState<'idle' | 'running' | 'done' | 'error'>('idle');
@@ -843,11 +945,77 @@ export default function AIIntakePage() {
   const supportsVoice = supportsNativeRecording || supportsWavRecording;
   const interactionLocked = busy || Boolean(deletingMessageId) || Boolean(deletingIntakeId) || streaming || recording || transcribing || explanationStatus === 'running';
   const notMentioned = m.aiIntakePage.notMentioned;
+  const latestAssistantMessage = useMemo(
+    () => [...messages].reverse().find((message) => message.role === 'assistant' && message.content.trim()),
+    [messages],
+  );
+  const structuredQuestions = useMemo(() => structuredQuestionsFromMessage(latestAssistantMessage), [latestAssistantMessage]);
+  const structuredLabels = useMemo(() => {
+    if (locale === 'ar') {
+      return {
+        title: 'أجب داخل المحادثة',
+        other: 'خيار آخر',
+        otherPlaceholder: 'اكتب خياراً آخر',
+        submit: 'إرسال الإجابات',
+        textPlaceholder: 'اكتب الإجابة',
+      };
+    }
+    if (locale === 'de') {
+      return {
+        title: 'Direkt im Chat beantworten',
+        other: 'Andere Option',
+        otherPlaceholder: 'Andere Antwort eingeben',
+        submit: 'Antworten senden',
+        textPlaceholder: 'Antwort eingeben',
+      };
+    }
+    return {
+      title: 'Answer in chat',
+      other: 'Other option',
+      otherPlaceholder: 'Type another answer',
+      submit: 'Send answers',
+      textPlaceholder: 'Type the answer',
+    };
+  }, [locale]);
 
   useEffect(() => {
     document.body.classList.add('ai-intake-page-active');
     return () => document.body.classList.remove('ai-intake-page-active');
   }, []);
+
+  useEffect(() => {
+    if (historyCollapsed) return;
+    chatEndRef.current?.scrollIntoView({ block: 'end', behavior: 'smooth' });
+  }, [messages, streaming, streamingAssistantId, historyCollapsed, structuredQuestions.length]);
+
+  useEffect(() => {
+    setStructuredAnswers({});
+  }, [latestAssistantMessage?.id]);
+
+  useEffect(() => {
+    const syncAuth = () => {
+      const nextHasAuth = hasAuthToken();
+      setHasAuth(nextHasAuth);
+      setAuthReady(true);
+      if (!nextHasAuth) {
+        router.replace('/auth');
+      }
+    };
+
+    const handleStorage = (event: StorageEvent) => {
+      if (event.key === null || event.key === 'omran_auth_token' || event.key === 'omran_auth_user') {
+        syncAuth();
+      }
+    };
+
+    syncAuth();
+    window.addEventListener('omran-auth-changed', syncAuth);
+    window.addEventListener('storage', handleStorage);
+    return () => {
+      window.removeEventListener('omran-auth-changed', syncAuth);
+      window.removeEventListener('storage', handleStorage);
+    };
+  }, [router]);
 
   async function loadLists(preferredId?: string, pageOverride = intakePage) {
     const [intakePageData, customerRows] = await Promise.all([
@@ -917,9 +1085,10 @@ export default function AIIntakePage() {
   }
 
   useEffect(() => {
+    if (!authReady || !hasAuth) return;
     loadLists().catch((error) => alert(error.message));
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [intakePage]);
+  }, [intakePage, authReady, hasAuth]);
 
   useEffect(() => {
     setPortalReady(true);
@@ -1580,10 +1749,18 @@ export default function AIIntakePage() {
     }
   }
 
-  async function sendMessage() {
-    const content = chatInput.trim();
+  async function sendChatContent(rawContent: string) {
+    const content = rawContent.trim();
     if (!content || recording || transcribing) return;
     clearVoiceFeedback();
+
+    if (!hasAuthToken()) {
+      setHasAuth(false);
+      setAuthReady(true);
+      setChatError(AI_INTAKE_SIGN_IN_REQUIRED);
+      router.replace('/auth');
+      return;
+    }
 
     const intakeId = await ensureSelectedIntakeId();
     if (!intakeId) return;
@@ -1611,6 +1788,12 @@ export default function AIIntakePage() {
         body: JSON.stringify({ content }),
       });
       if (!res.ok) {
+        if (res.status === 401) {
+          clearStoredAuth();
+          setHasAuth(false);
+          router.replace('/auth');
+          throw new Error(AI_INTAKE_SIGN_IN_AGAIN);
+        }
         throw new Error(await safeMessage(res));
       }
       if (!res.body) {
@@ -1645,6 +1828,36 @@ export default function AIIntakePage() {
       setStreaming(false);
       setStreamingAssistantId(null);
     }
+  }
+
+  async function sendMessage() {
+    await sendChatContent(chatInput);
+  }
+
+  function updateStructuredAnswer(questionId: string, patch: StructuredAnswer) {
+    setStructuredAnswers((current) => ({ ...current, [questionId]: { ...current[questionId], ...patch } }));
+  }
+
+  function toggleStructuredValue(questionId: string, value: string, checked: boolean) {
+    setStructuredAnswers((current) => {
+      const existing = current[questionId]?.values || [];
+      const nextValues = checked ? Array.from(new Set([...existing, value])) : existing.filter((item) => item !== value);
+      return { ...current, [questionId]: { ...current[questionId], values: nextValues } };
+    });
+  }
+
+  async function submitStructuredAnswers() {
+    const parts = structuredQuestions
+      .map((question) => answerTextForQuestion(question, structuredAnswers[question.id] || {}))
+      .filter(Boolean);
+    if (parts.length === 0) return;
+    const content = [
+      'Structured intake answers:',
+      ...parts.map((part, index) => `${index + 1}. ${part}`),
+      '',
+      'Please save these answers as project facts for retrieval memory.',
+    ].join('\n');
+    await sendChatContent(content);
   }
 
   async function generateProposal() {
@@ -1943,6 +2156,114 @@ export default function AIIntakePage() {
     updateSite(siteIndex, { coverageType, selectedInternalHeadcount: 0 });
   }
 
+  function renderStructuredQuestionInput(question: StructuredQuestion) {
+    const answer = structuredAnswers[question.id] || {};
+    const inputId = `structured-${question.id}`;
+    if (question.kind === 'single') {
+      return (
+        <div className="ai-structured-options" role="radiogroup" aria-labelledby={`${inputId}-label`}>
+          {question.options.map((option) => (
+            <label key={option} className="ai-structured-option">
+              <input
+                type="radio"
+                name={inputId}
+                checked={answer.value === option}
+                onChange={() => updateStructuredAnswer(question.id, { value: option })}
+                disabled={interactionLocked}
+              />
+              <span>{option}</span>
+            </label>
+          ))}
+          <label className="ai-structured-other">
+            <span>{structuredLabels.other}</span>
+            <input
+              value={answer.other || ''}
+              onChange={(event) => updateStructuredAnswer(question.id, { other: event.target.value })}
+              placeholder={structuredLabels.otherPlaceholder}
+              disabled={interactionLocked}
+            />
+          </label>
+        </div>
+      );
+    }
+
+    if (question.kind === 'multiple') {
+      return (
+        <div className="ai-structured-options" aria-labelledby={`${inputId}-label`}>
+          {question.options.map((option) => (
+            <label key={option} className="ai-structured-option">
+              <input
+                type="checkbox"
+                checked={(answer.values || []).includes(option)}
+                onChange={(event) => toggleStructuredValue(question.id, option, event.target.checked)}
+                disabled={interactionLocked}
+              />
+              <span>{option}</span>
+            </label>
+          ))}
+          <label className="ai-structured-other">
+            <span>{structuredLabels.other}</span>
+            <input
+              value={answer.other || ''}
+              onChange={(event) => updateStructuredAnswer(question.id, { other: event.target.value })}
+              placeholder={structuredLabels.otherPlaceholder}
+              disabled={interactionLocked}
+            />
+          </label>
+        </div>
+      );
+    }
+
+    const inputType = question.kind === 'date' ? 'date' : question.kind === 'number' ? 'number' : question.kind === 'phone' ? 'tel' : 'text';
+    return (
+      <div className="ai-structured-typed">
+        <input
+          id={inputId}
+          type={inputType}
+          inputMode={question.kind === 'number' ? 'decimal' : question.kind === 'phone' ? 'tel' : undefined}
+          value={answer.value || ''}
+          onChange={(event) => updateStructuredAnswer(question.id, { value: event.target.value })}
+          placeholder={structuredLabels.textPlaceholder}
+          disabled={interactionLocked}
+        />
+        {question.kind !== 'text' && (
+          <input
+            value={answer.other || ''}
+            onChange={(event) => updateStructuredAnswer(question.id, { other: event.target.value })}
+            placeholder={structuredLabels.otherPlaceholder}
+            disabled={interactionLocked}
+          />
+        )}
+      </div>
+    );
+  }
+
+  function renderStructuredAnswerPanel(message: ProposalMessage) {
+    if (message.id !== latestAssistantMessage?.id || structuredQuestions.length === 0 || streaming) return null;
+    return (
+      <div className="ai-structured-panel">
+        <div className="ai-structured-title">{structuredLabels.title}</div>
+        {structuredQuestions.map((question, index) => (
+          <div key={question.id} className="ai-structured-question">
+            <label id={`structured-${question.id}-label`} className="ai-structured-label">
+              {index + 1}. {question.text}
+            </label>
+            {renderStructuredQuestionInput(question)}
+          </div>
+        ))}
+        <button
+          type="button"
+          className="btn primary with-icon ai-structured-submit"
+          onClick={() => void submitStructuredAnswers()}
+          disabled={interactionLocked}
+        >
+          <Icon name="send" />
+          {structuredLabels.submit}
+        </button>
+      </div>
+    );
+  }
+
   const siteTotal = (draft.proposedSites || []).length;
   const missingWorkshopCount = (draft.proposedSites || []).filter((site) => !(site.assignedWorkshopName || '').trim()).length;
   const paymentDraftCount = (draft.paymentDrafts || []).length;
@@ -1996,6 +2317,18 @@ export default function AIIntakePage() {
     : locale === 'de'
       ? { planned: 'Geplant', received: 'Erhalten', refunded: 'Erstattet', canceled: 'Storniert' }
       : { planned: 'Planned', received: 'Received', refunded: 'Refunded', canceled: 'Canceled' };
+
+  if (!authReady || !hasAuth) {
+    return (
+      <div className="ai-intake-shell">
+        <div className="ai-intake-main">
+          <section className="card ai-intake-hero">
+            <p className="muted">{AI_INTAKE_SIGN_IN_REQUIRED}</p>
+          </section>
+        </div>
+      </div>
+    );
+  }
 
   const intakeSidebar = (
 <div className="card ai-intake-sidebar">
@@ -2218,7 +2551,7 @@ export default function AIIntakePage() {
                 )}
               </div>
             ) : (
-              <div className="ai-chat-thread">
+              <div className="ai-chat-thread" ref={chatThreadRef}>
                 {hiddenMessageCount > 0 && (
                   <div className="ai-render-limit-notice">
                     <span>{hiddenMessageCount} {performanceText.hiddenMessages}</span>
@@ -2265,9 +2598,11 @@ export default function AIIntakePage() {
                   ) : (
                     <div style={{ whiteSpace: 'pre-wrap' }}>{message.content}</div>
                   )}
+                    {renderStructuredAnswerPanel(message)}
                   </div>
                 ))}
                 {messages.length === 0 && <div className="muted">{m.aiIntakePage.noConversation}</div>}
+                <div ref={chatEndRef} aria-hidden="true" />
               </div>
             )}
           </div>

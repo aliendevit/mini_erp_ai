@@ -25,11 +25,11 @@ if not load_dotenv(ENV_FILE):
 
 
 class Settings(BaseModel):
-    database_url: str = os.getenv("DATABASE_URL", "sqlite:///./app.db")
+    database_url: str = os.getenv("DATABASE_URL", "postgresql://omran:change-me-local@localhost:5432/omran")
     cors_origin: str = os.getenv("CORS_ORIGIN", "http://localhost:3000")
     log_level: str = os.getenv("LOG_LEVEL", "INFO").strip().upper()
     gemini_api_key: str = os.getenv("GEMINI_API_KEY", "").strip()
-    gemini_model: str = os.getenv("GEMINI_MODEL", "gemini-1.5-flash").strip()
+    gemini_model: str = os.getenv("GEMINI_MODEL", "gemini-2.5-flash").strip()
     assemblyai_api_key: str = os.getenv("ASSEMBLYAI_API_KEY", "").strip()
     assemblyai_api_base: str = os.getenv("ASSEMBLYAI_API_BASE", "https://api.assemblyai.com").rstrip("/")
     openrouter_api_key: str = os.getenv("OPENROUTER_API_KEY", "").strip()

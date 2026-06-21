@@ -13,7 +13,7 @@ The active runtime architecture is:
 
 - `frontend/` - Next.js App Router UI
 - `backend-python/` - FastAPI monolith with SQLAlchemy
-- `backend-python/app.db` - SQLite by default
+- PostgreSQL + pgvector database
 - Gemini API - external AI provider used for intake chat and proposal drafting
 
 The legacy `backend/` folder still exists in the repository, but the current active backend is `backend-python/`.
@@ -29,8 +29,7 @@ flowchart LR
     U[Browser User] --> F[Next.js Frontend]
     F -->|REST /api/*| B[FastAPI Backend]
     B --> S[SQLAlchemy ORM]
-    S --> DB[(SQLite app.db)]
-    S --> PG[(PostgreSQL optional)]
+    S --> DB[(PostgreSQL + pgvector)]
     B --> G[Gemini API]
     B --> D[PDF and Word Document Services]
 ```
@@ -71,8 +70,7 @@ flowchart LR
 ### Persistence layer
 
 - ORM: SQLAlchemy models in `backend-python/app/models.py`
-- Default DB: SQLite via `DATABASE_URL=sqlite:///./app.db`
-- Optional DB: PostgreSQL via `pg8000`
+- Database: PostgreSQL via `pg8000`
 - Startup behavior:
   - create tables
   - apply lightweight compatibility fix for `weeklyCapacityHours`
@@ -279,7 +277,7 @@ Frontend:
 - no authentication or authorization
 - monolithic backend
 - synchronous Gemini and document generation calls
-- SQLite is local-first and convenient, but not ideal for multi-user concurrency
+- PostgreSQL is the single database runtime for local, test, and deployment use
 - legacy TypeScript backend is still present in the repository, but current runtime design uses the Python backend
 - AI is assistive only; final writes remain deterministic and manager-approved
 

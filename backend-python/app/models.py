@@ -751,3 +751,118 @@ class ProposalMessage(Base):
     created_at: Mapped[datetime] = mapped_column("createdAt", DateTime(timezone=True), server_default=func.now())
 
     proposal: Mapped[Proposal] = relationship(back_populates="messages")
+
+
+class RagSource(Base):
+    __tablename__ = "RagSource"
+    __table_args__ = (
+        Index("RagSource_proposalId_idx", "proposalId"),
+        Index("RagSource_orderId_idx", "orderId"),
+        Index("RagSource_customerId_idx", "customerId"),
+        Index("RagSource_siteId_idx", "siteId"),
+        Index("RagSource_status_idx", "ingestionStatus"),
+        Index("RagSource_entity_idx", "sourceEntityType", "sourceEntityId"),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid4()))
+    proposal_id: Mapped[str | None] = mapped_column("proposalId", String(36), ForeignKey("Proposal.id"))
+    order_id: Mapped[str | None] = mapped_column("orderId", String(36), ForeignKey("Order.id"))
+    customer_id: Mapped[str | None] = mapped_column("customerId", String(36), ForeignKey("Customer.id"))
+    site_id: Mapped[str | None] = mapped_column("siteId", String(36), ForeignKey("Site.id"))
+    source_type: Mapped[str] = mapped_column("sourceType", String, nullable=False)
+    source_entity_type: Mapped[str | None] = mapped_column("sourceEntityType", String)
+    source_entity_id: Mapped[str | None] = mapped_column("sourceEntityId", String(36))
+    document_type: Mapped[str | None] = mapped_column("documentType", String)
+    title: Mapped[str | None] = mapped_column(String)
+    original_file_name: Mapped[str | None] = mapped_column("originalFileName", String)
+    mime_type: Mapped[str | None] = mapped_column("mimeType", String)
+    storage_path: Mapped[str | None] = mapped_column("storagePath", Text)
+    file_hash: Mapped[str | None] = mapped_column("fileHash", String)
+    language: Mapped[str | None] = mapped_column(String)
+    ingestion_status: Mapped[str] = mapped_column(
+        "ingestionStatus", String, nullable=False, default="pending", server_default="pending"
+    )
+    extraction_method: Mapped[str | None] = mapped_column("extractionMethod", String)
+    extractor_version: Mapped[str | None] = mapped_column("extractorVersion", String)
+    metadata_json: Mapped[str | None] = mapped_column("metadataJson", Text)
+    created_by_user_id: Mapped[str | None] = mapped_column("createdByUserId", String(36))
+    created_at: Mapped[datetime] = mapped_column("createdAt", DateTime(timezone=True), server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(
+        "updatedAt", DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
+    )
+
+    chunks: Mapped[list["RagChunk"]] = relationship(back_populates="source", cascade="all, delete-orphan")
+    ingestion_jobs: Mapped[list["RagIngestionJob"]] = relationship(back_populates="source", cascade="all, delete-orphan")
+
+
+class RagChunk(Base):
+    __tablename__ = "RagChunk"
+    __table_args__ = (
+        Index("RagChunk_sourceId_idx", "sourceId"),
+        Index("RagChunk_proposalId_idx", "proposalId"),
+        Index("RagChunk_orderId_idx", "orderId"),
+        Index("RagChunk_customerId_idx", "customerId"),
+        Index("RagChunk_siteId_idx", "siteId"),
+        Index("RagChunk_entity_idx", "sourceEntityType", "sourceEntityId"),
+        Index("RagChunk_active_scope_idx", "isActive", "proposalId", "orderId", "sourceType", "trustLevel"),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid4()))
+    source_id: Mapped[str] = mapped_column(
+        "sourceId", String(36), ForeignKey("RagSource.id", ondelete="CASCADE"), nullable=False
+    )
+    proposal_id: Mapped[str | None] = mapped_column("proposalId", String(36), ForeignKey("Proposal.id"))
+    order_id: Mapped[str | None] = mapped_column("orderId", String(36), ForeignKey("Order.id"))
+    customer_id: Mapped[str | None] = mapped_column("customerId", String(36), ForeignKey("Customer.id"))
+    site_id: Mapped[str | None] = mapped_column("siteId", String(36), ForeignKey("Site.id"))
+    source_type: Mapped[str] = mapped_column("sourceType", String, nullable=False)
+    source_entity_type: Mapped[str | None] = mapped_column("sourceEntityType", String)
+    source_entity_id: Mapped[str | None] = mapped_column("sourceEntityId", String(36))
+    chunk_type: Mapped[str] = mapped_column("chunkType", String, nullable=False)
+    trust_level: Mapped[str] = mapped_column("trustLevel", String, nullable=False)
+    chunk_text: Mapped[str] = mapped_column("chunkText", Text, nullable=False)
+    chunk_text_hash: Mapped[str] = mapped_column("chunkTextHash", String, nullable=False)
+    chunk_index: Mapped[int] = mapped_column("chunkIndex", Integer, nullable=False)
+    token_count: Mapped[int | None] = mapped_column("tokenCount", Integer)
+    language: Mapped[str | None] = mapped_column(String)
+    page_start: Mapped[int | None] = mapped_column("pageStart", Integer)
+    page_end: Mapped[int | None] = mapped_column("pageEnd", Integer)
+    bounding_boxes_json: Mapped[str | None] = mapped_column("boundingBoxesJson", Text)
+    layout_json: Mapped[str | None] = mapped_column("layoutJson", Text)
+    heading_path_json: Mapped[str | None] = mapped_column("headingPathJson", Text)
+    metadata_json: Mapped[str | None] = mapped_column("metadataJson", Text)
+    embedding_model: Mapped[str] = mapped_column("embeddingModel", String, nullable=False)
+    embedding_dim: Mapped[int] = mapped_column("embeddingDim", Integer, nullable=False, default=768, server_default="768")
+    embedding_json: Mapped[str | None] = mapped_column("embeddingJson", Text)
+    is_active: Mapped[bool] = mapped_column("isActive", Boolean, nullable=False, default=True, server_default="true")
+    superseded_by_chunk_id: Mapped[str | None] = mapped_column("supersededByChunkId", String(36))
+    created_at: Mapped[datetime] = mapped_column("createdAt", DateTime(timezone=True), server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(
+        "updatedAt", DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
+    )
+
+    source: Mapped[RagSource] = relationship(back_populates="chunks")
+
+
+class RagIngestionJob(Base):
+    __tablename__ = "RagIngestionJob"
+    __table_args__ = (
+        Index("RagIngestionJob_sourceId_idx", "sourceId"),
+        Index("RagIngestionJob_status_idx", "status"),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid4()))
+    source_id: Mapped[str] = mapped_column(
+        "sourceId", String(36), ForeignKey("RagSource.id", ondelete="CASCADE"), nullable=False
+    )
+    status: Mapped[str] = mapped_column(String, nullable=False, default="pending", server_default="pending")
+    stage: Mapped[str | None] = mapped_column(String)
+    error_message: Mapped[str | None] = mapped_column("errorMessage", Text)
+    started_at: Mapped[datetime | None] = mapped_column("startedAt", DateTime(timezone=True))
+    finished_at: Mapped[datetime | None] = mapped_column("finishedAt", DateTime(timezone=True))
+    created_at: Mapped[datetime] = mapped_column("createdAt", DateTime(timezone=True), server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(
+        "updatedAt", DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
+    )
+
+    source: Mapped[RagSource] = relationship(back_populates="ingestion_jobs")

@@ -9,19 +9,20 @@ from unittest.mock import patch
 import wave
 
 from fastapi import HTTPException
-from sqlalchemy import create_engine, select
-from sqlalchemy.orm import Session, sessionmaker
-from sqlalchemy.pool import StaticPool
+from sqlalchemy import select
+from sqlalchemy.orm import Session
 from starlette.datastructures import Headers, UploadFile
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from app.database import Base
-from app.models import Proposal, ProposalMessage
+from app.models import Proposal, ProposalMessage, RagChunk, RagSource
 from app.routers.ai import clear_intake_messages, create_intake, delete_intake, delete_intake_message, generate_proposal, intake_message_stream, transcribe_intake_audio
 from app.services.assemblyai_client import transcribe_audio
 from app.services.proposals import build_proposal_prompt
 from app.schemas import AIIntakeCreatePayload, AIIntakeMessagePayload
+from postgres_test_utils import create_session
 
 
 async def _collect_streaming_response(response) -> str:
@@ -60,18 +61,12 @@ def _upload_file(content: bytes, content_type: str = "audio/wav", filename: str 
 
 class AIAssistantTests(unittest.TestCase):
     def setUp(self) -> None:
-        engine = create_engine(
-            "sqlite://",
-            connect_args={"check_same_thread": False},
-            poolclass=StaticPool,
-            future=True,
-        )
-        TestingSession = sessionmaker(bind=engine, autoflush=False, autocommit=False, future=True)
-        Base.metadata.create_all(bind=engine)
-        self.db: Session = TestingSession()
+        self.engine, _TestingSession, self.db = create_session()
 
     def tearDown(self) -> None:
         self.db.close()
+        Base.metadata.drop_all(bind=self.engine)
+        self.engine.dispose()
 
     def test_intake_message_stream_persists_both_messages(self) -> None:
         created = create_intake(
@@ -101,23 +96,65 @@ class AIAssistantTests(unittest.TestCase):
         self.assertEqual(messages[1].role, "assistant")
         self.assertEqual(messages[1].content, "Danke fuer die Details.")
 
+    def test_intake_message_stream_captures_rag_facts_and_injects_context(self) -> None:
+        created = create_intake(
+            AIIntakeCreatePayload(customerCompanyName="Garden Client", orderTitle="Garden work"),
+            db=self.db,
+        )
+        proposal_id = created["id"]
+        captured_prompts: list[str] = []
+
+        def fake_stream(prompt: str):
+            captured_prompts.append(prompt)
+            return iter(["Saved garden facts."])
+
+        classifier_json = '{"save":true,"facts":["Garden fence height is 1.5 meters.","Solarna COM phone is +963 955 111 222."]}'
+        with patch("app.routers.ai.ensure_gemini_ready"), patch("app.services.rag.generate_text", return_value=classifier_json), patch(
+            "app.routers.ai.stream_text", side_effect=fake_stream
+        ):
+            response = intake_message_stream(
+                proposal_id,
+                AIIntakeMessagePayload(content="Garden fence height is 1.5 meters. Call Solarna COM at +963 955 111 222."),
+                db=self.db,
+            )
+            body = asyncio.run(_collect_streaming_response(response))
+
+        self.assertEqual(body, "Saved garden facts.")
+        sources = self.db.scalars(select(RagSource).where(RagSource.proposal_id == proposal_id)).all()
+        chunks = self.db.scalars(select(RagChunk).where(RagChunk.proposal_id == proposal_id)).all()
+        self.assertEqual(len(sources), 1)
+        self.assertGreaterEqual(len(chunks), 2)
+        self.assertEqual(sources[0].source_type, "chat_fact")
+        self.assertTrue(captured_prompts)
+        self.assertIn("Scoped RAG retrieval snippets", captured_prompts[0])
+        self.assertIn("Garden fence height is 1.5 meters", captured_prompts[0])
+
     def test_clear_intake_messages_removes_persisted_conversation(self) -> None:
         created = create_intake(AIIntakeCreatePayload(orderTitle="Voice intake"), db=self.db)
         proposal_id = created["id"]
 
         proposal = self.db.get(Proposal, proposal_id)
         proposal.messages = [
-            ProposalMessage(role="user", content="Hello"),
+            ProposalMessage(role="user", content="Garden fence height is 1.5 meters."),
             ProposalMessage(role="assistant", content="Hi"),
         ]
         self.db.add(proposal)
         self.db.commit()
+        user_message = self.db.scalars(
+            select(ProposalMessage).where(ProposalMessage.proposal_id == proposal_id, ProposalMessage.role == "user")
+        ).first()
+        with patch("app.services.rag.generate_text", return_value='{"save":true,"facts":["Garden fence height is 1.5 meters."]}'):
+            from app.services.rag import capture_chat_message_for_rag
+
+            capture_chat_message_for_rag(self.db, proposal, user_message)
+            self.db.commit()
 
         payload = clear_intake_messages(proposal_id, db=self.db)
 
         self.assertEqual(payload["messages"], [])
         messages = self.db.scalars(select(ProposalMessage).where(ProposalMessage.proposal_id == proposal_id)).all()
         self.assertEqual(messages, [])
+        self.assertEqual(self.db.scalars(select(RagSource).where(RagSource.proposal_id == proposal_id)).all(), [])
 
     def test_delete_intake_removes_session_and_related_messages(self) -> None:
         created = create_intake(AIIntakeCreatePayload(orderTitle="Delete this intake"), db=self.db)
@@ -142,17 +179,23 @@ class AIAssistantTests(unittest.TestCase):
 
         proposal = self.db.get(Proposal, proposal_id)
         first = ProposalMessage(role="user", content="Keep this project detail")
-        selected = ProposalMessage(role="assistant", content="Delete this reply")
+        selected = ProposalMessage(role="user", content="Delete this garden fence height detail")
         last = ProposalMessage(role="user", content="Keep this payment detail")
         proposal.messages = [first, selected, last]
         self.db.add(proposal)
         self.db.commit()
         selected_id = selected.id
+        with patch("app.services.rag.generate_text", return_value='{"save":true,"facts":["Delete this garden fence height detail"]}'):
+            from app.services.rag import capture_chat_message_for_rag
+
+            capture_chat_message_for_rag(self.db, proposal, selected)
+            self.db.commit()
 
         payload = delete_intake_message(proposal_id, selected_id, db=self.db)
 
         self.assertEqual([message["content"] for message in payload["messages"]], [first.content, last.content])
         self.assertIsNone(self.db.get(ProposalMessage, selected_id))
+        self.assertEqual(self.db.scalars(select(RagSource).where(RagSource.source_entity_id == selected_id)).all(), [])
 
     def test_generate_proposal_sets_site_hours_when_gemini_omits_them(self) -> None:
         created = create_intake(AIIntakeCreatePayload(), db=self.db)

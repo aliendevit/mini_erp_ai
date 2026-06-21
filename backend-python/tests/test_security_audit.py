@@ -4,32 +4,25 @@ import sys
 import unittest
 from pathlib import Path
 
-from sqlalchemy import create_engine, select
-from sqlalchemy.orm import Session, sessionmaker
-from sqlalchemy.pool import StaticPool
+from sqlalchemy import select
+from sqlalchemy.orm import Session
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from app.database import Base
 from app.models import AuditLog, Customer, UserAccount
-from app.routers import ai, core, invoices, system
+from app.routers import ai, core, invoices, rag, system
 from app.routers.auth import get_current_user
 from app.routers.core import create_order
 from app.schemas import OrderPayload
+from postgres_test_utils import create_session
 
 
 class SecurityAuditTests(unittest.TestCase):
     def setUp(self) -> None:
-        self.engine = create_engine(
-            "sqlite://",
-            connect_args={"check_same_thread": False},
-            poolclass=StaticPool,
-            future=True,
-        )
-        TestingSession = sessionmaker(bind=self.engine, autoflush=False, autocommit=False, future=True)
-        Base.metadata.create_all(bind=self.engine)
+        self.engine, TestingSession, self.db = create_session()
         self.TestingSession = TestingSession
-        self.db: Session = TestingSession()
 
     def tearDown(self) -> None:
         self.db.close()
@@ -37,7 +30,7 @@ class SecurityAuditTests(unittest.TestCase):
         self.engine.dispose()
 
     def test_business_routers_require_current_user(self) -> None:
-        for router in (core.router, invoices.router, ai.router):
+        for router in (core.router, invoices.router, ai.router, rag.router):
             dependencies = [item.dependency for item in router.dependencies]
             self.assertIn(get_current_user, dependencies)
 

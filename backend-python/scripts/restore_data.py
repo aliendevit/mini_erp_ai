@@ -17,20 +17,10 @@ sys.path.insert(0, str(ROOT))
 from app.settings import get_settings  # noqa: E402
 
 
-def sqlite_path(database_url: str) -> Path | None:
-    if not database_url.startswith("sqlite:///"):
-        return None
-    raw = database_url.replace("sqlite:///", "", 1)
-    path = Path(raw)
-    return path if path.is_absolute() else ROOT / path
-
-
 def database_kind(database_url: str) -> str:
-    if database_url.startswith("sqlite:///"):
-        return "sqlite"
     if database_url.startswith("postgresql://") or database_url.startswith("postgresql+pg8000://"):
         return "postgresql"
-    raise SystemExit(f"Unsupported DATABASE_URL: {database_url}")
+    raise SystemExit(f"PostgreSQL DATABASE_URL is required: {database_url}")
 
 
 def postgres_connection_parts(database_url: str) -> dict[str, str]:
@@ -97,7 +87,7 @@ def main() -> None:
 
     settings = get_settings()
     current_kind = database_kind(settings.database_url)
-    backup_kind = manifest.get("databaseUrlKind", "sqlite")
+    backup_kind = manifest.get("databaseUrlKind", "postgresql")
     if backup_kind != current_kind:
         raise SystemExit(f"Backup is {backup_kind}, but current database is {current_kind}.")
 
@@ -105,16 +95,8 @@ def main() -> None:
     if not source_db.exists():
         raise SystemExit(f"Backup database file not found: {source_db}")
 
-    if current_kind == "sqlite":
-        db_path = sqlite_path(settings.database_url)
-        if db_path is None:
-            raise SystemExit("SQLite database path not found.")
-        db_path.parent.mkdir(parents=True, exist_ok=True)
-        shutil.copy2(source_db, db_path)
-        restored_to = str(db_path)
-    else:
-        restore_postgres(settings.database_url, source_db)
-        restored_to = "PostgreSQL database"
+    restore_postgres(settings.database_url, source_db)
+    restored_to = "PostgreSQL database"
 
     uploads_archive = backup_dir / manifest.get("uploadsArchive", "uploads.zip")
     uploads_dir = ROOT / "uploads"

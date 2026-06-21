@@ -22,7 +22,7 @@ FastAPI REST API
         |       - Invoice and PDF/Word document generation
         |
         +--> SQLAlchemy models
-        |       - SQLite in prototype
+        |       - PostgreSQL
         |
         +--> Local file storage
         |       - Uploaded project photos and generated documents
@@ -109,7 +109,7 @@ Location:
 Technology:
 
 - SQLAlchemy ORM
-- SQLite for prototype storage
+- PostgreSQL for application storage
 
 Main data areas:
 

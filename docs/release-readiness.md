@@ -24,7 +24,7 @@ It is not yet ready for a real production launch without additional security, de
 | --- | --- | --- |
 | Authentication and roles | Protect real business data | Add login, role permissions, and access control. |
 | Audit log | Track critical business actions | Record who changed orders, invoices, workshops, payments, and baselines. |
-| Production database | SQLite is not enough for real multi-user deployment | Move to PostgreSQL or another production database. |
+| Production database | PostgreSQL is required for runtime and RAG vector search | Keep schema, backups, and tests on PostgreSQL. |
 | File storage | Local uploads are fragile in production | Use managed object storage or a server-backed storage strategy. |
 | Backup and restore | Prevent data loss | Add database and upload backup plan. |
 | Secret management | Avoid leaking API keys | Use deployment secret store and remove all real keys from local examples. |

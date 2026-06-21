@@ -74,7 +74,7 @@ Do not commit real `.env`, `.env.local`, or API keys.
 Common backend variables:
 
 ```text
-DATABASE_URL=sqlite:///./app.db
+DATABASE_URL=postgresql://omran:change-me-local@localhost:5432/omran
 CORS_ORIGIN=http://localhost:3000
 GEMINI_API_KEY=...
 GEMINI_MODEL=...

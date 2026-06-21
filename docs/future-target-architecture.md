@@ -67,8 +67,8 @@ flowchart LR
 
 ### Persistence
 
-- move primary runtime to PostgreSQL
-- keep SQLite only for local development and demos
+- keep primary runtime on PostgreSQL
+- keep tests and local development on PostgreSQL test databases
 - add proper migrations instead of startup compatibility patches
 - add indexes for:
   - work-entry date filtering
@@ -203,7 +203,7 @@ flowchart TB
 - keep FastAPI monolith
 - standardize API schemas
 - add auth and RBAC
-- move fully to PostgreSQL for non-local environments
+- keep all environments on PostgreSQL
 - replace startup schema patching with migrations
 
 ### Phase 2 - Introduce async infrastructure
@@ -230,7 +230,7 @@ flowchart TB
 
 - do not split into microservices early; keep one deployable backend until scale justifies separation
 - do not let AI write accounting-critical data without explicit backend-controlled confirmation
-- do not make SQLite the production target
+- do not introduce a second database runtime
 - do not couple the frontend directly to provider-specific AI behavior
 
 ## 8. Recommended First Upgrades
@@ -238,7 +238,7 @@ flowchart TB
 The next practical upgrades should be:
 
 1. authentication and role-based access control
-2. PostgreSQL as the default non-local runtime
+2. PostgreSQL as the only runtime
 3. migration framework for schema evolution
 4. Redis-backed background jobs for AI and exports
 5. object storage for generated documents

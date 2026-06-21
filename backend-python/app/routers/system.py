@@ -38,29 +38,15 @@ AUDIT_ACTIONS = {
 }
 
 
-def _sqlite_path() -> Path:
-    database_url = get_settings().database_url
-    if not database_url.startswith("sqlite:///"):
-        raise HTTPException(
-            status.HTTP_400_BAD_REQUEST,
-            "Current database is not SQLite.",
-        )
-    raw = database_url.replace("sqlite:///", "", 1)
-    path = Path(raw)
-    return path if path.is_absolute() else ROOT / path
-
-
 def _database_url() -> str:
     return get_settings().database_url
 
 
 def _database_kind(database_url: str | None = None) -> str:
     url = database_url or _database_url()
-    if url.startswith("sqlite:///"):
-        return "sqlite"
     if url.startswith("postgresql://") or url.startswith("postgresql+pg8000://"):
         return "postgresql"
-    raise HTTPException(status.HTTP_400_BAD_REQUEST, "Unsupported database type for backup/restore.")
+    raise HTTPException(status.HTTP_400_BAD_REQUEST, "PostgreSQL DATABASE_URL is required for backup/restore.")
 
 
 def _postgres_connection_parts(database_url: str | None = None) -> dict[str, str]:
@@ -190,15 +176,8 @@ def _create_backup_archive(label: str = "backup") -> dict:
     work_dir.mkdir(parents=True, exist_ok=False)
 
     try:
-        if database_kind == "sqlite":
-            db_path = _sqlite_path()
-            if not db_path.exists():
-                raise HTTPException(status.HTTP_404_NOT_FOUND, f"Database file not found: {db_path}")
-            db_target = work_dir / db_path.name
-            shutil.copy2(db_path, db_target)
-        else:
-            db_target = work_dir / "database.dump"
-            _dump_postgres_database(db_target)
+        db_target = work_dir / "database.dump"
+        _dump_postgres_database(db_target)
 
         upload_file_count = 0
         uploads_zip = work_dir / "uploads.zip"
@@ -390,7 +369,7 @@ async def restore_backup(
             _safe_extract(archive, extract_dir)
 
         manifest = json.loads((extract_dir / "manifest.json").read_text(encoding="utf-8"))
-        archive_database_kind = manifest.get("databaseUrlKind", "sqlite")
+        archive_database_kind = manifest.get("databaseUrlKind", "postgresql")
         current_database_kind = _database_kind()
         if archive_database_kind != current_database_kind:
             raise HTTPException(
@@ -403,13 +382,7 @@ async def restore_backup(
             raise HTTPException(status.HTTP_400_BAD_REQUEST, "Backup database file is missing.")
 
         safety_backup = _create_backup_archive("pre-restore")
-        if current_database_kind == "sqlite":
-            db_path = _sqlite_path()
-            db_path.parent.mkdir(parents=True, exist_ok=True)
-            engine.dispose()
-            shutil.copy2(source_db, db_path)
-        else:
-            _restore_postgres_database(source_db)
+        _restore_postgres_database(source_db)
         init_db()
 
         if uploads_archive.exists():

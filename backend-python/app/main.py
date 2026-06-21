@@ -14,7 +14,7 @@ from fastapi.staticfiles import StaticFiles
 from sqlalchemy import text
 
 from .database import DATABASE_URL, engine, init_db
-from .routers import ai, auth, core, invoices, system
+from .routers import ai, auth, core, invoices, rag, system
 from .settings import get_settings
 
 app = FastAPI(title="Simple Accounting Python Backend")
@@ -120,8 +120,7 @@ def health() -> dict:
 
     with engine.connect() as conn:
         conn.execute(text("SELECT 1"))
-    database_kind = "postgresql" if DATABASE_URL.startswith("postgresql") else "sqlite"
-    return {"ok": True, "database": database_kind, "time": datetime.now(timezone.utc).isoformat()}
+    return {"ok": True, "database": "postgresql", "time": datetime.now(timezone.utc).isoformat()}
 
 
 @app.on_event("startup")
@@ -132,5 +131,6 @@ def startup() -> None:
 app.include_router(core.router, prefix="/api")
 app.include_router(invoices.router, prefix="/api")
 app.include_router(ai.router, prefix="/api")
+app.include_router(rag.router, prefix="/api")
 app.include_router(auth.router, prefix="/api")
 app.include_router(system.router, prefix="/api")

@@ -20,6 +20,18 @@ export function authHeaders(): Record<string, string> {
   return token ? { Authorization: `Bearer ${token}` } : {};
 }
 
+export function hasAuthToken(): boolean {
+  if (typeof window === 'undefined') return false;
+  return Boolean(localStorage.getItem('omran_auth_token'));
+}
+
+export function clearStoredAuth(): void {
+  if (typeof window === 'undefined') return;
+  localStorage.removeItem('omran_auth_token');
+  localStorage.removeItem('omran_auth_user');
+  window.dispatchEvent(new Event('omran-auth-changed'));
+}
+
 function downloadFileName(path: string, fallback = 'download') {
   const cleanPath = path.split('?')[0] || '';
   return cleanPath.split('/').filter(Boolean).pop() || fallback;

@@ -1,34 +1,59 @@
 services:
   db:
-    image: postgres:16
+    image: pgvector/pgvector:pg16
+    restart: unless-stopped
     environment:
-      POSTGRES_USER: app
-      POSTGRES_PASSWORD: app
-      POSTGRES_DB: app
+      POSTGRES_USER: ${POSTGRES_USER:-omran}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-change-me-local}
+      POSTGRES_DB: ${POSTGRES_DB:-omran}
     ports:
-      - "5432:5432"
+      - "${POSTGRES_PORT:-5432}:5432"
     volumes:
-      - db_data_v2:/var/lib/postgresql/data
+      - db_data_v2_python:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
 
   backend:
-    build: ./backend
+    build: ./backend-python
+    restart: unless-stopped
+    env_file:
+      - ./backend-python/.env
     environment:
-      DATABASE_URL: postgresql://app:app@db:5432/app
-      PORT: 3001
-      CORS_ORIGIN: http://localhost:3000
+      DATABASE_URL: postgresql://${POSTGRES_USER:-omran}:${POSTGRES_PASSWORD:-change-me-local}@db:5432/${POSTGRES_DB:-omran}
+      CORS_ORIGIN: ${CORS_ORIGIN:-http://localhost:3000}
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+      GEMINI_MODEL: ${GEMINI_MODEL:-gemini-2.5-flash}
+      OPENROUTER_API_KEY: ${OPENROUTER_API_KEY:-}
+      OPENROUTER_MODEL: ${OPENROUTER_MODEL:-openrouter/free}
+      OPENROUTER_SITE_URL: ${OPENROUTER_SITE_URL:-http://localhost:3000}
+      OPENROUTER_APP_NAME: ${OPENROUTER_APP_NAME:-Mini ERP AI}
+      ASSEMBLYAI_API_KEY: ${ASSEMBLYAI_API_KEY:-}
+      ASSEMBLYAI_API_BASE: ${ASSEMBLYAI_API_BASE:-https://api.assemblyai.com}
     depends_on:
-      - db
+      db:
+        condition: service_healthy
     ports:
-      - "3001:3001"
+      - "${BACKEND_PORT:-3001}:3001"
+    volumes:
+      - backend_uploads:/app/uploads
+      - backend_backups:/app/backups
+      - backend_logs:/app/logs
 
   frontend:
     build: ./frontend
+    restart: unless-stopped
     environment:
-      NEXT_PUBLIC_API_BASE: http://localhost:3001/api
+      NEXT_PUBLIC_API_BASE: ${NEXT_PUBLIC_API_BASE:-http://localhost:3001/api}
     depends_on:
       - backend
     ports:
-      - "3000:3000"
+      - "${FRONTEND_PORT:-3000}:3000"
 
 volumes:
-  db_data_v2:
+  db_data_v2_python:
+  backend_uploads:
+  backend_backups:
+  backend_logs:
