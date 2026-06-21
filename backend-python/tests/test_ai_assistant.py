@@ -20,8 +20,9 @@ from app.database import Base
 from app.models import Proposal, ProposalMessage
 from app.routers.ai import clear_intake_messages, create_intake, delete_intake, delete_intake_message, generate_proposal, intake_message_stream, transcribe_intake_audio
 from app.services.assemblyai_client import transcribe_audio
-from app.services.proposals import build_proposal_prompt
+from app.services.proposals import build_proposal_prompt, refresh_proposal_memory_locally
 from app.schemas import AIIntakeCreatePayload, AIIntakeMessagePayload
+from app.utils import proposal_payload
 
 
 async def _collect_streaming_response(response) -> str:
@@ -100,6 +101,44 @@ class AIAssistantTests(unittest.TestCase):
         self.assertEqual(messages[0].content, "Hello, I have a new client.")
         self.assertEqual(messages[1].role, "assistant")
         self.assertEqual(messages[1].content, "Danke fuer die Details.")
+
+    def test_a2ui_blocks_use_intake_memory_before_proposal_generation(self) -> None:
+        created = create_intake(AIIntakeCreatePayload(), db=self.db)
+        proposal = self.db.get(Proposal, created["id"])
+        proposal.messages = [
+            ProposalMessage(
+                role="user",
+                content=(
+                    "I have a renovation project for Al Noor Properties in Berlin, Alexanderplatz 12. "
+                    "Bathroom waterproofing, ceramic tiling, plumbing pipe replacement, full wall painting, "
+                    "putty work, and floor removal are required. Budget is 12000 EUR. "
+                    "The 3000 EUR deposit will be paid by bank transfer. Reference number DEP-ALNOOR-2026-001. "
+                    "Assign Nord Fliesen & Abdichtung for tiling and waterproofing. "
+                    "Assign Workshop Al-Nazafa for plumbing. Assign Weser Malerteam GmbH for painting."
+                ),
+            ),
+            ProposalMessage(role="assistant", content="I captured the project details."),
+        ]
+        self.db.add(proposal)
+        self.db.commit()
+
+        proposal = self.db.get(Proposal, created["id"])
+        refresh_proposal_memory_locally(self.db, proposal, proposal.messages)
+        self.db.commit()
+
+        payload = proposal_payload(self.db.get(Proposal, created["id"]), include_messages=True)
+        assistant_message = payload["messages"][-1]
+        blocks = {block["type"]: block for block in assistant_message["ui"]}
+
+        self.assertGreaterEqual(blocks["intakeReadiness"]["percent"], 70)
+        summary_values = {item["label"]: item["value"] for item in blocks["intakeSummary"]["items"]}
+        self.assertEqual(summary_values["Customer"], "Al Noor Properties")
+        self.assertGreaterEqual(summary_values["Payments"], 1)
+        self.assertGreaterEqual(summary_values["Workshops"], 3)
+        self.assertIn("tiling", summary_values["Trades"])
+        missing_keys = {item["key"] for item in blocks["missingInfoChecklist"]["items"]}
+        self.assertNotIn("customerCompanyName", missing_keys)
+        self.assertNotIn("skills", missing_keys)
 
     def test_clear_intake_messages_removes_persisted_conversation(self) -> None:
         created = create_intake(AIIntakeCreatePayload(orderTitle="Voice intake"), db=self.db)

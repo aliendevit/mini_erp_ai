@@ -22,11 +22,45 @@ type PaginatedResponse<T> = {
   pageSize: number;
 };
 
+type A2UIBlock =
+  | {
+      a2uiVersion: string;
+      id: string;
+      type: 'intakeReadiness';
+      title: string;
+      status: 'ready' | 'needs_input' | string;
+      percent: number;
+      description?: string;
+    }
+  | {
+      a2uiVersion: string;
+      id: string;
+      type: 'intakeSummary';
+      title: string;
+      items: Array<{ label: string; value: string | number | null }>;
+    }
+  | {
+      a2uiVersion: string;
+      id: string;
+      type: 'missingInfoChecklist';
+      title: string;
+      items: Array<{ key: string; label: string; severity?: 'required' | 'recommended' | 'optional' | string }>;
+      emptyText?: string;
+    }
+  | {
+      a2uiVersion: string;
+      id: string;
+      type: 'nextActions';
+      title: string;
+      items: string[];
+    };
+
 type ProposalMessage = {
   id: string;
   role: 'user' | 'assistant';
   content: string;
   createdAt: string;
+  ui?: A2UIBlock[];
 };
 
 type ProposalCoverageType = 'internal_only' | 'mixed_with_workshop' | 'workshop_only';
@@ -293,6 +327,140 @@ function Icon({ name }: { name: IconName }) {
         <path key={path} d={path} />
       ))}
     </svg>
+  );
+}
+
+function a2uiLabels(locale: string) {
+  if (locale === 'ar') {
+    return {
+      badge: 'A2UI',
+      ready: 'جاهز',
+      needsInput: 'يحتاج معلومات',
+      complete: 'اكتمال البيانات',
+      required: 'مطلوب',
+      recommended: 'مستحسن',
+      optional: 'اختياري',
+    };
+  }
+  if (locale === 'de') {
+    return {
+      badge: 'A2UI',
+      ready: 'Bereit',
+      needsInput: 'Angaben fehlen',
+      complete: 'Datenvollstaendigkeit',
+      required: 'Pflicht',
+      recommended: 'Empfohlen',
+      optional: 'Optional',
+    };
+  }
+  return {
+    badge: 'A2UI',
+    ready: 'Ready',
+    needsInput: 'Needs input',
+    complete: 'Data completeness',
+    required: 'Required',
+    recommended: 'Recommended',
+    optional: 'Optional',
+  };
+}
+
+function severityLabel(value: string | undefined, labels: ReturnType<typeof a2uiLabels>) {
+  if (value === 'required') return labels.required;
+  if (value === 'recommended') return labels.recommended;
+  if (value === 'optional') return labels.optional;
+  return value || labels.recommended;
+}
+
+function A2UIRenderer({ blocks, locale }: { blocks?: A2UIBlock[]; locale: string }) {
+  const labels = a2uiLabels(locale);
+  if (!blocks?.length) return null;
+
+  return (
+    <div className="a2ui-stack" aria-label="A2UI">
+      {blocks.map((block) => {
+        if (block.type === 'intakeReadiness') {
+          const percent = Math.max(0, Math.min(100, Number(block.percent || 0)));
+          const ready = block.status === 'ready';
+          return (
+            <section key={block.id} className={`a2ui-card readiness ${ready ? 'ready' : 'needs-input'}`}>
+              <div className="a2ui-card-header">
+                <span className="a2ui-badge">{labels.badge}</span>
+                <strong>{block.title}</strong>
+                <em>{ready ? labels.ready : labels.needsInput}</em>
+              </div>
+              <div className="a2ui-readiness-row">
+                <span>{labels.complete}</span>
+                <strong>{percent}%</strong>
+              </div>
+              <div className="a2ui-progress" aria-hidden="true">
+                <span style={{ width: `${percent}%` }} />
+              </div>
+            </section>
+          );
+        }
+
+        if (block.type === 'intakeSummary') {
+          return (
+            <section key={block.id} className="a2ui-card">
+              <div className="a2ui-card-header">
+                <span className="a2ui-badge">{labels.badge}</span>
+                <strong>{block.title}</strong>
+              </div>
+              <div className="a2ui-summary-grid">
+                {block.items.map((item) => (
+                  <div key={item.label}>
+                    <span>{item.label}</span>
+                    <strong>{item.value == null || item.value === '' ? '-' : item.value}</strong>
+                  </div>
+                ))}
+              </div>
+            </section>
+          );
+        }
+
+        if (block.type === 'missingInfoChecklist') {
+          return (
+            <section key={block.id} className="a2ui-card">
+              <div className="a2ui-card-header">
+                <span className="a2ui-badge">{labels.badge}</span>
+                <strong>{block.title}</strong>
+              </div>
+              {block.items.length ? (
+                <div className="a2ui-checklist">
+                  {block.items.map((item) => (
+                    <div key={item.key}>
+                      <span className={`a2ui-dot ${item.severity || 'recommended'}`} />
+                      <strong>{item.label}</strong>
+                      <em>{severityLabel(item.severity, labels)}</em>
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <div className="a2ui-empty">{block.emptyText || labels.ready}</div>
+              )}
+            </section>
+          );
+        }
+
+        if (block.type === 'nextActions') {
+          return (
+            <section key={block.id} className="a2ui-card">
+              <div className="a2ui-card-header">
+                <span className="a2ui-badge">{labels.badge}</span>
+                <strong>{block.title}</strong>
+              </div>
+              <ol className="a2ui-actions">
+                {block.items.map((item, index) => (
+                  <li key={`${item}-${index}`}>{item}</li>
+                ))}
+              </ol>
+            </section>
+          );
+        }
+
+        return null;
+      })}
+    </div>
   );
 }
 
@@ -2254,17 +2422,20 @@ export default function AIIntakePage() {
                       </button>
                     </div>
                     {message.content ? (
-                    <div style={{ whiteSpace: 'pre-wrap' }}>{message.content}</div>
-                  ) : streaming && streamingAssistantId === message.id ? (
-                    <div className="ai-writing-indicator" aria-live="polite">
-                      <span />
-                      <span />
-                      <span />
-                      <em>{m.aiIntakePage.streaming}</em>
-                    </div>
-                  ) : (
-                    <div style={{ whiteSpace: 'pre-wrap' }}>{message.content}</div>
-                  )}
+                      <div style={{ whiteSpace: 'pre-wrap' }}>{message.content}</div>
+                    ) : streaming && streamingAssistantId === message.id ? (
+                      <div className="ai-writing-indicator" aria-live="polite">
+                        <span />
+                        <span />
+                        <span />
+                        <em>{m.aiIntakePage.streaming}</em>
+                      </div>
+                    ) : (
+                      <div style={{ whiteSpace: 'pre-wrap' }}>{message.content}</div>
+                    )}
+                    {message.role === 'assistant' && message.ui?.length ? (
+                      <A2UIRenderer blocks={message.ui} locale={locale} />
+                    ) : null}
                   </div>
                 ))}
                 {messages.length === 0 && <div className="muted">{m.aiIntakePage.noConversation}</div>}

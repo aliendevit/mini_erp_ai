@@ -1032,7 +1032,7 @@ def refresh_proposal_memory_locally(db: Session, proposal: Proposal, messages: l
                 "dueDate": None,
                 "paidDate": None,
                 "method": "bank transfer" if any(term in lower for term in ["bank", "transfer", "ueberweisung", "\u00fcberweisung", "\u062a\u062d\u0648\u064a\u0644"]) else None,
-                "reference": None,
+                "reference": (re.search(r"(?:reference|ref(?:erence)? number|referenz)\s*(?:is|:)?\s*([A-Z0-9][A-Z0-9._/-]{3,})", content, flags=re.IGNORECASE).group(1) if re.search(r"(?:reference|ref(?:erence)? number|referenz)\s*(?:is|:)?\s*([A-Z0-9][A-Z0-9._/-]{3,})", content, flags=re.IGNORECASE) else None),
                 "notes": content[:500],
             }
             payment_drafts.append(draft)
@@ -1048,21 +1048,44 @@ def refresh_proposal_memory_locally(db: Session, proposal: Proposal, messages: l
             "\u0641\u0631\u064a\u0642 \u062e\u0627\u0631\u062c\u064a",
             "\u0645\u0642\u0627\u0648\u0644 \u0641\u0631\u0639\u064a",
         ]
-        if any(term in lower for term in workshop_terms):
+        workshop_name_patterns = [
+            r"Assign\s+([^.\n]+?)(?:\s+for|\.)",
+            r"assign\s+([^.\n]+?)(?:\s+for|\.)",
+            r"(Nord\s+Fliesen\s*&\s*Abdichtung)",
+            r"(Weser\s+Malerteam\s+GmbH)",
+            r"(Workshop\s+Al-[A-Za-z]+)",
+            r"(Workshop\s+Al-[A-Za-z]+(?:\s+for\s+[A-Za-z\s]+)?)",
+        ]
+        detected_workshop_names: list[str] = []
+        for pattern in workshop_name_patterns:
+            for match in re.finditer(pattern, content, flags=re.IGNORECASE):
+                name = match.group(1).strip(" .")
+                if name and name.lower() not in {item.lower() for item in detected_workshop_names}:
+                    detected_workshop_names.append(name)
+
+        if any(term in lower for term in workshop_terms) or detected_workshop_names:
             name_match = re.search("(?:named|called|name is|\u0627\u0633\u0645\u0647\u0627|\u0627\u0633\u0645\u0647|\u0627\u0633\u0645)\\s+([^,.\\n]+)", content, flags=re.IGNORECASE)
-            name = name_match.group(1).strip() if name_match else "External workshop/team"
-            workshop = {
-                "name": name[:120],
-                "contactName": None,
-                "phone": None,
-                "email": emails[0] if emails else None,
-                "specialties": [],
-                "suggestedFor": [],
-                "relationshipStatus": "known",
-                "notes": content[:500],
-            }
-            external_workshops.append(workshop)
-            _add_local_fact(facts, "contractor_workshop", "external_workshop", workshop, message.id)
+            names = detected_workshop_names or ([name_match.group(1).strip()] if name_match else ["External workshop/team"])
+            specialty_hints = []
+            if any(term in lower for term in ["tile", "tiling", "ceramic", "fliesen", "waterproof", "abdichtung"]):
+                specialty_hints.extend(["tiling", "waterproofing"])
+            if any(term in lower for term in ["plumbing", "pipe", "pipes", "sanitaer", "sanit\u00e4r"]):
+                specialty_hints.append("plumbing")
+            if any(term in lower for term in ["paint", "painting", "maler"]):
+                specialty_hints.append("painting")
+            for name in names:
+                workshop = {
+                    "name": name[:120],
+                    "contactName": None,
+                    "phone": None,
+                    "email": emails[0] if emails else None,
+                    "specialties": _dedupe_strings(specialty_hints),
+                    "suggestedFor": [],
+                    "relationshipStatus": "known",
+                    "notes": content[:500],
+                }
+                external_workshops.append(workshop)
+                _add_local_fact(facts, "contractor_workshop", "external_workshop", workshop, message.id)
 
         if "?" in content or "?" in content:
             open_questions.append(content[:300])

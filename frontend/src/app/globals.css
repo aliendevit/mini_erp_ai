@@ -8587,3 +8587,206 @@ html[data-theme="construction"] .auth-layout .auth-actions .btn.primary {
     display: none !important;
   }
 }
+
+/* A2UI safe renderer for AI Intake assistant messages */
+.a2ui-stack {
+  display: grid;
+  gap: 10px;
+  margin-top: 12px;
+}
+
+.a2ui-card {
+  position: relative;
+  overflow: hidden;
+  padding: 12px;
+  border: 1px solid color-mix(in srgb, var(--border, #344256) 78%, transparent);
+  border-radius: 14px;
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.055), rgba(255, 255, 255, 0.018)),
+    color-mix(in srgb, var(--card) 88%, transparent);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.07);
+}
+
+.a2ui-card::before {
+  content: "";
+  position: absolute;
+  inset: 0 auto 0 0;
+  width: 3px;
+  background: linear-gradient(180deg, var(--accent, #4f7cff), #22c55e);
+  opacity: 0.72;
+}
+
+html[dir='rtl'] .a2ui-card::before {
+  inset: 0 0 0 auto;
+}
+
+.a2ui-card-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 10px;
+}
+
+.a2ui-card-header strong {
+  min-width: 0;
+  color: var(--text);
+  font-size: 0.92rem;
+}
+
+.a2ui-card-header em {
+  margin-inline-start: auto;
+  padding: 4px 7px;
+  border-radius: 999px;
+  color: var(--muted);
+  font-size: 0.68rem;
+  font-style: normal;
+  font-weight: 850;
+  background: color-mix(in srgb, var(--btnBg) 86%, transparent);
+}
+
+.a2ui-badge {
+  padding: 4px 7px;
+  border: 1px solid color-mix(in srgb, var(--accent, #4f7cff) 38%, transparent);
+  border-radius: 999px;
+  color: color-mix(in srgb, var(--accent, #4f7cff) 82%, #ffffff);
+  font-size: 0.64rem;
+  font-weight: 950;
+  letter-spacing: 0.08em;
+}
+
+.a2ui-readiness-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  color: var(--muted);
+  font-size: 0.8rem;
+  font-weight: 800;
+}
+
+.a2ui-readiness-row strong {
+  color: var(--text);
+  font-size: 1rem;
+}
+
+.a2ui-progress {
+  height: 8px;
+  margin-top: 8px;
+  overflow: hidden;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--border, #344256) 54%, transparent);
+}
+
+.a2ui-progress span {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: linear-gradient(90deg, var(--accent, #4f7cff), #22c55e);
+}
+
+.a2ui-card.readiness.needs-input .a2ui-progress span {
+  background: linear-gradient(90deg, #f59e0b, var(--accent, #4f7cff));
+}
+
+.a2ui-summary-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
+  gap: 8px;
+}
+
+.a2ui-summary-grid div {
+  min-width: 0;
+  padding: 9px;
+  border: 1px solid color-mix(in srgb, var(--border, #344256) 58%, transparent);
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--btnBg) 72%, transparent);
+}
+
+.a2ui-summary-grid span,
+.a2ui-checklist em {
+  display: block;
+  color: var(--muted);
+  font-size: 0.68rem;
+  font-weight: 850;
+  text-transform: uppercase;
+}
+
+.a2ui-summary-grid strong {
+  display: block;
+  margin-top: 4px;
+  overflow: hidden;
+  color: var(--text);
+  font-size: 0.82rem;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.a2ui-checklist {
+  display: grid;
+  gap: 7px;
+}
+
+.a2ui-checklist div {
+  display: grid;
+  grid-template-columns: 10px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 9px;
+  border: 1px solid color-mix(in srgb, var(--border, #344256) 54%, transparent);
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--btnBg) 64%, transparent);
+}
+
+.a2ui-checklist strong {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--text);
+  font-size: 0.82rem;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.a2ui-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 999px;
+  background: #60a5fa;
+}
+
+.a2ui-dot.required {
+  background: #ef4444;
+}
+
+.a2ui-dot.recommended {
+  background: #f59e0b;
+}
+
+.a2ui-dot.optional {
+  background: #22c55e;
+}
+
+.a2ui-actions {
+  display: grid;
+  gap: 8px;
+  margin: 0;
+  padding-inline-start: 22px;
+  color: var(--text);
+}
+
+.a2ui-actions li {
+  padding-inline-start: 2px;
+  line-height: 1.45;
+}
+
+.a2ui-empty {
+  padding: 10px;
+  border-radius: 10px;
+  color: var(--muted);
+  background: color-mix(in srgb, var(--btnBg) 72%, transparent);
+}
+
+html[data-theme="light"] .a2ui-card {
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.92), rgba(248, 250, 252, 0.88)),
+    var(--card);
+}
