@@ -9,8 +9,12 @@ node_modules/
 frontend/node_modules/
 .next/
 frontend/.next/
+frontend/test-results/
+frontend/playwright-report/
+frontend/blob-report/
 
 # Local env and databases
+.restore-temp/
 backend-python/.env
 frontend/.env.local
 .env

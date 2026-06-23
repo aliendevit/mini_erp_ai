@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 import urllib.error
 import urllib.request
 from collections.abc import Iterable
@@ -21,6 +22,29 @@ _LOCALE_HINTS = {
     "en": "English",
     "ar": "Arabic",
 }
+
+
+def _e2e_fake_ai_enabled() -> bool:
+    return os.getenv("E2E_FAKE_AI", "").strip().lower() in {"1", "true", "yes", "on"}
+
+
+def _e2e_manager_message(prompt: str) -> str:
+    marker = "Manager message:"
+    if marker not in prompt:
+        return ""
+    return prompt.split(marker, 1)[1].strip()
+
+
+def _e2e_generate_text(prompt: str, response_mime_type: str | None = None) -> str:
+    message = _e2e_manager_message(prompt) or prompt.strip()
+    if response_mime_type == "application/json":
+        return json.dumps(
+            {
+                "save": bool(message),
+                "facts": [f"E2E captured manager input: {message[:240]}"] if message else [],
+            }
+        )
+    return "E2E assistant captured the project details for RAG storage."
 
 
 def _looks_like_quota_error(exc: Exception) -> bool:
@@ -129,6 +153,8 @@ def _fallback_text_if_possible(exc: Exception, prompt: str, response_mime_type: 
 
 def ensure_gemini_ready():
     settings = get_settings()
+    if _e2e_fake_ai_enabled():
+        return None, settings
     if not settings.gemini_api_key:
         raise HTTPException(status_code=500, detail="Missing GEMINI_API_KEY. Add it to backend-python/.env.")
 
@@ -148,6 +174,8 @@ def _get_model(response_mime_type: str | None = None):
 
 
 def generate_text(prompt: str, response_mime_type: str | None = None) -> str:
+    if _e2e_fake_ai_enabled():
+        return _e2e_generate_text(prompt, response_mime_type=response_mime_type)
     try:
         model = _get_model(response_mime_type=response_mime_type)
         response = model.generate_content(prompt)
@@ -162,6 +190,12 @@ def generate_text(prompt: str, response_mime_type: str | None = None) -> str:
 
 
 def stream_text(prompt: str) -> Iterable[str]:
+    if _e2e_fake_ai_enabled():
+        reply = _e2e_generate_text(prompt)
+        midpoint = max(1, len(reply) // 2)
+        yield reply[:midpoint]
+        yield reply[midpoint:]
+        return
     try:
         model = _get_model()
         response = model.generate_content(prompt, stream=True)

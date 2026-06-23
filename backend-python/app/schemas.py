@@ -375,3 +375,10 @@ class AIIntakeConfirmPayload(BaseModel):
     siteAssignments: list[ProposalSiteAssignmentPayload] = Field(default_factory=list)
     manualEstimatedPrice: float | None = None
     paymentDrafts: list[ProposalPaymentDraftPayload] | None = None
+
+
+class RagQueryPayload(BaseModel):
+    proposalId: str | None = None
+    orderId: str | None = None
+    question: str = Field(..., min_length=1, max_length=10000)
+    limit: int = Field(default=8, ge=1, le=20)

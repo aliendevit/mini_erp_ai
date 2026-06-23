@@ -1,9 +1,9 @@
 'use client';
 
 import Link from 'next/link';
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { type ChangeEvent, useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
-import { API_BASE, apiGet, apiJson, authHeaders } from '../../lib/api';
+import { API_BASE, apiForm, apiGet, apiJson, authHeaders } from '../../lib/api';
 import { type BrowserSpeechRecognition } from '../../lib/browser-speech';
 import { type NativeAudioRecordingSession, isNativeAudioRecordingSupported, startNativeAudioRecording } from '../../lib/native-audio-recorder';
 import { useI18n } from '../../lib/i18n';
@@ -254,6 +254,16 @@ type ProposalDraft = {
   createdAt?: string;
   updatedAt?: string;
   messages?: ProposalMessage[];
+};
+
+type RagSource = {
+  id: string;
+  proposalId?: string | null;
+  orderId?: string | null;
+  sourceType: string;
+  title?: string | null;
+  ingestionStatus: string;
+  createdAt?: string | null;
 };
 
 const SELECTED_INTAKE_STORAGE_KEY = 'ai_intake_selected_id';
@@ -575,6 +585,15 @@ function extraLabels(locale: string) {
       explanationFailed: "\u062a\u0639\u0630\u0631 \u0625\u0646\u0634\u0627\u0621 \u0634\u0631\u062d \u0627\u0644\u0627\u0642\u062a\u0631\u0627\u062d.",
       explanationEmpty: "\u0644\u0627 \u064a\u0648\u062c\u062f \u0634\u0631\u062d \u0645\u062a\u0627\u062d \u0628\u0639\u062f.",
       closeExplanation: "\u0625\u063a\u0644\u0627\u0642",
+      ragMemoryTitle: "RAG memory",
+      ragSources: "Sources",
+      ragCaptureDraft: "Capture draft",
+      ragUploadText: "Upload text",
+      ragCaptureRunning: "Capturing draft...",
+      ragUploadRunning: "Uploading file...",
+      ragCaptured: "RAG memory updated.",
+      ragFailed: "RAG update failed.",
+      ragNoSources: "No RAG sources yet.",
     };
   }
   if (locale === 'en') {
@@ -683,6 +702,15 @@ function extraLabels(locale: string) {
       explanationFailed: 'Could not generate the recommendation explanation.',
       explanationEmpty: 'No explanation is available yet.',
       closeExplanation: 'Close',
+      ragMemoryTitle: 'RAG memory',
+      ragSources: 'Sources',
+      ragCaptureDraft: 'Capture draft',
+      ragUploadText: 'Upload text',
+      ragCaptureRunning: 'Capturing draft...',
+      ragUploadRunning: 'Uploading file...',
+      ragCaptured: 'RAG memory updated.',
+      ragFailed: 'RAG update failed.',
+      ragNoSources: 'No RAG sources yet.',
     };
   }
   return {
@@ -790,6 +818,15 @@ function extraLabels(locale: string) {
     explanationFailed: 'Die Erklaerung zur Empfehlung konnte nicht erzeugt werden.',
     explanationEmpty: 'Noch keine Erklaerung verfuegbar.',
     closeExplanation: 'Schliessen',
+    ragMemoryTitle: 'RAG-Speicher',
+    ragSources: 'Quellen',
+    ragCaptureDraft: 'Entwurf erfassen',
+    ragUploadText: 'Text hochladen',
+    ragCaptureRunning: 'Entwurf wird erfasst...',
+    ragUploadRunning: 'Datei wird hochgeladen...',
+    ragCaptured: 'RAG-Speicher aktualisiert.',
+    ragFailed: 'RAG-Aktualisierung fehlgeschlagen.',
+    ragNoSources: 'Noch keine RAG-Quellen.',
   };
 }
 
@@ -970,6 +1007,8 @@ export default function AIIntakePage() {
   const [intakePage, setIntakePage] = useState(1);
   const [intakeTotal, setIntakeTotal] = useState(0);
   const [recommendations, setRecommendations] = useState<RecommendationPayload | null>(null);
+  const [ragSources, setRagSources] = useState<RagSource[]>([]);
+  const [ragStatus, setRagStatus] = useState<'idle' | 'capturing' | 'uploading' | 'done' | 'error'>('idle');
   const [chatInput, setChatInput] = useState('');
   const [busy, setBusy] = useState(false);
   const [deletingMessageId, setDeletingMessageId] = useState<string | null>(null);
@@ -990,6 +1029,7 @@ export default function AIIntakePage() {
   const [transcribing, setTranscribing] = useState(false);
   const [voiceDebug, setVoiceDebug] = useState<VoiceDebugState | null>(null);
   const recorderRef = useRef<WavRecordingSession | NativeAudioRecordingSession | null>(null);
+  const ragFileInputRef = useRef<HTMLInputElement | null>(null);
   const speechRecognitionRef = useRef<BrowserSpeechRecognition | null>(null);
   const speechTranscriptRef = useRef('');
   const speechCancelledRef = useRef(false);
@@ -1016,6 +1056,15 @@ export default function AIIntakePage() {
     document.body.classList.add('ai-intake-page-active');
     return () => document.body.classList.remove('ai-intake-page-active');
   }, []);
+
+  async function loadRagSourcesForIntake(id: string) {
+    try {
+      const response = await apiGet<{ items: RagSource[] }>(`/rag/sources?proposalId=${encodeURIComponent(id)}`);
+      setRagSources(response.items || []);
+    } catch {
+      setRagSources([]);
+    }
+  }
 
   async function loadLists(preferredId?: string, pageOverride = intakePage) {
     const [intakePageData, customerRows] = await Promise.all([
@@ -1052,6 +1101,8 @@ export default function AIIntakePage() {
       setShowAllMessages(false);
       setHistoryCollapsed(false);
       setRecommendations(null);
+      setRagSources([]);
+      setRagStatus('idle');
       setExistingCustomerId('');
       setLastResult(null);
     }
@@ -1078,6 +1129,7 @@ export default function AIIntakePage() {
     setHistoryCollapsed(false);
     const nextRecommendations = normalizeRecommendations(intake.recommendedTeam);
     setRecommendations(nextRecommendations);
+    await loadRagSourcesForIntake(id);
     setExistingCustomerId(intake.convertedCustomerId || '');
     setLastResult(
       intake.convertedOrderId ? { orderId: intake.convertedOrderId, customerId: intake.convertedCustomerId || undefined } : null
@@ -1700,7 +1752,46 @@ export default function AIIntakePage() {
     const updated = await apiJson<ProposalDraft>(`/ai/intakes/${selectedId}`, 'PUT', buildDraftPayload());
     setDraft(normalizeDraftValue(updated));
     setMessages(updated.messages || []);
+    await loadRagSourcesForIntake(selectedId);
     return updated;
+  }
+
+  async function captureDraftToRag() {
+    if (!selectedId) return alert(m.aiIntakePage.createIntakeFirst);
+    setRagStatus('capturing');
+    setBusy(true);
+    try {
+      await persistDraftSnapshot();
+      setRagStatus('done');
+    } catch (error: any) {
+      setRagStatus('error');
+      alert(error.message);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function uploadRagTextSource(event: ChangeEvent<HTMLInputElement>) {
+    const file = event.target.files?.[0];
+    if (!file || !selectedId) return;
+    const form = new FormData();
+    form.append('proposalId', selectedId);
+    if (draft.convertedOrderId) form.append('orderId', draft.convertedOrderId);
+    if (draft.convertedCustomerId) form.append('customerId', draft.convertedCustomerId);
+    form.append('file', file);
+    setRagStatus('uploading');
+    setBusy(true);
+    try {
+      await apiForm(`/rag/sources/upload`, 'POST', form);
+      await loadRagSourcesForIntake(selectedId);
+      setRagStatus('done');
+    } catch (error: any) {
+      setRagStatus('error');
+      alert(error.message);
+    } finally {
+      event.target.value = '';
+      setBusy(false);
+    }
   }
 
   async function saveDraft() {
@@ -2143,6 +2234,17 @@ export default function AIIntakePage() {
   const hiddenIntakeCount = Math.max(0, intakes.length - visibleIntakes.length);
   const visibleMessages = showAllMessages || messages.length <= MESSAGE_RENDER_LIMIT ? messages : messages.slice(-MESSAGE_RENDER_LIMIT);
   const hiddenMessageCount = Math.max(0, messages.length - visibleMessages.length);
+  const latestRagSource = ragSources[0];
+  const ragStatusText =
+    ragStatus === 'capturing'
+      ? x.ragCaptureRunning
+      : ragStatus === 'uploading'
+        ? x.ragUploadRunning
+        : ragStatus === 'done'
+          ? x.ragCaptured
+          : ragStatus === 'error'
+            ? x.ragFailed
+            : '';
   const performanceText = locale === 'ar'
     ? { showAll: '\u0639\u0631\u0636 \u0627\u0644\u0643\u0644', showLess: '\u0639\u0631\u0636 \u0623\u0642\u0644', hiddenSessions: '\u0645\u062d\u0627\u062f\u062b\u0627\u062a \u0625\u0636\u0627\u0641\u064a\u0629 \u0645\u062e\u0641\u064a\u0629 \u0644\u062a\u062d\u0633\u064a\u0646 \u0627\u0644\u0623\u062f\u0627\u0621', hiddenMessages: '\u0631\u0633\u0627\u0626\u0644 \u0642\u062f\u064a\u0645\u0629 \u0645\u062e\u0641\u064a\u0629 \u0644\u062a\u062d\u0633\u064a\u0646 \u0627\u0644\u0623\u062f\u0627\u0621' }
     : locale === 'de'
@@ -2181,7 +2283,12 @@ export default function AIIntakePage() {
           <Icon name={intakeListCollapsed ? 'info' : 'x'} />
           {intakeListCollapsed ? x.expandHistory : x.collapseHistory}
         </button>
-        <button className="btn primary with-icon" onClick={createIntake} disabled={interactionLocked}>
+        <button
+          className="btn primary with-icon"
+          onClick={createIntake}
+          disabled={interactionLocked}
+          data-testid="ai-intake-create"
+        >
           <Icon name="plus" />
           {m.common.createNew}
         </button>
@@ -2313,6 +2420,43 @@ export default function AIIntakePage() {
             </div>
           </div>
 
+          <div className="ai-rag-strip" aria-live="polite" data-testid="rag-strip">
+            <div className="ai-rag-summary">
+              <span>{x.ragMemoryTitle}</span>
+              <strong data-testid="rag-source-count">{ragSources.length}</strong>
+              <em>{ragSources.length ? `${x.ragSources}: ${latestRagSource?.title || latestRagSource?.sourceType || '-'}` : x.ragNoSources}</em>
+            </div>
+            <div className="ai-rag-actions">
+              <button
+                className="btn with-icon"
+                onClick={captureDraftToRag}
+                disabled={!selectedId || interactionLocked}
+                data-testid="rag-capture-draft"
+              >
+                <Icon name="save" />
+                {x.ragCaptureDraft}
+              </button>
+              <button
+                className="btn with-icon"
+                onClick={() => ragFileInputRef.current?.click()}
+                disabled={!selectedId || interactionLocked}
+                data-testid="rag-upload-text"
+              >
+                <Icon name="file" />
+                {x.ragUploadText}
+              </button>
+              <input
+                ref={ragFileInputRef}
+                className="ai-hidden-file-input"
+                type="file"
+                accept=".txt,.md,.csv,.json,.xml,.log,text/plain,text/markdown,text/csv,application/json,application/xml,text/xml"
+                onChange={uploadRagTextSource}
+                data-testid="rag-file-input"
+              />
+            </div>
+            {ragStatusText && <div className={`ai-rag-status ${ragStatus}`}>{ragStatusText}</div>}
+          </div>
+
           {proposalGenerationStatus !== 'idle' && (
             <>
               <div className="spacer" />
@@ -2403,6 +2547,7 @@ export default function AIIntakePage() {
                   <div
                     key={message.id}
                     className={`ai-chat-message ${message.role}`}
+                    data-testid={`ai-chat-message-${message.role}`}
                   >
                     <div className="ai-chat-message-header">
                       <div className="ai-chat-role">
@@ -2452,9 +2597,15 @@ export default function AIIntakePage() {
                 if (voiceNotice) setVoiceNotice('');
               }}
               placeholder={m.aiIntakePage.messagePlaceholder}
+              data-testid="ai-chat-input"
             />
             <div className="ai-chat-composer-actions">
-              <button className="btn primary with-icon" onClick={sendMessage} disabled={interactionLocked || !chatInput.trim()}>
+              <button
+                className="btn primary with-icon"
+                onClick={sendMessage}
+                disabled={interactionLocked || !chatInput.trim()}
+                data-testid="ai-chat-send"
+              >
                 <Icon name="send" />
                 {streaming ? m.aiIntakePage.streaming : m.aiIntakePage.sendMessage}
               </button>
@@ -2625,6 +2776,7 @@ export default function AIIntakePage() {
                 placeholder={notMentioned}
                 value={draft.orderTitle || ''}
                 onChange={(event) => setDraft((current) => ({ ...current, orderTitle: event.target.value }))}
+                data-testid="proposal-order-title"
               />
             </div>
             <div>
@@ -2693,6 +2845,7 @@ export default function AIIntakePage() {
               placeholder={notMentioned}
               value={draft.summary || ''}
               onChange={(event) => setDraft((current) => ({ ...current, summary: event.target.value }))}
+              data-testid="proposal-summary"
             />
           </div>
 

@@ -16,6 +16,7 @@ from ..models import Customer, Employee, Order, PaymentRecord, Proposal, Proposa
 from ..schemas import ProposalDraftPayload
 from ..utils import as_datetime, decimal_or_none, ensure, json_dumps, json_loads
 from .gemini_client import generate_text
+from .omran_persona import omran_persona_block
 
 
 logger = logging.getLogger(__name__)
@@ -59,17 +60,64 @@ _GERMAN_HINT_RE = re.compile(
     r"\b(?:und|mit|fuer|f?r|auftrag|angebot|kunde|firma|baustelle|renovierung|sanierung|bitte|treppenhaus|keller|rechnung|stunden|tage|arbeiter|mitarbeiter|maler|trockenbau)\b",
     flags=re.IGNORECASE,
 )
+_ENGLISH_HINT_RE = re.compile(
+    r"\b(?:the|and|with|for|please|project|customer|client|site|work|need|needs|start|finish|budget|payment|workshop|renovation|construction)\b",
+    flags=re.IGNORECASE,
+)
+_LANGUAGE_SWITCH_CUE_RE = re.compile(
+    r"\b(?:switch|change|reply|answer|write|speak|use|continue|respond)\b|"
+    r"\b(?:wechsel|wechsle|antwort|antworte|schreib|schreibe|sprich|verwende)\b|"
+    r"(?:اكتب|رد|جاوب|أجب|اجب|تكلم|تكلّم|احكي|حوّل|حول|بدّل|بدل|استخدم|خلينا)",
+    flags=re.IGNORECASE,
+)
+_LANGUAGE_LABELS = {
+    "arabic": ("arabic", "arabisch", "عربي", "العربية", "بالعربي", "بالعربية"),
+    "german": ("german", "deutsch", "الألمانية", "الالمانية", "بالألمانية", "بالالمانية"),
+    "english": ("english", "englisch", "الإنجليزية", "الانجليزية", "إنجليزي", "انجليزي", "بالإنجليزية", "بالانجليزية"),
+}
+
+
+def _detect_language_from_text(text: str) -> str:
+    if _contains_arabic(text):
+        return "arabic"
+    german_score = len(_GERMAN_HINT_RE.findall(text))
+    if re.search(r"[\u00e4\u00f6\u00fc\u00c4\u00d6\u00dc\u00df]", text):
+        german_score += 2
+    english_score = len(_ENGLISH_HINT_RE.findall(text))
+    if german_score >= 2 and german_score >= english_score:
+        return "german"
+    return "english"
+
+
+def _explicit_language_switch(text: str) -> str | None:
+    normalized = text.strip().casefold()
+    if not normalized:
+        return None
+    has_switch_cue = bool(_LANGUAGE_SWITCH_CUE_RE.search(normalized))
+    for language, labels in _LANGUAGE_LABELS.items():
+        if not any(label.casefold() in normalized for label in labels):
+            continue
+        if has_switch_cue:
+            return language
+        if language == "german" and re.search(r"\b(?:auf|in)\s+deutsch\b", normalized):
+            return language
+        if language == "english" and re.search(r"\b(?:in)\s+english\b|\bauf\s+englisch\b", normalized):
+            return language
+        if language == "arabic" and re.search(r"\b(?:in)\s+arabic\b|\bauf\s+arabisch\b|باللغة\s+العربية", normalized):
+            return language
+    return None
 
 
 def _conversation_language_mode(messages: list[ProposalMessage]) -> str:
-    latest_manager_message = _latest_manager_message(messages)
-    manager_text = "\n".join(_manager_messages(messages))
-    combined_text = f"{latest_manager_message}\n{manager_text}"
-    if _contains_arabic(combined_text):
-        return "arabic"
-    if re.search(r"[\u00e4\u00f6\u00fc\u00c4\u00d6\u00dc\u00df]", combined_text) or _GERMAN_HINT_RE.search(combined_text):
-        return "german"
-    return "english"
+    manager_messages = _manager_messages(messages)
+    if not manager_messages:
+        return "english"
+    language_mode = _explicit_language_switch(manager_messages[0]) or _detect_language_from_text(manager_messages[0])
+    for message in manager_messages[1:]:
+        explicit_switch = _explicit_language_switch(message)
+        if explicit_switch:
+            language_mode = explicit_switch
+    return language_mode
 
 
 def _localized_default_site_name(language_mode: str) -> str:
@@ -1162,13 +1210,15 @@ def build_intake_chat_prompt(
     proposal: Proposal,
     messages: list[ProposalMessage],
     known_available_workshops: list[dict[str, Any]] | None = None,
+    rag_context_chunks: list[dict[str, Any]] | None = None,
 ) -> str:
     known_customer = proposal.customer_company_name or "unknown"
     known_title = proposal.order_title or "unknown"
     language_mode = _conversation_language_mode(messages)
     language_rules = [
-        "- Reply in the same language as the manager's latest message.",
-        "- If the manager writes in Arabic, reply entirely in Arabic.",
+        "- Reply in the conversation language established by the first manager message unless the manager explicitly asks to switch language.",
+        "- Do not switch languages because isolated foreign words, names, addresses, technical terms, RAG snippets, or quoted text appear in another language.",
+        "- If the locked conversation language is Arabic, reply entirely in Arabic.",
         "- Keep phone numbers, email addresses, street addresses, and company names exactly as provided.",
     ]
     if language_mode == "arabic":
@@ -1184,14 +1234,19 @@ def build_intake_chat_prompt(
     payment_drafts = _safe_json(proposal.payment_drafts_json, [])
     external_workshops = _safe_json(proposal.external_workshops_json, [])
     known_available_workshops = known_available_workshops or []
+    rag_context_chunks = rag_context_chunks or []
     latest_turn_guidance = _latest_scope_turn_guidance(messages, language_mode)
 
     return "\n".join(
         [
+            "Omran system persona:",
+            omran_persona_block("AI intake chat", language=language_mode),
+            "",
             "You are an ERP intake assistant for a construction/renovation company that coordinates external workshops and subcontractors.",
             "Your job is to help a manager capture one client project intake as clearly as possible.",
             "Memory isolation rules:",
             "- Use only the current proposal fields, facts, memory summary, and transcript below.",
+            "- You may also use the scoped RAG retrieval snippets below when they belong to this proposal/order.",
             "- Never use customer, payment, workshop, or project facts from another chat.",
             "- If the manager starts a different project in a new intake, treat it as empty memory.",
             "Contractor and workshop rules:",
@@ -1262,6 +1317,9 @@ def build_intake_chat_prompt(
             "",
             "Known available workshop partners:",
             json.dumps(known_available_workshops, ensure_ascii=True),
+            "",
+            "Scoped RAG retrieval snippets for this intake/order:",
+            json.dumps(rag_context_chunks, ensure_ascii=True),
             "",
             "Conversation so far for this intake only:",
             _chat_lines(messages),
@@ -1337,7 +1395,8 @@ def build_proposal_prompt(messages: list[ProposalMessage], proposal: Proposal | 
     }
     language_mode = _conversation_language_mode(messages)
     language_rules = [
-        "Write all human-readable proposal values in the same language as the manager's conversation.",
+        "Write all human-readable proposal values in the conversation language established by the first manager message unless the manager explicitly asks to switch language.",
+        "Do not switch proposal language because isolated foreign words, names, technical terms, RAG snippets, or quoted text appear in another language.",
         "Keep phone numbers, email addresses, street addresses, and company names exactly as provided.",
     ]
     if language_mode == "arabic":
