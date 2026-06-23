@@ -8589,6 +8589,89 @@ html[data-theme="construction"] .auth-layout .auth-actions .btn.primary {
 }
 
 /* A2UI safe renderer for AI Intake assistant messages */
+.ai-rag-strip {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 10px;
+  margin-top: 14px;
+  padding: 10px;
+  border: 1px solid color-mix(in srgb, var(--border, #344256) 62%, transparent);
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--btnBg) 58%, transparent);
+}
+
+.ai-rag-summary {
+  display: grid;
+  grid-template-columns: auto auto minmax(0, 1fr);
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.ai-rag-summary span,
+.ai-rag-summary em,
+.ai-rag-status {
+  color: var(--muted);
+  font-size: 0.76rem;
+  font-style: normal;
+  font-weight: 800;
+}
+
+.ai-rag-summary strong {
+  display: inline-grid;
+  min-width: 30px;
+  height: 26px;
+  place-items: center;
+  border-radius: 999px;
+  color: var(--text);
+  background: color-mix(in srgb, var(--accent, #4f7cff) 18%, transparent);
+}
+
+.ai-rag-summary em {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ai-rag-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.ai-rag-status {
+  grid-column: 1 / -1;
+}
+
+.ai-rag-status.error {
+  color: #ef4444;
+}
+
+.ai-rag-status.done {
+  color: #22c55e;
+}
+
+.ai-hidden-file-input {
+  display: none;
+}
+
+@media (max-width: 760px) {
+  .ai-rag-strip {
+    grid-template-columns: 1fr;
+  }
+
+  .ai-rag-actions {
+    justify-content: stretch;
+  }
+
+  .ai-rag-actions .btn {
+    flex: 1 1 150px;
+  }
+}
+
 .a2ui-stack {
   display: grid;
   gap: 10px;

@@ -40,6 +40,13 @@ from ..services.proposals import (
     intake_assistant_source_text,
     sanitize_intake_assistant_reply,
 )
+from ..services.rag import (
+    capture_chat_message_for_rag,
+    capture_proposal_snapshot_for_rag,
+    delete_rag_for_proposal,
+    delete_rag_for_proposal_messages,
+    rag_context_for_prompt,
+)
 from ..utils import as_datetime, end_of_utc_day, ensure, json_dumps, json_loads, not_found, proposal_payload
 
 router = APIRouter(dependencies=[Depends(get_current_user)])
@@ -235,9 +242,15 @@ def get_intake_pdf(
 
 
 @router.put("/ai/intakes/{proposal_id}")
-def update_intake(proposal_id: str, payload: ProposalDraftPayload, db: Session = Depends(get_db)) -> dict:
+def update_intake(
+    proposal_id: str,
+    payload: ProposalDraftPayload,
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+) -> dict:
     proposal = _get_proposal(db, proposal_id)
     apply_proposal_update(proposal, payload)
+    capture_proposal_snapshot_for_rag(db, proposal, created_by_user_id=actor_id(current_user))
     db.commit()
     db.refresh(proposal)
     return proposal_payload(proposal, include_messages=True)
@@ -246,6 +259,7 @@ def update_intake(proposal_id: str, payload: ProposalDraftPayload, db: Session =
 @router.delete("/ai/intakes/{proposal_id}")
 def delete_intake(proposal_id: str, db: Session = Depends(get_db)) -> dict:
     proposal = _get_proposal(db, proposal_id)
+    delete_rag_for_proposal(db, proposal.id)
     db.delete(proposal)
     db.commit()
     return {"ok": True}
@@ -254,6 +268,7 @@ def delete_intake(proposal_id: str, db: Session = Depends(get_db)) -> dict:
 @router.delete("/ai/intakes/{proposal_id}/messages")
 def clear_intake_messages(proposal_id: str, db: Session = Depends(get_db)) -> dict:
     proposal = _get_proposal(db, proposal_id)
+    delete_rag_for_proposal_messages(db, proposal.id)
     proposal.messages.clear()
     clear_proposal_memory(db, proposal)
     proposal.updated_at = datetime.now(timezone.utc)
@@ -270,6 +285,7 @@ def delete_intake_message(proposal_id: str, message_id: str, db: Session = Depen
     if not message or message.proposal_id != proposal.id:
         raise not_found()
 
+    delete_rag_for_proposal_messages(db, proposal.id, [message.id])
     proposal.messages.remove(message)
     db.flush()
     remaining_messages = list(
@@ -290,24 +306,36 @@ def delete_intake_message(proposal_id: str, message_id: str, db: Session = Depen
 
 
 @router.post("/ai/intakes/{proposal_id}/messages/stream")
-def intake_message_stream(proposal_id: str, payload: AIIntakeMessagePayload, db: Session = Depends(get_db)) -> StreamingResponse:
+def intake_message_stream(
+    proposal_id: str,
+    payload: AIIntakeMessagePayload,
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+) -> StreamingResponse:
     proposal = _get_proposal(db, proposal_id)
-    append_message(db, proposal, "user", payload.content)
+    user_message = append_message(db, proposal, "user", payload.content)
     db.commit()
     proposal = _get_proposal(db, proposal_id)
     try:
         refresh_proposal_memory_locally(db, proposal, proposal.messages)
+        capture_chat_message_for_rag(db, proposal, user_message, created_by_user_id=actor_id(current_user))
         db.commit()
     except Exception as exc:
         db.rollback()
-        logger.warning("AI intake memory refresh failed: proposal_id=%s error=%s", proposal_id, exc)
+        logger.warning("AI intake memory/RAG refresh failed: proposal_id=%s error=%s", proposal_id, exc)
     proposal = _get_proposal(db, proposal_id)
     ensure_gemini_ready()
 
     def generate() -> Iterable[str]:
         assistant_parts: list[str] = []
         try:
-            prompt = build_intake_chat_prompt(proposal, proposal.messages, _available_workshops_for_prompt(db))
+            rag_context = rag_context_for_prompt(db, proposal, question=payload.content)
+            prompt = build_intake_chat_prompt(
+                proposal,
+                proposal.messages,
+                _available_workshops_for_prompt(db),
+                rag_context_chunks=rag_context,
+            )
             for chunk in stream_text(prompt):
                 assistant_parts.append(chunk)
 
@@ -447,7 +475,11 @@ async def transcribe_intake_audio(
 
 
 @router.post("/ai/intakes/{proposal_id}/proposal")
-def generate_proposal(proposal_id: str, db: Session = Depends(get_db)) -> dict:
+def generate_proposal(
+    proposal_id: str,
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+) -> dict:
     proposal = _get_proposal(db, proposal_id)
     ensure(bool(proposal.messages), "Bitte zuerst eine Unterhaltung fuehren.")
     try:
@@ -457,6 +489,7 @@ def generate_proposal(proposal_id: str, db: Session = Depends(get_db)) -> dict:
         proposal = _get_proposal(db, proposal_id)
         logger.warning("AI intake local memory refresh before proposal failed: proposal_id=%s error=%s", proposal_id, exc)
     extract_proposal_from_messages(proposal, proposal.messages)
+    capture_proposal_snapshot_for_rag(db, proposal, created_by_user_id=actor_id(current_user))
     db.commit()
     db.refresh(proposal)
     return proposal_payload(proposal, include_messages=True)
@@ -679,6 +712,7 @@ def confirm_intake(
         manual_estimated_price=payload.manualEstimatedPrice,
         payment_drafts=[item.model_dump() for item in payload.paymentDrafts] if payload.paymentDrafts is not None else None,
     )
+    capture_proposal_snapshot_for_rag(db, proposal, created_by_user_id=actor_id(current_user))
     record_audit(
         db,
         action="ai_intake.confirmed",

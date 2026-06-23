@@ -8,6 +8,7 @@ from typing import Any
 from fastapi import HTTPException
 
 from .gemini_client import generate_text
+from .omran_persona import omran_persona_block
 
 logger = logging.getLogger(__name__)
 
@@ -159,8 +160,12 @@ def build_tracking_analysis_context(tracking: dict[str, Any]) -> dict[str, Any]:
 
 def _build_prompt(context: dict[str, Any], locale: str) -> str:
     language = _LOCALE_NAMES.get(locale, "English")
+    persona_language = {"ar": "arabic", "de": "german", "en": "english"}.get(locale, "english")
     return "\n".join(
         [
+            "Omran system persona:",
+            omran_persona_block("AI project monitoring", language=persona_language),
+            "",
             "You are an AI project monitoring assistant for a renovation/workshop ERP.",
             f"Answer in {language}.",
             "Use only the JSON tracking context. Do not invent progress, dates, materials, workshops, photos, or issues.",

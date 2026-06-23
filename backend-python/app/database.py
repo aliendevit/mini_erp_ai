@@ -30,6 +30,41 @@ engine = create_engine(DATABASE_URL, **engine_kwargs)
 SessionLocal = sessionmaker(bind=engine, autoflush=False, autocommit=False, future=True)
 
 
+def _is_postgresql() -> bool:
+    return DATABASE_URL.startswith("postgresql")
+
+
+def _ensure_pgvector_extension() -> None:
+    if not _is_postgresql():
+        return
+    try:
+        with engine.begin() as conn:
+            conn.execute(text("CREATE EXTENSION IF NOT EXISTS vector"))
+    except Exception:
+        # RAG still works through JSON embeddings; pgvector is an acceleration path.
+        return
+
+
+def _ensure_rag_pgvector_columns_and_indexes() -> None:
+    if not _is_postgresql():
+        return
+    inspector = inspect(engine)
+    if "RagChunk" not in inspector.get_table_names():
+        return
+
+    try:
+        with engine.begin() as conn:
+            conn.execute(text('ALTER TABLE "RagChunk" ADD COLUMN IF NOT EXISTS "embedding" vector(768)'))
+            conn.execute(
+                text(
+                    'CREATE INDEX IF NOT EXISTS "RagChunk_embedding_hnsw_idx" '
+                    'ON "RagChunk" USING hnsw ("embedding" vector_cosine_ops)'
+                )
+            )
+    except Exception:
+        return
+
+
 def _ensure_employee_staffing_columns() -> None:
     inspector = inspect(engine)
     if "Employee" not in inspector.get_table_names():
@@ -137,7 +172,9 @@ def _ensure_project_task_columns() -> None:
 def init_db() -> None:
     from . import models  # noqa: F401
 
+    _ensure_pgvector_extension()
     Base.metadata.create_all(bind=engine)
+    _ensure_rag_pgvector_columns_and_indexes()
     _ensure_employee_staffing_columns()
     _ensure_ai_intake_columns()
     _ensure_workshop_columns()

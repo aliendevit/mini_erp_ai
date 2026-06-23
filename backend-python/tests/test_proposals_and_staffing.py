@@ -495,13 +495,22 @@ class ProposalAndStaffingTests(unittest.TestCase):
           "assumptions": ["Photo metadata only"]
         }"""
 
-        with patch("app.services.tracking_ai.generate_text", return_value=ai_json):
+        captured_prompt = {}
+
+        def fake_generate_text(prompt: str, response_mime_type: str | None = None) -> str:
+            captured_prompt["value"] = prompt
+            return ai_json
+
+        with patch("app.services.tracking_ai.generate_text", side_effect=fake_generate_text):
             result = analyze_tracking(tracking, locale="en")
 
         self.assertEqual(result["provider"], "ai")
         self.assertEqual(result["healthStatus"], "watch")
         self.assertEqual(result["summary"], "Project needs workshop assignment.")
         self.assertTrue(result["sourceWarnings"])
+        self.assertIn("You are Omran", captured_prompt["value"])
+        self.assertIn("Current surface: AI project monitoring", captured_prompt["value"])
+        self.assertIn("Explain backend-calculated monitoring values", captured_prompt["value"])
 
     def test_tracking_analysis_endpoint_falls_back_when_ai_fails(self) -> None:
         order, site, _other_site, _workshop_a, _workshop_b = self._workshop_order_fixture()
@@ -694,9 +703,39 @@ class ProposalAndStaffingTests(unittest.TestCase):
         self.assertIn("reply entirely in Arabic", chat_prompt)
         self.assertIn("Write all human-readable proposal values in Arabic", proposal_prompt)
 
+    def test_conversation_language_sticks_to_first_manager_message(self) -> None:
+        messages = [
+            ProposalMessage(role="user", content="We need a clinic renovation proposal in Berlin."),
+            ProposalMessage(role="assistant", content="I captured the project."),
+            ProposalMessage(role="user", content="\u0627\u0644\u0645\u0648\u0642\u0639 is called Berlin Mitte and the workshop is Klinik Bau GmbH."),
+        ]
+
+        chat_prompt = build_intake_chat_prompt(Proposal(status="intake"), messages)
+        proposal_prompt = build_proposal_prompt(messages)
+
+        self.assertIn("current manager language is English", chat_prompt)
+        self.assertNotIn("current manager language is Arabic", chat_prompt)
+        self.assertIn("must be English", proposal_prompt)
+        self.assertNotIn("must be Arabic", proposal_prompt)
+
+    def test_explicit_language_switch_changes_locked_language(self) -> None:
+        messages = [
+            ProposalMessage(role="user", content="We need a clinic renovation proposal in Berlin."),
+            ProposalMessage(role="assistant", content="I captured the project."),
+            ProposalMessage(role="user", content="Please switch to Arabic for the rest of this intake."),
+        ]
+
+        chat_prompt = build_intake_chat_prompt(Proposal(status="intake"), messages)
+
+        self.assertIn("current manager language is Arabic", chat_prompt)
+        self.assertIn("reply entirely in Arabic", chat_prompt)
+
     def test_intake_chat_prompt_forbids_self_dialogue(self) -> None:
         prompt = build_intake_chat_prompt(Proposal(status="intake"), [ProposalMessage(role="user", content="Please update the kitchen site.")])
 
+        self.assertIn("You are Omran", prompt)
+        self.assertIn("The manager stays in control", prompt)
+        self.assertIn("Current surface: AI intake chat", prompt)
         self.assertIn("Never write role labels", prompt)
         self.assertIn("Never continue the conversation", prompt)
         self.assertIn("Never create fake future turns", prompt)

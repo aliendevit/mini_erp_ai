@@ -373,7 +373,7 @@ class AIAssistantTests(unittest.TestCase):
             ]
         )
 
-        self.assertIn("same language as the manager's conversation", prompt)
+        self.assertIn("conversation language established by the first manager message", prompt)
         self.assertIn('must be English', prompt)
         self.assertNotIn('Prefer German business wording', prompt)
 
