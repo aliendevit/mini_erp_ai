@@ -179,7 +179,18 @@ def generate_text(prompt: str, response_mime_type: str | None = None) -> str:
     try:
         model = _get_model(response_mime_type=response_mime_type)
         response = model.generate_content(prompt)
-        return (getattr(response, "text", "") or "").strip()
+        text = _extract_response_text(response)
+        if text:
+            return text
+        debug_text = _debug_text(_response_debug_summary(response))
+        logger.warning("Gemini returned an empty text response. %s", debug_text)
+        raise HTTPException(
+            status_code=502,
+            detail=(
+                "AI provider returned no text. Try a shorter message, remove unusual formatting, "
+                "or retry the request."
+            ),
+        )
     except Exception as exc:  # pragma: no cover - provider/library errors vary
         fallback = _fallback_text_if_possible(exc, prompt, response_mime_type=response_mime_type)
         if fallback is not None:
@@ -199,10 +210,21 @@ def stream_text(prompt: str) -> Iterable[str]:
     try:
         model = _get_model()
         response = model.generate_content(prompt, stream=True)
+        yielded = False
         for chunk in response:
-            text = getattr(chunk, "text", None)
+            text = _extract_response_text(chunk)
             if text:
+                yielded = True
                 yield text
+        if not yielded:
+            logger.warning("Gemini stream returned no text chunks.")
+            raise HTTPException(
+                status_code=502,
+                detail=(
+                    "AI provider returned no text. Try a shorter message, remove unusual formatting, "
+                    "or retry the request."
+                ),
+            )
     except Exception as exc:  # pragma: no cover - provider/library errors vary
         fallback = _fallback_text_if_possible(exc, prompt)
         if fallback is not None:
