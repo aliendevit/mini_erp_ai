@@ -4,6 +4,7 @@ import Link from 'next/link';
 import { useEffect, useMemo, useState, type CSSProperties } from 'react';
 
 import { useI18n } from '../../lib/i18n';
+import { appConfirm } from '../../lib/dialog';
 import { apiGet, apiJson } from '../../lib/api';
 import { inDateRange, parseApiDateLocal } from '../../lib/date';
 import { DateInput } from '../ui/DateInput';
@@ -180,7 +181,7 @@ export default function WorkEntriesPage() {
   }
 
   async function del(id: string) {
-    if (!confirm(m.common.deleteConfirm)) return;
+    if (!(await appConfirm(m.common.deleteConfirm))) return;
     try {
       await apiJson(`/work-entries/${id}`, 'DELETE');
       await load();

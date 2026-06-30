@@ -6,6 +6,7 @@ import { zodResolver } from '@hookform/resolvers/zod';
 
 import { apiGet, apiJson } from '../../lib/api';
 import { useI18n } from '../../lib/i18n';
+import { appConfirm } from '../../lib/dialog';
 import { fieldClass, sanitizePhoneInput, validationCopy, WorkshopFormData, workshopSchema } from '../../lib/form-validation';
 import { getPageSlice, ListPager } from '../ui/ListPager';
 
@@ -167,7 +168,7 @@ export default function WorkshopsPage() {
   }
 
   async function remove(id: string) {
-    if (!confirm(t.deleteConfirm)) return;
+    if (!(await appConfirm(t.deleteConfirm))) return;
     try {
       await apiJson(`/workshops/${id}`, 'DELETE');
       await load();

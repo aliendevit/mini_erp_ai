@@ -460,6 +460,7 @@ def invoice_payload(invoice: Invoice, include_customer: bool = False, include_li
         "status": invoice.status,
         "customerId": invoice.customer_id,
         "issueDate": invoice.issue_date,
+        "dueDate": getattr(invoice, "due_date", None),
         "periodStart": invoice.period_start,
         "periodEnd": invoice.period_end,
         "notes": invoice.notes,

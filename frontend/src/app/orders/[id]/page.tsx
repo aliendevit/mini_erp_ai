@@ -1,10 +1,11 @@
-﻿'use client';
+'use client';
 
 import Link from 'next/link';
 import { useEffect, useMemo, useState } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 
 import { useI18n } from '../../../lib/i18n';
+import { appConfirm } from '../../../lib/dialog';
 import { apiGet, apiJson } from '../../../lib/api';
 
 type Customer = { id: string; companyName: string };
@@ -199,7 +200,7 @@ export default function OrderDetailPage() {
   }
 
   async function deleteOrder() {
-    if (!confirm(m.common.deleteConfirm)) return;
+    if (!(await appConfirm(m.common.deleteConfirm))) return;
     try {
       await apiJson(`/orders/${id}`, 'DELETE');
       router.push('/orders');
@@ -251,7 +252,7 @@ export default function OrderDetailPage() {
   }
 
   async function deleteSite(siteId: string) {
-    if (!confirm(m.common.deleteConfirm)) return;
+    if (!(await appConfirm(m.common.deleteConfirm))) return;
     try {
       await apiJson(`/sites/${siteId}`, 'DELETE');
       await load();
@@ -312,7 +313,7 @@ export default function OrderDetailPage() {
   }
 
   async function removeWorkshopAssignment(assignmentId: string) {
-    if (!confirm(m.common.deleteConfirm)) return;
+    if (!(await appConfirm(m.common.deleteConfirm))) return;
     try {
       await apiJson(`/workshop-assignments/${assignmentId}`, 'DELETE');
       if (editingAssignmentId === assignmentId) setEditingAssignmentId(null);
@@ -333,7 +334,7 @@ export default function OrderDetailPage() {
   const statusLabels = m.statuses.order;
   const trackingLabels = m.trackingPage.labels;
   const actionCopy = locale === 'ar'
-    ? { track: 'تتبع', ai: 'ذكاء', bill: 'فاتورة', workshopInvoice: 'فاتورة ورشة', workshopInvoiceDescription: 'إنشاء فاتورة ثابتة لمواقع العمل وحزم الورش.' }
+    ? { track: '????', ai: '????', bill: '??????', workshopInvoice: '?????? ????', workshopInvoiceDescription: '????? ?????? ????? ?????? ????? ???? ?????.' }
     : locale === 'de'
       ? { track: 'TRACK', ai: 'KI', bill: 'RECHNUNG', workshopInvoice: 'Werkstattrechnung', workshopInvoiceDescription: 'Pauschalrechnung f?r Standorte und Werkstatt-Leistungspakete erstellen.' }
       : { track: 'TRACK', ai: 'AI', bill: 'BILL', workshopInvoice: 'Workshop invoice', workshopInvoiceDescription: 'Create a fixed invoice for site and workshop work packages.' };

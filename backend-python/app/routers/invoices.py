@@ -3,20 +3,21 @@ from __future__ import annotations
 from datetime import datetime, timezone
 from decimal import Decimal
 
-from fastapi import APIRouter, Depends, Query, Response
+from fastapi import APIRouter, Depends, Query, Response, status
 from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, joinedload, selectinload
 
 from ..database import get_db
-from ..models import Invoice, InvoiceLine, Order, WorkEntry
-from ..routers.auth import get_current_user
-from ..schemas import InvoiceMergePayload, InvoiceUpdatePayload, WorkshopInvoiceCreatePayload
+from ..models import Invoice, InvoiceLine, Order, PaymentRecord, WorkEntry
+from ..routers.auth import get_current_user, require_permission, tenant_id_for_user
+from ..schemas import InvoiceMergePayload, InvoiceUpdatePayload, PaymentRecordPayload, WorkshopInvoiceCreatePayload
 from ..services.audit import actor_id, record_audit
 from ..services.invoice_documents import build_invoice_docx, build_invoice_pdf
 from ..services.invoice_totals import recalc_invoice_totals
 from ..utils import (
     as_datetime,
+    decimal_or_none,
     end_of_utc_day,
     ensure,
     ensure_invoice_has_number_and_date,
@@ -25,11 +26,12 @@ from ..utils import (
     invoice_payload,
     not_found,
     parse_ymd_to_utc_start,
+    payment_record_payload,
     raise_delete_error,
     work_entry_payload,
 )
 
-router = APIRouter(dependencies=[Depends(get_current_user)])
+router = APIRouter(dependencies=[Depends(get_current_user), Depends(require_permission("manage_invoices"))])
 
 
 def _page_params(page: int, page_size: int) -> tuple[int, int]:
@@ -49,6 +51,16 @@ def _paginated_response(items: list[dict], total: int, page: int, page_size: int
         "hasNext": page < total_pages,
         "hasPrev": page > 1,
     }
+
+
+def _tenant_id(user) -> str | None:
+    return tenant_id_for_user(user)
+
+
+def _ensure_same_tenant(item, user) -> None:
+    tenant_id = _tenant_id(user)
+    if tenant_id and getattr(item, "tenant_id", None) != tenant_id:
+        raise not_found()
 
 
 def _sum_hours(lines: list[InvoiceLine]) -> float:
@@ -86,6 +98,153 @@ def _get_invoice_with_details(db: Session, invoice_id: str) -> Invoice:
     if not invoice:
         raise not_found()
     return invoice
+
+
+def _invoice_effective_totals(db: Session, invoice: Invoice) -> dict[str, float]:
+    totals = recalc_invoice_totals(db, invoice.id)
+    fixed_amount = float(invoice.pauschal_amount or 0)
+    if totals["totalAmount"] <= 0 and fixed_amount > 0:
+        totals["totalAmount"] = round(fixed_amount, 2)
+    return totals
+
+
+def _invoice_payments(db: Session, invoice_id: str) -> list[PaymentRecord]:
+    return list(
+        db.scalars(
+            select(PaymentRecord)
+            .where(PaymentRecord.invoice_id == invoice_id)
+            .order_by(PaymentRecord.paid_date.desc().nullslast(), PaymentRecord.created_at.desc())
+        ).all()
+    )
+
+
+def _invoice_payment_summary(total_amount: float, payments: list[PaymentRecord]) -> dict[str, float]:
+    today = datetime.now(timezone.utc).date()
+    paid_amount = 0.0
+    refunded_amount = 0.0
+    deposit_amount = 0.0
+    paid_today = 0.0
+    planned_amount = 0.0
+
+    for payment in payments:
+        amount = float(payment.amount or 0)
+        if payment.status == "planned":
+            planned_amount += amount
+        if payment.status == "received":
+            paid_amount += amount
+            if payment.payment_type == "deposit":
+                deposit_amount += amount
+            if payment.paid_date and payment.paid_date.date() == today:
+                paid_today += amount
+        if payment.status == "refunded":
+            refunded_amount += amount
+
+    net_paid = max(0.0, paid_amount - refunded_amount)
+    return {
+        "totalAmount": round(total_amount, 2),
+        "paidAmount": round(net_paid, 2),
+        "depositAmount": round(deposit_amount, 2),
+        "paidToday": round(paid_today, 2),
+        "plannedAmount": round(planned_amount, 2),
+        "refundedAmount": round(refunded_amount, 2),
+        "remainingBalance": round(max(total_amount - net_paid, 0.0), 2),
+    }
+
+
+def _invoice_detail_payload(db: Session, invoice_id: str) -> dict:
+    invoice = _get_invoice_with_details(db, invoice_id)
+    totals = _invoice_effective_totals(db, invoice)
+    payments = _invoice_payments(db, invoice.id)
+    payload = invoice_payload(invoice, include_customer=True, include_lines=True)
+    payload.update(totals)
+    payload["payments"] = [payment_record_payload(payment) for payment in payments]
+    payload["paymentSummary"] = _invoice_payment_summary(totals["totalAmount"], payments)
+    payload["overdue"] = bool(
+        invoice.due_date
+        and invoice.due_date < datetime.now(timezone.utc)
+        and payload["paymentSummary"]["remainingBalance"] > 0
+        and invoice.status not in {"draft", "paid", "canceled"}
+    )
+    return payload
+
+
+def _invoice_list_payload(db: Session, invoice: Invoice, filtered_lines: list[InvoiceLine] | None = None) -> dict:
+    payload = invoice_payload(invoice, include_customer=True)
+    totals = _invoice_effective_totals(db, invoice)
+    payments = _invoice_payments(db, invoice.id)
+    summary = _invoice_payment_summary(totals["totalAmount"], payments)
+    lines = list(filtered_lines) if filtered_lines is not None else list(invoice.lines)
+    payload.update(totals)
+    payload["totalHours"] = totals["totalHours"] if filtered_lines is None else _sum_hours(lines)
+    payload["lineCount"] = len(lines)
+    payload["paymentSummary"] = summary
+    payload["overdue"] = bool(
+        invoice.due_date
+        and invoice.due_date < datetime.now(timezone.utc)
+        and summary["remainingBalance"] > 0
+        and invoice.status not in {"draft", "paid", "canceled"}
+    )
+    return payload
+
+
+def _invoice_metrics(db: Session, tenant_id: str | None) -> dict:
+    stmt = select(Invoice).options(selectinload(Invoice.lines))
+    if tenant_id:
+        stmt = stmt.where(Invoice.tenant_id == tenant_id)
+    invoices = db.execute(stmt).unique().scalars().all()
+    metrics = {
+        "total": len(invoices),
+        "draft": 0,
+        "final": 0,
+        "sent": 0,
+        "partialPaid": 0,
+        "paid": 0,
+        "canceled": 0,
+        "overdue": 0,
+        "outstandingBalance": 0.0,
+        "paidAmount": 0.0,
+        "currency": "EUR",
+    }
+    now = datetime.now(timezone.utc)
+    for invoice in invoices:
+        status_value = str(invoice.status)
+        if status_value == "partial_paid":
+            metrics["partialPaid"] += 1
+        elif status_value in metrics:
+            metrics[status_value] += 1
+        totals = _invoice_effective_totals(db, invoice)
+        summary = _invoice_payment_summary(totals["totalAmount"], _invoice_payments(db, invoice.id))
+        metrics["outstandingBalance"] = round(metrics["outstandingBalance"] + summary["remainingBalance"], 2)
+        metrics["paidAmount"] = round(metrics["paidAmount"] + summary["paidAmount"], 2)
+        if invoice.due_date and invoice.due_date < now and summary["remainingBalance"] > 0 and status_value not in {"draft", "paid", "canceled"}:
+            metrics["overdue"] += 1
+    return metrics
+
+
+def _first_invoice_order_id(invoice: Invoice) -> str | None:
+    for line in invoice.lines:
+        if line.work_entry and line.work_entry.order_id:
+            return line.work_entry.order_id
+    return None
+
+
+def _apply_invoice_payment_payload(item: PaymentRecord, invoice: Invoice, payload: PaymentRecordPayload) -> PaymentRecord:
+    item.proposal_id = payload.proposalId
+    item.customer_id = invoice.customer_id
+    item.order_id = payload.orderId or _first_invoice_order_id(invoice)
+    item.invoice_id = invoice.id
+    item.payment_type = payload.type or "deposit"
+    item.status = payload.status or "planned"
+    item.amount = decimal_or_none(payload.amount)
+    item.currency = payload.currency or "EUR"
+    item.due_date = as_datetime(payload.dueDate)
+    item.paid_date = as_datetime(payload.paidDate)
+    if item.status == "received" and item.paid_date is None:
+        item.paid_date = datetime.now(timezone.utc)
+    item.method = payload.method
+    item.reference = payload.reference
+    item.notes = payload.notes
+    return item
 
 
 def _ensure_exportable_invoice(db: Session, invoice_id: str) -> Invoice:
@@ -239,7 +398,11 @@ def invoice_draft_group(
 
 
 @router.post("/invoices/merge")
-def merge_invoices(payload: InvoiceMergePayload, db: Session = Depends(get_db)) -> dict:
+def merge_invoices(
+    payload: InvoiceMergePayload,
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+) -> dict:
     ensure(payload.groupBy in {"employee", "site", "order"}, "Ungueltiges groupBy.")
     ensure(bool(payload.key), "key fehlt.")
     ensure(len(payload.sourceInvoiceIds) >= 1, "sourceInvoiceIds fehlt.")
@@ -261,12 +424,16 @@ def merge_invoices(payload: InvoiceMergePayload, db: Session = Depends(get_db)) 
     )
     invoices = db.execute(stmt).unique().scalars().all()
     ensure(len(invoices) == len(payload.sourceInvoiceIds), "Mindestens eine Rechnung wurde nicht gefunden.")
+    for invoice in invoices:
+        _ensure_same_tenant(invoice, current_user)
     ensure(all(invoice.status == "draft" for invoice in invoices), "Nur Entwurf-Rechnungen koennen zusammengefuehrt werden.", 409)
 
     customer_id = invoices[0].customer_id
+    tenant_id = invoices[0].tenant_id
     source_lines = []
     for invoice in invoices:
         ensure(invoice.customer_id == customer_id, "Zusammenfuehren nicht moeglich: Rechnungen haben unterschiedliche Kunden.", 409)
+        ensure(invoice.tenant_id == tenant_id, "Zusammenfuehren nicht moeglich: Rechnungen gehoeren zu unterschiedlichen Firmen.", 409)
         ensure(bool(invoice.lines), "Zusammenfuehren nicht moeglich: Leere Rechnung.", 409)
         for line in invoice.lines:
             entry = line.work_entry
@@ -296,6 +463,7 @@ def merge_invoices(payload: InvoiceMergePayload, db: Session = Depends(get_db)) 
         for _ in splits:
             issue_date = datetime.now(timezone.utc)
             invoice = Invoice(
+                tenant_id=tenant_id,
                 status="final",
                 customer_id=customer_id,
                 issue_date=issue_date,
@@ -343,7 +511,11 @@ def merge_invoices(payload: InvoiceMergePayload, db: Session = Depends(get_db)) 
 
 
 @router.post("/invoices/workshop-fixed", status_code=201)
-def create_workshop_fixed_invoice(payload: WorkshopInvoiceCreatePayload, db: Session = Depends(get_db)) -> dict:
+def create_workshop_fixed_invoice(
+    payload: WorkshopInvoiceCreatePayload,
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+) -> dict:
     order = db.execute(
         select(Order)
         .options(joinedload(Order.customer), selectinload(Order.sites))
@@ -351,6 +523,7 @@ def create_workshop_fixed_invoice(payload: WorkshopInvoiceCreatePayload, db: Ses
     ).unique().scalar_one_or_none()
     if not order:
         raise not_found()
+    _ensure_same_tenant(order, current_user)
     ensure(bool(payload.items), "Mindestens eine Rechnungsposition ist erforderlich.")
 
     site_names = {site.id: site.site_name for site in order.sites}
@@ -387,6 +560,7 @@ def create_workshop_fixed_invoice(payload: WorkshopInvoiceCreatePayload, db: Ses
         issue_date = datetime.now(timezone.utc)
 
     invoice = Invoice(
+        tenant_id=order.tenant_id,
         status=payload.status,
         customer_id=order.customer_id,
         issue_date=issue_date,
@@ -413,6 +587,7 @@ def list_invoices(
     page: int = Query(default=1, ge=1),
     pageSize: int = Query(default=25, ge=1, le=100),
     db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
 ) -> list[dict] | dict:
     from_dt, to_dt = _service_date_bounds(from_date, to_date)
     stmt = (
@@ -420,6 +595,9 @@ def list_invoices(
         .options(joinedload(Invoice.customer), selectinload(Invoice.lines))
         .order_by(Invoice.created_at.desc())
     )
+    tenant_id = _tenant_id(current_user)
+    if tenant_id:
+        stmt = stmt.where(Invoice.tenant_id == tenant_id)
     if status:
         stmt = stmt.where(Invoice.status == status)
     else:
@@ -427,6 +605,8 @@ def list_invoices(
 
     if paginated and not (from_dt or to_dt):
         count_stmt = select(func.count()).select_from(Invoice)
+        if tenant_id:
+            count_stmt = count_stmt.where(Invoice.tenant_id == tenant_id)
         if status:
             count_stmt = count_stmt.where(Invoice.status == status)
         else:
@@ -448,10 +628,7 @@ def list_invoices(
         else:
             filtered_lines = list(invoice.lines)
 
-        payload = invoice_payload(invoice, include_customer=True)
-        totals = recalc_invoice_totals(db, invoice.id)
-        payload["totalHours"] = totals["totalHours"] if not (from_dt or to_dt) else _sum_hours(filtered_lines)
-        payload["lineCount"] = len(filtered_lines)
+        payload = _invoice_list_payload(db, invoice, filtered_lines if (from_dt or to_dt) else None)
         out.append(payload)
     if paginated:
         if from_dt or to_dt:
@@ -459,13 +636,16 @@ def list_invoices(
             total = len(out)
             start = (safe_page - 1) * safe_page_size
             out = out[start:start + safe_page_size]
-        return _paginated_response(out, total, safe_page, safe_page_size)
+        response = _paginated_response(out, total, safe_page, safe_page_size)
+        response["metrics"] = _invoice_metrics(db, tenant_id)
+        return response
     return out
 
 
 @router.get("/invoices/{invoice_id}/pdf")
-def invoice_pdf(invoice_id: str, db: Session = Depends(get_db)) -> Response:
+def invoice_pdf(invoice_id: str, db: Session = Depends(get_db), current_user=Depends(get_current_user)) -> Response:
     invoice = _ensure_exportable_invoice(db, invoice_id)
+    _ensure_same_tenant(invoice, current_user)
     payload = build_invoice_pdf(invoice, kind="detailed")
     return Response(
         content=payload,
@@ -475,8 +655,9 @@ def invoice_pdf(invoice_id: str, db: Session = Depends(get_db)) -> Response:
 
 
 @router.get("/invoices/{invoice_id}/pdf/pauschal")
-def invoice_pdf_pauschal(invoice_id: str, db: Session = Depends(get_db)) -> Response:
+def invoice_pdf_pauschal(invoice_id: str, db: Session = Depends(get_db), current_user=Depends(get_current_user)) -> Response:
     invoice = _ensure_exportable_invoice(db, invoice_id)
+    _ensure_same_tenant(invoice, current_user)
     payload = build_invoice_pdf(invoice, kind="pauschal")
     return Response(
         content=payload,
@@ -486,8 +667,9 @@ def invoice_pdf_pauschal(invoice_id: str, db: Session = Depends(get_db)) -> Resp
 
 
 @router.get("/invoices/{invoice_id}/word")
-def invoice_word(invoice_id: str, db: Session = Depends(get_db)) -> Response:
+def invoice_word(invoice_id: str, db: Session = Depends(get_db), current_user=Depends(get_current_user)) -> Response:
     invoice = _ensure_exportable_invoice(db, invoice_id)
+    _ensure_same_tenant(invoice, current_user)
     payload = build_invoice_docx(invoice, kind="detailed")
     return Response(
         content=payload,
@@ -497,8 +679,9 @@ def invoice_word(invoice_id: str, db: Session = Depends(get_db)) -> Response:
 
 
 @router.get("/invoices/{invoice_id}/word/pauschal")
-def invoice_word_pauschal(invoice_id: str, db: Session = Depends(get_db)) -> Response:
+def invoice_word_pauschal(invoice_id: str, db: Session = Depends(get_db), current_user=Depends(get_current_user)) -> Response:
     invoice = _ensure_exportable_invoice(db, invoice_id)
+    _ensure_same_tenant(invoice, current_user)
     payload = build_invoice_docx(invoice, kind="pauschal")
     return Response(
         content=payload,
@@ -508,17 +691,96 @@ def invoice_word_pauschal(invoice_id: str, db: Session = Depends(get_db)) -> Res
 
 
 @router.get("/invoices/{invoice_id}")
-def get_invoice(invoice_id: str, db: Session = Depends(get_db)) -> dict:
+def get_invoice(invoice_id: str, db: Session = Depends(get_db), current_user=Depends(get_current_user)) -> dict:
     invoice = _get_invoice_with_details(db, invoice_id)
+    _ensure_same_tenant(invoice, current_user)
 
     if invoice.status != "draft" and (not invoice.invoice_number or not invoice.issue_date):
         ensure_invoice_has_number_and_date(db, invoice.id)
         db.commit()
-        invoice = _get_invoice_with_details(db, invoice_id)
+    return _invoice_detail_payload(db, invoice_id)
 
-    payload = invoice_payload(invoice, include_customer=True, include_lines=True)
-    payload.update(recalc_invoice_totals(db, invoice.id))
-    return payload
+
+@router.post("/invoices/{invoice_id}/payments", status_code=status.HTTP_201_CREATED)
+def create_invoice_payment(
+    invoice_id: str,
+    payload: PaymentRecordPayload,
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+) -> dict:
+    invoice = _get_invoice_with_details(db, invoice_id)
+    _ensure_same_tenant(invoice, current_user)
+    payment = PaymentRecord()
+    _apply_invoice_payment_payload(payment, invoice, payload)
+    db.add(payment)
+
+    try:
+        db.flush()
+        record_audit(
+            db,
+            action="invoice.payment.added",
+            entity_type="PaymentRecord",
+            entity_id=payment.id,
+            actor_user_id=actor_id(current_user),
+            summary=f"Payment added to invoice: {invoice.invoice_number or invoice.id}",
+            details={
+                "invoiceId": invoice.id,
+                "customerId": invoice.customer_id,
+                "type": payment.payment_type,
+                "status": payment.status,
+                "amount": float(payment.amount or 0),
+                "currency": payment.currency,
+                "method": payment.method,
+                "reference": payment.reference,
+            },
+        )
+        db.commit()
+        return _invoice_detail_payload(db, invoice_id)
+    except IntegrityError:
+        db.rollback()
+        raise german_error("Zahlung konnte nicht gespeichert werden.")
+
+
+@router.delete("/invoices/{invoice_id}/payments/{payment_id}")
+def delete_invoice_payment(
+    invoice_id: str,
+    payment_id: str,
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+) -> dict:
+    invoice = db.get(Invoice, invoice_id)
+    if not invoice:
+        raise not_found()
+    _ensure_same_tenant(invoice, current_user)
+    payment = db.get(PaymentRecord, payment_id)
+    if not payment or payment.invoice_id != invoice_id:
+        raise not_found()
+
+    try:
+        record_audit(
+            db,
+            action="invoice.payment.deleted",
+            entity_type="PaymentRecord",
+            entity_id=payment.id,
+            actor_user_id=actor_id(current_user),
+            summary=f"Payment deleted from invoice: {invoice.invoice_number or invoice.id}",
+            details={
+                "invoiceId": invoice.id,
+                "customerId": invoice.customer_id,
+                "type": payment.payment_type,
+                "status": payment.status,
+                "amount": float(payment.amount or 0),
+                "currency": payment.currency,
+                "method": payment.method,
+                "reference": payment.reference,
+            },
+        )
+        db.delete(payment)
+        db.commit()
+        return _invoice_detail_payload(db, invoice_id)
+    except IntegrityError:
+        db.rollback()
+        raise german_error("Zahlung konnte nicht geloescht werden.")
 
 
 @router.put("/invoices/{invoice_id}")
@@ -531,9 +793,11 @@ def update_invoice(
     invoice = db.get(Invoice, invoice_id)
     if not invoice:
         raise not_found()
+    _ensure_same_tenant(invoice, current_user)
 
     invoice.status = payload.status or invoice.status
     invoice.issue_date = as_datetime(payload.issueDate) if payload.issueDate is not None else None
+    invoice.due_date = as_datetime(payload.dueDate) if payload.dueDate is not None else None
     invoice.notes = payload.notes
     invoice.pauschal_amount = Decimal(str(payload.pauschalAmount)) if payload.pauschalAmount is not None else None
 
@@ -567,6 +831,7 @@ def delete_invoice(
     invoice = db.get(Invoice, invoice_id)
     if not invoice:
         raise not_found()
+    _ensure_same_tenant(invoice, current_user)
     ensure(invoice.status == "draft", "Nur Entwurf-Rechnungen koennen geloescht werden.", 409)
 
     try:
@@ -579,6 +844,7 @@ def delete_invoice(
             summary=f"Invoice deleted: {invoice.invoice_number or invoice.id}",
             details={"status": invoice.status, "customerId": invoice.customer_id},
         )
+        db.query(PaymentRecord).filter(PaymentRecord.invoice_id == invoice_id).delete(synchronize_session=False)
         db.query(InvoiceLine).filter(InvoiceLine.invoice_id == invoice_id).delete(synchronize_session=False)
         db.delete(invoice)
         db.commit()

@@ -6,6 +6,7 @@ import Link from 'next/link';
 
 import { API_BASE, apiAuthBlob, apiForm, apiGet, apiJson } from '../../../lib/api';
 import { useI18n } from '../../../lib/i18n';
+import { appConfirm } from '../../../lib/dialog';
 import { ListPager } from '../../ui/ListPager';
 import { useToast } from '../../ui/ToastProvider';
 
@@ -511,7 +512,7 @@ export default function ProjectTrackingSection({ orderId }: { orderId: string })
   }
 
   async function deleteItem(path: string) {
-    if (!confirm(x.deleteConfirm)) return;
+    if (!(await appConfirm(x.deleteConfirm))) return;
     try {
       const data = await apiJson<TrackingPayload>(path, 'DELETE');
       applyTracking(data);

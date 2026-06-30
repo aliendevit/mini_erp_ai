@@ -33,19 +33,51 @@ type AuditResponse = {
   };
 };
 
+type AuditScope = {
+  id: string;
+  label: string;
+  kind: 'platform' | 'company' | 'legacy' | string;
+};
+
+type AuditScopesResponse = {
+  defaultScope: string;
+  scopes: AuditScope[];
+};
+
 const PAGE_SIZE = 12;
 const actionOptions = [
   'all',
+  'platform.company.created',
+  'platform.manager_password.reset',
+  'user.created',
+  'user.ai_permissions.updated',
+  'user.password.changed',
   'invoice.updated',
   'invoice.deleted',
+  'invoice.payment.added',
+  'invoice.payment.deleted',
   'order.created',
+  'order.updated',
   'order.deleted',
   'ai.proposal.confirmed',
+  'tracking.baseline.updated',
+  'tracking.progress.created',
+  'tracking.progress.updated',
+  'tracking.progress.deleted',
+  'tracking.task.created',
+  'tracking.task.updated',
+  'tracking.task.deleted',
+  'tracking.issue.created',
+  'tracking.issue.updated',
+  'tracking.issue.deleted',
+  'tracking.material.created',
+  'tracking.material.updated',
+  'tracking.material.deleted',
   'backup.restored',
   'monitoring.alert.updated',
 ] as const;
 
-const entityOptions = ['all', 'Invoice', 'Order', 'Proposal', 'SystemBackup', 'ProjectMonitoringAlert'] as const;
+const entityOptions = ['all', 'SaasTenant', 'UserAccount', 'Invoice', 'PaymentRecord', 'Order', 'Proposal', 'SystemBackup', 'ProjectMonitoringAlert', 'ProjectTask', 'ProjectIssue', 'ProjectMaterialLog', 'ProjectProgressUpdate', 'ProjectSiteBaseline'] as const;
 
 const copy = {
   de: {
@@ -78,6 +110,8 @@ const copy = {
       all: 'Alle Aktionen',
       'invoice.updated': 'Rechnung bearbeitet',
       'invoice.deleted': 'Rechnung geloescht',
+      'invoice.payment.added': 'Zahlung hinzugefuegt',
+      'invoice.payment.deleted': 'Zahlung geloescht',
       'order.created': 'Auftrag erstellt',
       'order.deleted': 'Auftrag geloescht',
       'ai.proposal.confirmed': 'AI Vorschlag bestaetigt',
@@ -87,6 +121,7 @@ const copy = {
     entityLabels: {
       all: 'Alle Objekte',
       Invoice: 'Rechnung',
+      PaymentRecord: 'Zahlung',
       Order: 'Auftrag',
       Proposal: 'AI Vorschlag',
       SystemBackup: 'Backup',
@@ -121,21 +156,50 @@ const copy = {
     important: 'Important events',
     actionLabels: {
       all: 'All actions',
+      'platform.company.created': 'Company created',
+      'platform.manager_password.reset': 'Manager password reset',
+      'user.created': 'User created',
+      'user.ai_permissions.updated': 'AI permissions updated',
+      'user.password.changed': 'Password changed',
       'invoice.updated': 'Invoice edited',
       'invoice.deleted': 'Invoice deleted',
+      'invoice.payment.added': 'Payment added',
+      'invoice.payment.deleted': 'Payment deleted',
       'order.created': 'Order created',
+      'order.updated': 'Order edited',
       'order.deleted': 'Order deleted',
       'ai.proposal.confirmed': 'AI proposal confirmed',
+      'tracking.baseline.updated': 'Tracking baseline updated',
+      'tracking.progress.created': 'Progress update created',
+      'tracking.progress.updated': 'Progress update edited',
+      'tracking.progress.deleted': 'Progress update deleted',
+      'tracking.task.created': 'Tracking task created',
+      'tracking.task.updated': 'Tracking task edited',
+      'tracking.task.deleted': 'Tracking task deleted',
+      'tracking.issue.created': 'Tracking issue created',
+      'tracking.issue.updated': 'Tracking issue edited',
+      'tracking.issue.deleted': 'Tracking issue deleted',
+      'tracking.material.created': 'Material log created',
+      'tracking.material.updated': 'Material log edited',
+      'tracking.material.deleted': 'Material log deleted',
       'backup.restored': 'Backup restored',
       'monitoring.alert.updated': 'Monitoring alert updated',
     },
     entityLabels: {
       all: 'All entities',
+      SaasTenant: 'Company',
+      UserAccount: 'User',
       Invoice: 'Invoice',
+      PaymentRecord: 'Payment',
       Order: 'Order',
       Proposal: 'AI proposal',
       SystemBackup: 'Backup',
       ProjectMonitoringAlert: 'Monitoring alert',
+      ProjectTask: 'Tracking task',
+      ProjectIssue: 'Tracking issue',
+      ProjectMaterialLog: 'Material log',
+      ProjectProgressUpdate: 'Progress update',
+      ProjectSiteBaseline: 'Tracking baseline',
     },
   },
   ar: {
@@ -223,10 +287,28 @@ export default function AuditLogPage() {
   const [query, setQuery] = useState('');
   const [action, setAction] = useState<(typeof actionOptions)[number]>('all');
   const [entityType, setEntityType] = useState<(typeof entityOptions)[number]>('all');
+  const [scopes, setScopes] = useState<AuditScope[]>([]);
+  const [scope, setScope] = useState('platform');
   const [expandedId, setExpandedId] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [reloadKey, setReloadKey] = useState(0);
+
+  useEffect(() => {
+    let cancelled = false;
+    apiGet<AuditScopesResponse>('/system/audit-scopes')
+      .then((data) => {
+        if (cancelled) return;
+        setScopes(data.scopes || []);
+        setScope(data.defaultScope || data.scopes?.[0]?.id || 'platform');
+      })
+      .catch((err: any) => {
+        if (!cancelled) setError(err?.message || 'Failed to load audit scopes');
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   useEffect(() => {
     let cancelled = false;
@@ -238,6 +320,7 @@ export default function AuditLogPage() {
     if (query.trim()) params.set('q', query.trim());
     if (action !== 'all') params.set('action', action);
     if (entityType !== 'all') params.set('entityType', entityType);
+    if (scope) params.set('scope', scope);
 
     apiGet<AuditResponse>(`/system/audit-logs?${params.toString()}`)
       .then((data) => {
@@ -257,7 +340,7 @@ export default function AuditLogPage() {
     return () => {
       cancelled = true;
     };
-  }, [page, query, action, entityType, reloadKey]);
+  }, [page, query, action, entityType, scope, reloadKey]);
 
   const latest = items[0];
   const metricCards = useMemo(
@@ -294,6 +377,26 @@ export default function AuditLogPage() {
         </div>
       </section>
 
+      {scopes.length > 1 ? (
+        <section className="audit-scope-tabs" aria-label="Audit scopes">
+          {scopes.map((item) => (
+            <button
+              key={item.id}
+              type="button"
+              className={scope === item.id ? 'active' : ''}
+              onClick={() => {
+                setPage(1);
+                setScope(item.id);
+                setExpandedId(null);
+              }}
+            >
+              <span>{item.kind === 'platform' ? 'Platform' : 'Company'}</span>
+              <strong>{item.label}</strong>
+            </button>
+          ))}
+        </section>
+      ) : null}
+
       <section className="audit-panel">
         <div className="audit-panel-header">
           <div>
@@ -328,7 +431,7 @@ export default function AuditLogPage() {
             >
               {actionOptions.map((option) => (
                 <option key={option} value={option}>
-                  {t.actionLabels[option]}
+                  {t.actionLabels[option as keyof typeof t.actionLabels] || option}
                 </option>
               ))}
             </select>
@@ -344,7 +447,7 @@ export default function AuditLogPage() {
             >
               {entityOptions.map((option) => (
                 <option key={option} value={option}>
-                  {t.entityLabels[option]}
+                  {t.entityLabels[option as keyof typeof t.entityLabels] || option}
                 </option>
               ))}
             </select>

@@ -4,6 +4,7 @@ import hashlib
 import json
 import math
 import re
+import shutil
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -262,6 +263,21 @@ def delete_rag_for_proposal_messages(db: Session, proposal_id: str, message_ids:
     return len(sources)
 
 
+def delete_rag_source(db: Session, source: RagSource) -> None:
+    storage_path = source.storage_path
+    db.delete(source)
+    db.flush()
+    if storage_path:
+        try:
+            stored = Path(storage_path)
+            source_dir = stored.parent
+            if UPLOAD_ROOT in stored.resolve().parents and source_dir.exists():
+                shutil.rmtree(source_dir, ignore_errors=True)
+        except Exception:
+            # Database deletion is the source of truth; file cleanup can be retried manually.
+            pass
+
+
 def _heuristic_durable(text_value: str) -> bool:
     lowered = text_value.lower()
     if "structured intake answers:" in lowered or "please save these answers as project facts" in lowered:
@@ -335,6 +351,7 @@ def capture_chat_message_for_rag(
         "capturedAt": _utcnow().isoformat(),
     }
     source = RagSource(
+        tenant_id=proposal.tenant_id,
         proposal_id=proposal.id,
         order_id=proposal.converted_order_id,
         customer_id=proposal.converted_customer_id,
@@ -411,6 +428,7 @@ def capture_proposal_snapshot_for_rag(
         return None
 
     source = RagSource(
+        tenant_id=proposal.tenant_id,
         proposal_id=proposal.id,
         order_id=proposal.converted_order_id,
         customer_id=proposal.converted_customer_id,
@@ -467,6 +485,7 @@ async def ingest_uploaded_text_file(
     order_id: str | None = None,
     customer_id: str | None = None,
     site_id: str | None = None,
+    tenant_id: str | None = None,
     created_by_user_id: str | None = None,
 ) -> RagSource:
     ensure(bool(proposal_id or order_id), "proposalId oder orderId ist erforderlich.")
@@ -477,6 +496,7 @@ async def ingest_uploaded_text_file(
     ensure(bool(text_value.strip()), "Uploaded file is empty.")
 
     source = RagSource(
+        tenant_id=tenant_id,
         proposal_id=proposal_id,
         order_id=order_id,
         customer_id=customer_id,
@@ -521,6 +541,71 @@ async def ingest_uploaded_text_file(
     job.stage = "complete"
     job.finished_at = _utcnow()
     db.flush()
+    return source
+
+
+def reingest_rag_source(db: Session, source: RagSource, *, created_by_user_id: str | None = None) -> RagSource:
+    for chunk in list(source.chunks):
+        db.delete(chunk)
+    for job in list(source.ingestion_jobs):
+        db.delete(job)
+    db.flush()
+
+    if source.source_type == "uploaded_file":
+        ensure(bool(source.storage_path), "Uploaded source has no stored file.")
+        storage_path = Path(source.storage_path or "")
+        ensure(storage_path.exists(), "Stored upload file was not found.", 404)
+        raw = storage_path.read_bytes()
+        text_value = _decode_upload_text(raw, source.mime_type, source.original_file_name or source.title or "upload.txt")
+        ensure(bool(text_value.strip()), "Uploaded file is empty.")
+        source.ingestion_status = "processing"
+        source.file_hash = hashlib.sha256(raw).hexdigest()
+        source.extractor_version = RAG_EXTRACTOR_VERSION
+        source.updated_at = _utcnow()
+        if created_by_user_id:
+            source.created_by_user_id = source.created_by_user_id or created_by_user_id
+        job = RagIngestionJob(source=source, status="running", stage="reingest_text", started_at=_utcnow())
+        db.add(job)
+        db.flush()
+        for index, chunk in enumerate(_chunk_text(text_value)):
+            _add_chunk(
+                db,
+                source,
+                chunk,
+                chunk_index=index,
+                chunk_type="text_chunk",
+                trust_level=RAG_TRUST_EXTRACTED_UNCONFIRMED,
+                layout={"extraction": "plain_text", "chunkIndex": index, "reingested": True},
+                metadata={"fileName": source.original_file_name or source.title, "fileHash": source.file_hash},
+            )
+        source.ingestion_status = "ready"
+        job.status = "complete"
+        job.stage = "complete"
+        job.finished_at = _utcnow()
+        db.flush()
+        return source
+
+    if source.source_type == "proposal_snapshot" and source.proposal_id:
+        proposal = db.get(Proposal, source.proposal_id)
+        ensure(proposal is not None, "Linked proposal was not found.", 404)
+        assert proposal is not None
+        next_source = capture_proposal_snapshot_for_rag(db, proposal, created_by_user_id=created_by_user_id)
+        ensure(next_source is not None, "Proposal snapshot has no content to reprocess.")
+        assert next_source is not None
+        return next_source
+
+    if source.source_type == "chat_fact" and source.proposal_id and source.source_entity_id:
+        proposal = db.get(Proposal, source.proposal_id)
+        message = db.get(ProposalMessage, source.source_entity_id)
+        ensure(proposal is not None and message is not None, "Linked chat message was not found.", 404)
+        db.delete(source)
+        db.flush()
+        next_source = capture_chat_message_for_rag(db, proposal, message, created_by_user_id=created_by_user_id)
+        ensure(next_source is not None, "Chat message has no durable facts to reprocess.")
+        assert next_source is not None
+        return next_source
+
+    ensure(False, "This RAG source type cannot be reprocessed yet.", 400)
     return source
 
 

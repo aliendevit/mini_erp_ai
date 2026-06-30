@@ -14,7 +14,7 @@ from fastapi.staticfiles import StaticFiles
 from sqlalchemy import text
 
 from .database import DATABASE_URL, engine, init_db
-from .routers import ai, auth, core, invoices, rag, system
+from .routers import ai, auth, core, invoices, platform, rag, system
 from .settings import get_settings
 
 app = FastAPI(title="Simple Accounting Python Backend")
@@ -131,6 +131,7 @@ def startup() -> None:
 
 app.include_router(core.router, prefix="/api")
 app.include_router(invoices.router, prefix="/api")
+app.include_router(platform.router, prefix="/api")
 app.include_router(ai.router, prefix="/api")
 app.include_router(rag.router, prefix="/api")
 app.include_router(auth.router, prefix="/api")

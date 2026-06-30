@@ -39,7 +39,7 @@ from ..models import (
     WorkshopSiteAssignment,
     WorkEntry,
 )
-from ..routers.auth import get_current_user
+from ..routers.auth import get_current_user, require_permission, tenant_id_for_user
 from ..schemas import (
     AssignmentPayload,
     AssignmentUpdatePayload,
@@ -126,6 +126,48 @@ def _paginated_response(items: list[dict], total: int, page: int, page_size: int
         "hasNext": page < total_pages,
         "hasPrev": page > 1,
     }
+
+
+def _tenant_id(user) -> str | None:
+    return tenant_id_for_user(user)
+
+
+def _ensure_same_tenant(item, user) -> None:
+    tenant_id = _tenant_id(user)
+    if tenant_id and getattr(item, "tenant_id", None) != tenant_id:
+        raise not_found()
+
+
+def _ensure_order_access(db: Session, order_id: str, user) -> Order:
+    order = db.get(Order, order_id)
+    if not order:
+        raise not_found()
+    _ensure_same_tenant(order, user)
+    return order
+
+
+def _ensure_site_access(db: Session, site_id: str, user) -> Site:
+    site = db.get(Site, site_id)
+    if not site:
+        raise not_found()
+    _ensure_order_access(db, site.order_id, user)
+    return site
+
+
+def _ensure_employee_access(db: Session, employee_id: str, user) -> Employee:
+    employee = db.get(Employee, employee_id)
+    if not employee:
+        raise not_found()
+    _ensure_same_tenant(employee, user)
+    return employee
+
+
+def _ensure_work_entry_access(db: Session, work_entry_id: str, user) -> WorkEntry:
+    entry = db.get(WorkEntry, work_entry_id)
+    if not entry:
+        raise not_found()
+    _ensure_order_access(db, entry.order_id, user)
+    return entry
 
 
 def _apply_workshop_payload(item: CustomerWorkshop, payload: CustomerWorkshopPayload) -> CustomerWorkshop:
@@ -247,7 +289,9 @@ def _apply_payment_payload(item: PaymentRecord, payload: PaymentRecordPayload) -
 
 
 def _create_draft_invoice(db: Session, customer_id: str) -> Invoice:
+    customer = db.get(Customer, customer_id)
     invoice = Invoice(
+        tenant_id=customer.tenant_id if customer else None,
         status="draft",
         customer_id=customer_id,
         invoice_number=None,
@@ -996,29 +1040,49 @@ def list_customers(
     paginated: bool = Query(default=False),
     page: int = Query(default=1, ge=1),
     pageSize: int = Query(default=25, ge=1, le=100),
+    _: object = Depends(require_permission("manage_company")),
     db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
 ) -> list[dict] | dict:
     stmt = select(Customer).order_by(Customer.company_name.asc())
+    tenant_id = _tenant_id(current_user)
+    if tenant_id:
+        stmt = stmt.where(Customer.tenant_id == tenant_id)
     if not paginated:
         items = db.scalars(stmt).all()
         return [customer_payload(item) for item in items]
     safe_page, safe_page_size = _page_params(page, pageSize)
-    total = db.scalar(select(func.count()).select_from(Customer)) or 0
+    count_stmt = select(func.count()).select_from(Customer)
+    if tenant_id:
+        count_stmt = count_stmt.where(Customer.tenant_id == tenant_id)
+    total = db.scalar(count_stmt) or 0
     items = db.scalars(stmt.offset((safe_page - 1) * safe_page_size).limit(safe_page_size)).all()
     return _paginated_response([customer_payload(item) for item in items], total, safe_page, safe_page_size)
 
 
 @router.get("/customers/{customer_id}")
-def get_customer(customer_id: str, db: Session = Depends(get_db)) -> dict:
+def get_customer(
+    customer_id: str,
+    _: object = Depends(require_permission("manage_company")),
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+) -> dict:
     item = db.get(Customer, customer_id)
     if not item:
         raise not_found()
+    _ensure_same_tenant(item, current_user)
     return customer_payload(item)
 
 
 @router.post("/customers", status_code=201)
-def create_customer(payload: CustomerPayload, db: Session = Depends(get_db)) -> dict:
+def create_customer(
+    payload: CustomerPayload,
+    _: object = Depends(require_permission("manage_company")),
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+) -> dict:
     item = Customer(
+        tenant_id=_tenant_id(current_user),
         company_name=payload.companyName.strip(),
         street=payload.street,
         zip_code=payload.zipCode,
@@ -1037,10 +1101,17 @@ def create_customer(payload: CustomerPayload, db: Session = Depends(get_db)) -> 
 
 
 @router.put("/customers/{customer_id}")
-def update_customer(customer_id: str, payload: CustomerPayload, db: Session = Depends(get_db)) -> dict:
+def update_customer(
+    customer_id: str,
+    payload: CustomerPayload,
+    _: object = Depends(require_permission("manage_company")),
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+) -> dict:
     item = db.get(Customer, customer_id)
     if not item:
         raise not_found()
+    _ensure_same_tenant(item, current_user)
     item.company_name = payload.companyName.strip()
     item.street = payload.street
     item.zip_code = payload.zipCode
@@ -1057,10 +1128,16 @@ def update_customer(customer_id: str, payload: CustomerPayload, db: Session = De
 
 
 @router.delete("/customers/{customer_id}")
-def delete_customer(customer_id: str, db: Session = Depends(get_db)) -> dict:
+def delete_customer(
+    customer_id: str,
+    _: object = Depends(require_permission("manage_company")),
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+) -> dict:
     item = db.get(Customer, customer_id)
     if not item:
         raise not_found()
+    _ensure_same_tenant(item, current_user)
     try:
         db.delete(item)
         db.commit()
@@ -1071,10 +1148,16 @@ def delete_customer(customer_id: str, db: Session = Depends(get_db)) -> dict:
 
 
 @router.get("/customers/{customer_id}/workshops")
-def list_customer_workshops(customer_id: str, db: Session = Depends(get_db)) -> list[dict]:
+def list_customer_workshops(
+    customer_id: str,
+    _: object = Depends(require_permission("manage_company")),
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+) -> list[dict]:
     customer = db.get(Customer, customer_id)
     if not customer:
         raise not_found()
+    _ensure_same_tenant(customer, current_user)
     items = db.scalars(
         select(CustomerWorkshop)
         .where(CustomerWorkshop.customer_id == customer_id)
@@ -1084,10 +1167,17 @@ def list_customer_workshops(customer_id: str, db: Session = Depends(get_db)) -> 
 
 
 @router.post("/customers/{customer_id}/workshops", status_code=201)
-def create_customer_workshop(customer_id: str, payload: CustomerWorkshopPayload, db: Session = Depends(get_db)) -> dict:
+def create_customer_workshop(
+    customer_id: str,
+    payload: CustomerWorkshopPayload,
+    _: object = Depends(require_permission("manage_company")),
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+) -> dict:
     customer = db.get(Customer, customer_id)
     if not customer:
         raise not_found()
+    _ensure_same_tenant(customer, current_user)
     ensure(bool(payload.name and payload.name.strip()), "Workshop-Name fehlt.")
     item = CustomerWorkshop(customer_id=customer_id, name=payload.name.strip())
     _apply_workshop_payload(item, payload)
@@ -1098,10 +1188,21 @@ def create_customer_workshop(customer_id: str, payload: CustomerWorkshopPayload,
 
 
 @router.put("/customers/{customer_id}/workshops/{workshop_id}")
-def update_customer_workshop(customer_id: str, workshop_id: str, payload: CustomerWorkshopPayload, db: Session = Depends(get_db)) -> dict:
+def update_customer_workshop(
+    customer_id: str,
+    workshop_id: str,
+    payload: CustomerWorkshopPayload,
+    _: object = Depends(require_permission("manage_company")),
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+) -> dict:
     item = db.get(CustomerWorkshop, workshop_id)
     if not item or item.customer_id != customer_id:
         raise not_found()
+    customer = db.get(Customer, item.customer_id)
+    if not customer:
+        raise not_found()
+    _ensure_same_tenant(customer, current_user)
     ensure(bool(payload.name and payload.name.strip()), "Workshop-Name fehlt.")
     _apply_workshop_payload(item, payload)
     db.commit()
@@ -1110,10 +1211,20 @@ def update_customer_workshop(customer_id: str, workshop_id: str, payload: Custom
 
 
 @router.delete("/customers/{customer_id}/workshops/{workshop_id}")
-def delete_customer_workshop(customer_id: str, workshop_id: str, db: Session = Depends(get_db)) -> dict:
+def delete_customer_workshop(
+    customer_id: str,
+    workshop_id: str,
+    _: object = Depends(require_permission("manage_company")),
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+) -> dict:
     item = db.get(CustomerWorkshop, workshop_id)
     if not item or item.customer_id != customer_id:
         raise not_found()
+    customer = db.get(Customer, item.customer_id)
+    if not customer:
+        raise not_found()
+    _ensure_same_tenant(customer, current_user)
     db.delete(item)
     db.commit()
     return {"ok": True}
@@ -1123,6 +1234,7 @@ def delete_customer_workshop(customer_id: str, workshop_id: str, db: Session = D
 def list_workshops(
     activeOnly: bool = Query(default=False),
     availableOnly: bool = Query(default=False),
+    _: object = Depends(require_permission("manage_company")),
     db: Session = Depends(get_db),
 ) -> list[dict]:
     stmt = select(Workshop).order_by(Workshop.name.asc())
@@ -1134,7 +1246,7 @@ def list_workshops(
 
 
 @router.get("/workshops/{workshop_id}")
-def get_workshop(workshop_id: str, db: Session = Depends(get_db)) -> dict:
+def get_workshop(workshop_id: str, _: object = Depends(require_permission("manage_company")), db: Session = Depends(get_db)) -> dict:
     item = db.get(Workshop, workshop_id)
     if not item:
         raise not_found()
@@ -1142,7 +1254,7 @@ def get_workshop(workshop_id: str, db: Session = Depends(get_db)) -> dict:
 
 
 @router.post("/workshops", status_code=201)
-def create_workshop(payload: WorkshopPayload, db: Session = Depends(get_db)) -> dict:
+def create_workshop(payload: WorkshopPayload, _: object = Depends(require_permission("manage_company")), db: Session = Depends(get_db)) -> dict:
     ensure(bool(payload.name and payload.name.strip()), "Workshop-Name fehlt.")
     existing = db.scalar(select(Workshop).where(func.lower(Workshop.name) == payload.name.strip().lower()).limit(1))
     ensure(existing is None, "Workshop existiert bereits.", 409)
@@ -1155,7 +1267,12 @@ def create_workshop(payload: WorkshopPayload, db: Session = Depends(get_db)) -> 
 
 
 @router.put("/workshops/{workshop_id}")
-def update_workshop(workshop_id: str, payload: WorkshopPayload, db: Session = Depends(get_db)) -> dict:
+def update_workshop(
+    workshop_id: str,
+    payload: WorkshopPayload,
+    _: object = Depends(require_permission("manage_company")),
+    db: Session = Depends(get_db),
+) -> dict:
     item = db.get(Workshop, workshop_id)
     if not item:
         raise not_found()
@@ -1174,7 +1291,7 @@ def update_workshop(workshop_id: str, payload: WorkshopPayload, db: Session = De
 
 
 @router.delete("/workshops/{workshop_id}")
-def delete_workshop(workshop_id: str, db: Session = Depends(get_db)) -> dict:
+def delete_workshop(workshop_id: str, _: object = Depends(require_permission("manage_company")), db: Session = Depends(get_db)) -> dict:
     item = db.get(Workshop, workshop_id)
     if not item:
         raise not_found()
@@ -1186,10 +1303,12 @@ def delete_workshop(workshop_id: str, db: Session = Depends(get_db)) -> dict:
 
 
 @router.get("/orders/{order_id}/workshop-assignments")
-def list_order_workshop_assignments(order_id: str, db: Session = Depends(get_db)) -> list[dict]:
-    order = db.get(Order, order_id)
-    if not order:
-        raise not_found()
+def list_order_workshop_assignments(
+    order_id: str,
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+) -> list[dict]:
+    _ensure_order_access(db, order_id, current_user)
     items = db.execute(
         select(WorkshopSiteAssignment)
         .options(joinedload(WorkshopSiteAssignment.workshop), joinedload(WorkshopSiteAssignment.site))
@@ -1200,10 +1319,14 @@ def list_order_workshop_assignments(order_id: str, db: Session = Depends(get_db)
 
 
 @router.post("/orders/{order_id}/workshop-assignments", status_code=201)
-def create_order_workshop_assignment(order_id: str, payload: WorkshopSiteAssignmentPayload, db: Session = Depends(get_db)) -> dict:
-    order = db.get(Order, order_id)
-    if not order:
-        raise not_found()
+def create_order_workshop_assignment(
+    order_id: str,
+    payload: WorkshopSiteAssignmentPayload,
+    db: Session = Depends(get_db),
+    _: object = Depends(require_permission("manage_company")),
+    current_user=Depends(get_current_user),
+) -> dict:
+    order = _ensure_order_access(db, order_id, current_user)
     site = db.get(Site, payload.siteId)
     ensure(site is not None and site.order_id == order_id, "Die Baustelle gehoert nicht zum Auftrag.", 400)
     workshop = _ensure_assignable_workshop(db.get(Workshop, payload.workshopId))
@@ -1228,10 +1351,18 @@ def create_order_workshop_assignment(order_id: str, payload: WorkshopSiteAssignm
 
 
 @router.put("/workshop-assignments/{assignment_id}")
-def update_workshop_assignment(assignment_id: str, payload: WorkshopSiteAssignmentPayload, db: Session = Depends(get_db)) -> dict:
+def update_workshop_assignment(
+    assignment_id: str,
+    payload: WorkshopSiteAssignmentPayload,
+    db: Session = Depends(get_db),
+    _: object = Depends(require_permission("manage_company")),
+    current_user=Depends(get_current_user),
+) -> dict:
     item = db.get(WorkshopSiteAssignment, assignment_id)
     if not item:
         raise not_found()
+    _ensure_order_access(db, item.order_id, current_user)
+    _ensure_site_access(db, payload.siteId, current_user)
     order_id = _assignment_order_for_site(db, payload.siteId)
     ensure(item.order_id == order_id, "Die Zuordnung gehoert nicht zu dieser Baustelle.", 400)
     _ensure_assignable_workshop(db.get(Workshop, payload.workshopId))
@@ -1255,27 +1386,46 @@ def update_workshop_assignment(assignment_id: str, payload: WorkshopSiteAssignme
 
 
 @router.delete("/workshop-assignments/{assignment_id}")
-def delete_workshop_assignment(assignment_id: str, db: Session = Depends(get_db)) -> dict:
+def delete_workshop_assignment(
+    assignment_id: str,
+    _: object = Depends(require_permission("manage_company")),
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+) -> dict:
     item = db.get(WorkshopSiteAssignment, assignment_id)
     if not item:
         raise not_found()
+    _ensure_order_access(db, item.order_id, current_user)
     db.delete(item)
     db.commit()
     return {"ok": True}
 
 
 @router.get("/employees")
-def list_employees(db: Session = Depends(get_db)) -> list[dict]:
-    items = db.scalars(
+def list_employees(
+    _: object = Depends(require_permission("manage_users")),
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+) -> list[dict]:
+    stmt = (
         select(Employee)
         .options(selectinload(Employee.skill_records), selectinload(Employee.availability_blocks))
         .order_by(Employee.last_name.asc(), Employee.first_name.asc())
-    ).all()
+    )
+    tenant_id = _tenant_id(current_user)
+    if tenant_id:
+        stmt = stmt.where(Employee.tenant_id == tenant_id)
+    items = db.scalars(stmt).all()
     return [employee_payload(item, include_staffing=True) for item in items]
 
 
 @router.get("/employees/{employee_id}")
-def get_employee(employee_id: str, db: Session = Depends(get_db)) -> dict:
+def get_employee(
+    employee_id: str,
+    _: object = Depends(require_permission("manage_users")),
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+) -> dict:
     stmt = (
         select(Employee)
         .options(selectinload(Employee.skill_records), selectinload(Employee.availability_blocks))
@@ -1284,12 +1434,19 @@ def get_employee(employee_id: str, db: Session = Depends(get_db)) -> dict:
     item = db.execute(stmt).scalar_one_or_none()
     if not item:
         raise not_found()
+    _ensure_same_tenant(item, current_user)
     return employee_payload(item, include_staffing=True)
 
 
 @router.post("/employees", status_code=201)
-def create_employee(payload: EmployeePayload, db: Session = Depends(get_db)) -> dict:
+def create_employee(
+    payload: EmployeePayload,
+    _: object = Depends(require_permission("manage_users")),
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+) -> dict:
     item = Employee(
+        tenant_id=_tenant_id(current_user),
         first_name=payload.firstName.strip(),
         last_name=payload.lastName.strip(),
         birth_date=as_datetime(payload.birthDate),
@@ -1315,7 +1472,13 @@ def create_employee(payload: EmployeePayload, db: Session = Depends(get_db)) -> 
 
 
 @router.put("/employees/{employee_id}")
-def update_employee(employee_id: str, payload: EmployeePayload, db: Session = Depends(get_db)) -> dict:
+def update_employee(
+    employee_id: str,
+    payload: EmployeePayload,
+    _: object = Depends(require_permission("manage_users")),
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+) -> dict:
     item = db.execute(
         select(Employee)
         .options(selectinload(Employee.skill_records), selectinload(Employee.availability_blocks))
@@ -1323,6 +1486,7 @@ def update_employee(employee_id: str, payload: EmployeePayload, db: Session = De
     ).scalar_one_or_none()
     if not item:
         raise not_found()
+    _ensure_same_tenant(item, current_user)
     item.first_name = payload.firstName.strip()
     item.last_name = payload.lastName.strip()
     item.birth_date = as_datetime(payload.birthDate)
@@ -1341,10 +1505,16 @@ def update_employee(employee_id: str, payload: EmployeePayload, db: Session = De
 
 
 @router.delete("/employees/{employee_id}")
-def delete_employee(employee_id: str, db: Session = Depends(get_db)) -> dict:
+def delete_employee(
+    employee_id: str,
+    _: object = Depends(require_permission("manage_users")),
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+) -> dict:
     item = db.get(Employee, employee_id)
     if not item:
         raise not_found()
+    _ensure_same_tenant(item, current_user)
     try:
         db.delete(item)
         db.commit()
@@ -1362,9 +1532,15 @@ def list_orders(
     page: int = Query(default=1, ge=1),
     pageSize: int = Query(default=25, ge=1, le=100),
     db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+    _: object = Depends(require_permission("view_projects")),
 ) -> list[dict] | dict:
     stmt = select(Order).options(joinedload(Order.customer)).order_by(Order.created_at.desc())
     count_stmt = select(func.count()).select_from(Order).join(Customer, Order.customer_id == Customer.id)
+    tenant_id = _tenant_id(current_user)
+    if tenant_id:
+        stmt = stmt.where(Order.tenant_id == tenant_id)
+        count_stmt = count_stmt.where(Order.tenant_id == tenant_id)
     if status and status != "all":
         stmt = stmt.where(Order.status == status)
         count_stmt = count_stmt.where(Order.status == status)
@@ -1388,7 +1564,12 @@ def list_orders(
 
 
 @router.get("/orders/{order_id}")
-def get_order(order_id: str, db: Session = Depends(get_db)) -> dict:
+def get_order(
+    order_id: str,
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+    _: object = Depends(require_permission("view_projects")),
+) -> dict:
     stmt = (
         select(Order)
         .options(
@@ -1401,16 +1582,22 @@ def get_order(order_id: str, db: Session = Depends(get_db)) -> dict:
     item = db.execute(stmt).unique().scalar_one_or_none()
     if not item:
         raise not_found()
+    _ensure_same_tenant(item, current_user)
     return order_payload(item, include_customer=True, include_sites=True)
 
 
 @router.post("/orders", status_code=201)
 def create_order(
     payload: OrderPayload,
+    _: object = Depends(require_permission("manage_company")),
     db: Session = Depends(get_db),
     current_user=Depends(get_current_user),
 ) -> dict:
+    customer = db.get(Customer, payload.customerId)
+    ensure(customer is not None, "Kunde nicht gefunden.", 404)
+    _ensure_same_tenant(customer, current_user)
     item = Order(
+        tenant_id=_tenant_id(current_user),
         customer_id=payload.customerId,
         order_number=payload.orderNumber or None,
         title=payload.title.strip(),
@@ -1438,10 +1625,20 @@ def create_order(
 
 
 @router.put("/orders/{order_id}")
-def update_order(order_id: str, payload: OrderPayload, db: Session = Depends(get_db)) -> dict:
+def update_order(
+    order_id: str,
+    payload: OrderPayload,
+    _: object = Depends(require_permission("manage_company")),
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+) -> dict:
     item = db.get(Order, order_id)
     if not item:
         raise not_found()
+    _ensure_same_tenant(item, current_user)
+    customer = db.get(Customer, payload.customerId)
+    ensure(customer is not None, "Kunde nicht gefunden.", 404)
+    _ensure_same_tenant(customer, current_user)
     item.customer_id = payload.customerId
     item.order_number = payload.orderNumber or None
     item.title = payload.title.strip()
@@ -1451,6 +1648,15 @@ def update_order(order_id: str, payload: OrderPayload, db: Session = Depends(get
     item.end_date = as_datetime(payload.endDate)
     item.default_hourly_rate = decimal_or_none(payload.defaultHourlyRate)
     item.currency = payload.currency or "EUR"
+    record_audit(
+        db,
+        action="order.updated",
+        entity_type="Order",
+        entity_id=item.id,
+        actor_user_id=actor_id(current_user),
+        summary=f"Order updated: {item.title}",
+        details={"customerId": item.customer_id, "status": item.status},
+    )
     db.commit()
     db.refresh(item)
     return order_payload(item)
@@ -1461,10 +1667,12 @@ def delete_order(
     order_id: str,
     db: Session = Depends(get_db),
     current_user=Depends(get_current_user),
+    _: object = Depends(require_permission("manage_company")),
 ) -> dict:
     item = db.get(Order, order_id)
     if not item:
         raise not_found()
+    _ensure_same_tenant(item, current_user)
     try:
         record_audit(
             db,
@@ -1484,7 +1692,11 @@ def delete_order(
 
 
 @router.get("/sites")
-def list_sites(db: Session = Depends(get_db)) -> list[dict]:
+def list_sites(
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+    _: object = Depends(require_permission("view_projects")),
+) -> list[dict]:
     stmt = (
         select(Site)
         .options(
@@ -1494,12 +1706,20 @@ def list_sites(db: Session = Depends(get_db)) -> list[dict]:
         )
         .order_by(Site.created_at.desc())
     )
+    tenant_id = _tenant_id(current_user)
+    if tenant_id:
+        stmt = stmt.join(Order, Site.order_id == Order.id).where(Order.tenant_id == tenant_id)
     items = db.execute(stmt).unique().scalars().all()
     return [site_payload(item, include_order=True, include_assignments=True, include_workshops=True) for item in items]
 
 
 @router.get("/sites/{site_id}")
-def get_site(site_id: str, db: Session = Depends(get_db)) -> dict:
+def get_site(
+    site_id: str,
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+    _: object = Depends(require_permission("view_projects")),
+) -> dict:
     stmt = (
         select(Site)
         .options(
@@ -1512,11 +1732,18 @@ def get_site(site_id: str, db: Session = Depends(get_db)) -> dict:
     item = db.execute(stmt).unique().scalar_one_or_none()
     if not item:
         raise not_found()
+    _ensure_order_access(db, item.order_id, current_user)
     return site_payload(item, include_order=True, include_assignments=True, include_workshops=True)
 
 
 @router.post("/sites", status_code=201)
-def create_site(payload: SitePayload, db: Session = Depends(get_db)) -> dict:
+def create_site(
+    payload: SitePayload,
+    _: object = Depends(require_permission("manage_company")),
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+) -> dict:
+    _ensure_order_access(db, payload.orderId, current_user)
     item = Site(
         order_id=payload.orderId,
         site_name=payload.siteName.strip(),
@@ -1533,10 +1760,18 @@ def create_site(payload: SitePayload, db: Session = Depends(get_db)) -> dict:
 
 
 @router.put("/sites/{site_id}")
-def update_site(site_id: str, payload: SitePayload, db: Session = Depends(get_db)) -> dict:
+def update_site(
+    site_id: str,
+    payload: SitePayload,
+    _: object = Depends(require_permission("manage_company")),
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+) -> dict:
     item = db.get(Site, site_id)
     if not item:
         raise not_found()
+    _ensure_order_access(db, item.order_id, current_user)
+    _ensure_order_access(db, payload.orderId, current_user)
     item.order_id = payload.orderId
     item.site_name = payload.siteName.strip()
     item.street = payload.street
@@ -1550,12 +1785,24 @@ def update_site(site_id: str, payload: SitePayload, db: Session = Depends(get_db
 
 
 @router.get("/orders/{order_id}/tracking")
-def get_order_tracking(order_id: str, db: Session = Depends(get_db)) -> dict:
+def get_order_tracking(
+    order_id: str,
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+    _: object = Depends(require_permission("view_projects")),
+) -> dict:
+    _ensure_order_access(db, order_id, current_user)
     return _tracking_response(db, order_id)
 
 
 @router.post("/orders/{order_id}/tracking/baseline/suggest")
-def suggest_order_tracking_baseline(order_id: str, db: Session = Depends(get_db)) -> dict:
+def suggest_order_tracking_baseline(
+    order_id: str,
+    db: Session = Depends(get_db),
+    _: object = Depends(require_permission("update_tracking")),
+    current_user=Depends(get_current_user),
+) -> dict:
+    _ensure_order_access(db, order_id, current_user)
     order = db.execute(
         select(Order)
         .options(
@@ -1589,10 +1836,14 @@ def suggest_order_tracking_baseline(order_id: str, db: Session = Depends(get_db)
 
 @router.put("/orders/{order_id}/tracking/baseline/{site_id}")
 def update_order_site_tracking_baseline(
-    order_id: str, site_id: str, payload: ProjectSiteBaselinePayload, db: Session = Depends(get_db)
+    order_id: str,
+    site_id: str,
+    payload: ProjectSiteBaselinePayload,
+    db: Session = Depends(get_db),
+    _: object = Depends(require_permission("update_tracking")),
+    current_user=Depends(get_current_user),
 ) -> dict:
-    if not db.get(Order, order_id):
-        raise not_found()
+    _ensure_order_access(db, order_id, current_user)
     _ensure_site_belongs_to_order(db, order_id, site_id)
     planned_start = as_datetime(payload.plannedStartDate)
     planned_end = as_datetime(payload.plannedEndDate)
@@ -1607,14 +1858,28 @@ def update_order_site_tracking_baseline(
         source=payload.source,
         notes=payload.notes,
     )
+    record_audit(
+        db,
+        action="tracking.baseline.updated",
+        entity_type="ProjectSiteBaseline",
+        entity_id=site_id,
+        actor_user_id=actor_id(current_user),
+        summary="Tracking baseline updated",
+        details={"orderId": order_id, "siteId": site_id, "status": payload.baselineStatus},
+    )
     db.commit()
     return _tracking_response(db, order_id)
 
 
 @router.post("/orders/{order_id}/tracking/analyze")
-def analyze_order_tracking(order_id: str, locale: str = Query(default="en"), db: Session = Depends(get_db)) -> dict:
-    if not db.get(Order, order_id):
-        raise not_found()
+def analyze_order_tracking(
+    order_id: str,
+    locale: str = Query(default="en"),
+    db: Session = Depends(get_db),
+    _: object = Depends(require_permission("use_ai_monitoring")),
+    current_user=Depends(get_current_user),
+) -> dict:
+    _ensure_order_access(db, order_id, current_user)
     tracking = _tracking_response(db, order_id)
     analysis = analyze_tracking(tracking, locale=locale)
     warnings = list((tracking.get("dashboard") or {}).get("warnings") or [])
@@ -1635,9 +1900,10 @@ def list_order_monitoring_history(
     page: int = 1,
     pageSize: int = 20,
     db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+    _: object = Depends(require_permission("view_projects")),
 ) -> dict:
-    if not db.get(Order, order_id):
-        raise not_found()
+    _ensure_order_access(db, order_id, current_user)
     safe_page, safe_page_size = _page_params(page, pageSize)
     total = db.scalar(
         select(func.count()).select_from(ProjectMonitoringReport).where(ProjectMonitoringReport.order_id == order_id)
@@ -1660,9 +1926,10 @@ def list_order_monitoring_alerts(
     page: int = 1,
     pageSize: int = 50,
     db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+    _: object = Depends(require_permission("view_projects")),
 ) -> dict:
-    if not db.get(Order, order_id):
-        raise not_found()
+    _ensure_order_access(db, order_id, current_user)
     if syncCurrent:
         tracking = _tracking_response(db, order_id)
         _sync_monitoring_alerts(db, order_id, list((tracking.get("dashboard") or {}).get("warnings") or []))
@@ -1691,7 +1958,9 @@ def update_order_monitoring_alert(
     payload: ProjectMonitoringAlertUpdatePayload,
     db: Session = Depends(get_db),
     current_user=Depends(get_current_user),
+    _: object = Depends(require_permission("use_ai_monitoring")),
 ) -> dict:
+    _ensure_order_access(db, order_id, current_user)
     alert = db.get(ProjectMonitoringAlert, alert_id)
     if not alert or alert.order_id != order_id:
         raise not_found()
@@ -1700,7 +1969,7 @@ def update_order_monitoring_alert(
     alert.resolved_at = datetime.now(timezone.utc) if payload.status in {"resolved", "dismissed"} else None
     record_audit(
         db,
-        action="monitoring_alert.updated",
+        action="monitoring.alert.updated",
         entity_type="ProjectMonitoringAlert",
         entity_id=alert.id,
         actor_user_id=actor_id(current_user),
@@ -1731,10 +2000,10 @@ async def create_progress_update(
     photoCaption: str | None = Form(default=None),
     photos: list[UploadFile] | None = File(default=None),
     db: Session = Depends(get_db),
+    _: object = Depends(require_permission("update_tracking")),
+    current_user=Depends(get_current_user),
 ) -> dict:
-    order = db.get(Order, order_id)
-    if not order:
-        raise not_found()
+    order = _ensure_order_access(db, order_id, current_user)
     site_id = _normalize_optional_text(siteId)
     _ensure_site_belongs_to_order(db, order_id, site_id)
 
@@ -1782,6 +2051,15 @@ async def create_progress_update(
                 )
             )
 
+        record_audit(
+            db,
+            action="tracking.progress.created",
+            entity_type="ProjectProgressUpdate",
+            entity_id=update.id,
+            actor_user_id=actor_id(current_user),
+            summary=f"Progress update created: {update.title}",
+            details={"orderId": order.id, "siteId": update.site_id, "photoCount": len(upload_files), "status": update.status},
+        )
         db.commit()
     except Exception:
         db.rollback()
@@ -1798,8 +2076,14 @@ async def create_progress_update(
 
 @router.patch("/orders/{order_id}/progress-updates/{update_id}")
 def update_progress_update(
-    order_id: str, update_id: str, payload: ProjectProgressUpdatePayload, db: Session = Depends(get_db)
+    order_id: str,
+    update_id: str,
+    payload: ProjectProgressUpdatePayload,
+    db: Session = Depends(get_db),
+    _: object = Depends(require_permission("update_tracking")),
+    current_user=Depends(get_current_user),
 ) -> dict:
+    _ensure_order_access(db, order_id, current_user)
     update = db.get(ProjectProgressUpdate, update_id)
     if not update or update.order_id != order_id:
         raise not_found()
@@ -1818,12 +2102,28 @@ def update_progress_update(
         update.next_action = _normalize_optional_text(payload.nextAction)
     if payload.updateDate is not None:
         update.update_date = as_datetime(payload.updateDate) or update.update_date
+    record_audit(
+        db,
+        action="tracking.progress.updated",
+        entity_type="ProjectProgressUpdate",
+        entity_id=update.id,
+        actor_user_id=actor_id(current_user),
+        summary=f"Progress update changed: {update.title}",
+        details={"orderId": order_id, "siteId": update.site_id, "status": update.status},
+    )
     db.commit()
     return _tracking_response(db, order_id)
 
 
 @router.delete("/orders/{order_id}/progress-updates/{update_id}")
-def delete_progress_update(order_id: str, update_id: str, db: Session = Depends(get_db)) -> dict:
+def delete_progress_update(
+    order_id: str,
+    update_id: str,
+    db: Session = Depends(get_db),
+    _: object = Depends(require_permission("update_tracking")),
+    current_user=Depends(get_current_user),
+) -> dict:
+    _ensure_order_access(db, order_id, current_user)
     update = db.execute(
         select(ProjectProgressUpdate)
         .options(selectinload(ProjectProgressUpdate.photos))
@@ -1833,16 +2133,35 @@ def delete_progress_update(order_id: str, update_id: str, db: Session = Depends(
         raise not_found()
     for photo in update.photos:
         _delete_local_photo_file(photo)
+    record_audit(
+        db,
+        action="tracking.progress.deleted",
+        entity_type="ProjectProgressUpdate",
+        entity_id=update.id,
+        actor_user_id=actor_id(current_user),
+        summary=f"Progress update deleted: {update.title}",
+        details={"orderId": order_id, "siteId": update.site_id},
+    )
     db.delete(update)
     db.commit()
     return _tracking_response(db, order_id)
 
 
 @router.get("/progress-photos/{photo_id}")
-def get_progress_photo(photo_id: str, db: Session = Depends(get_db)) -> FileResponse:
-    photo = db.get(ProjectProgressPhoto, photo_id)
+def get_progress_photo(
+    photo_id: str,
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+    _: object = Depends(require_permission("view_projects")),
+) -> FileResponse:
+    photo = db.execute(
+        select(ProjectProgressPhoto)
+        .options(joinedload(ProjectProgressPhoto.update))
+        .where(ProjectProgressPhoto.id == photo_id)
+    ).scalar_one_or_none()
     if not photo:
         raise not_found()
+    _ensure_order_access(db, photo.update.order_id, current_user)
     path = Path(photo.storage_path)
     if not path.exists():
         raise not_found()
@@ -1850,9 +2169,14 @@ def get_progress_photo(photo_id: str, db: Session = Depends(get_db)) -> FileResp
 
 
 @router.post("/orders/{order_id}/tasks", status_code=201)
-def create_project_task(order_id: str, payload: ProjectTaskPayload, db: Session = Depends(get_db)) -> dict:
-    if not db.get(Order, order_id):
-        raise not_found()
+def create_project_task(
+    order_id: str,
+    payload: ProjectTaskPayload,
+    db: Session = Depends(get_db),
+    _: object = Depends(require_permission("update_tracking")),
+    current_user=Depends(get_current_user),
+) -> dict:
+    _ensure_order_access(db, order_id, current_user)
     _ensure_site_belongs_to_order(db, order_id, payload.siteId)
     ensure(bool(payload.taskName.strip()), "Aufgabe fehlt.")
     item = ProjectTask(
@@ -1868,12 +2192,30 @@ def create_project_task(order_id: str, payload: ProjectTaskPayload, db: Session 
         notes=_normalize_optional_text(payload.notes),
     )
     db.add(item)
+    db.flush()
+    record_audit(
+        db,
+        action="tracking.task.created",
+        entity_type="ProjectTask",
+        entity_id=item.id,
+        actor_user_id=actor_id(current_user),
+        summary=f"Tracking task created: {item.task_name}",
+        details={"orderId": order_id, "siteId": item.site_id, "status": item.status},
+    )
     db.commit()
     return _tracking_response(db, order_id)
 
 
 @router.patch("/orders/{order_id}/tasks/{task_id}")
-def update_project_task(order_id: str, task_id: str, payload: ProjectTaskPayload, db: Session = Depends(get_db)) -> dict:
+def update_project_task(
+    order_id: str,
+    task_id: str,
+    payload: ProjectTaskPayload,
+    db: Session = Depends(get_db),
+    _: object = Depends(require_permission("update_tracking")),
+    current_user=Depends(get_current_user),
+) -> dict:
+    _ensure_order_access(db, order_id, current_user)
     item = db.get(ProjectTask, task_id)
     if not item or item.order_id != order_id:
         raise not_found()
@@ -1888,24 +2230,54 @@ def update_project_task(order_id: str, task_id: str, payload: ProjectTaskPayload
     item.responsible_name = _normalize_optional_text(payload.responsibleName)
     item.due_date = as_datetime(payload.dueDate)
     item.notes = _normalize_optional_text(payload.notes)
+    record_audit(
+        db,
+        action="tracking.task.updated",
+        entity_type="ProjectTask",
+        entity_id=item.id,
+        actor_user_id=actor_id(current_user),
+        summary=f"Tracking task updated: {item.task_name}",
+        details={"orderId": order_id, "siteId": item.site_id, "status": item.status},
+    )
     db.commit()
     return _tracking_response(db, order_id)
 
 
 @router.delete("/orders/{order_id}/tasks/{task_id}")
-def delete_project_task(order_id: str, task_id: str, db: Session = Depends(get_db)) -> dict:
+def delete_project_task(
+    order_id: str,
+    task_id: str,
+    db: Session = Depends(get_db),
+    _: object = Depends(require_permission("update_tracking")),
+    current_user=Depends(get_current_user),
+) -> dict:
+    _ensure_order_access(db, order_id, current_user)
     item = db.get(ProjectTask, task_id)
     if not item or item.order_id != order_id:
         raise not_found()
+    record_audit(
+        db,
+        action="tracking.task.deleted",
+        entity_type="ProjectTask",
+        entity_id=item.id,
+        actor_user_id=actor_id(current_user),
+        summary=f"Tracking task deleted: {item.task_name}",
+        details={"orderId": order_id, "siteId": item.site_id, "status": item.status},
+    )
     db.delete(item)
     db.commit()
     return _tracking_response(db, order_id)
 
 
 @router.post("/orders/{order_id}/issues", status_code=201)
-def create_project_issue(order_id: str, payload: ProjectIssuePayload, db: Session = Depends(get_db)) -> dict:
-    if not db.get(Order, order_id):
-        raise not_found()
+def create_project_issue(
+    order_id: str,
+    payload: ProjectIssuePayload,
+    db: Session = Depends(get_db),
+    _: object = Depends(require_permission("update_tracking")),
+    current_user=Depends(get_current_user),
+) -> dict:
+    _ensure_order_access(db, order_id, current_user)
     _ensure_site_belongs_to_order(db, order_id, payload.siteId)
     ensure(bool(payload.title.strip()), "Problem-Titel fehlt.")
     item = ProjectIssue(
@@ -1920,14 +2292,30 @@ def create_project_issue(order_id: str, payload: ProjectIssuePayload, db: Sessio
         resolution_note=_normalize_optional_text(payload.resolutionNote),
     )
     db.add(item)
+    db.flush()
+    record_audit(
+        db,
+        action="tracking.issue.created",
+        entity_type="ProjectIssue",
+        entity_id=item.id,
+        actor_user_id=actor_id(current_user),
+        summary=f"Tracking issue created: {item.title}",
+        details={"orderId": order_id, "siteId": item.site_id, "severity": item.severity, "status": item.status},
+    )
     db.commit()
     return _tracking_response(db, order_id)
 
 
 @router.patch("/orders/{order_id}/issues/{issue_id}")
 def update_project_issue(
-    order_id: str, issue_id: str, payload: ProjectIssuePayload, db: Session = Depends(get_db)
+    order_id: str,
+    issue_id: str,
+    payload: ProjectIssuePayload,
+    db: Session = Depends(get_db),
+    _: object = Depends(require_permission("update_tracking")),
+    current_user=Depends(get_current_user),
 ) -> dict:
+    _ensure_order_access(db, order_id, current_user)
     item = db.get(ProjectIssue, issue_id)
     if not item or item.order_id != order_id:
         raise not_found()
@@ -1941,24 +2329,54 @@ def update_project_issue(
     item.responsible_type = payload.responsibleType or "not_assigned"
     item.responsible_name = _normalize_optional_text(payload.responsibleName)
     item.resolution_note = _normalize_optional_text(payload.resolutionNote)
+    record_audit(
+        db,
+        action="tracking.issue.updated",
+        entity_type="ProjectIssue",
+        entity_id=item.id,
+        actor_user_id=actor_id(current_user),
+        summary=f"Tracking issue updated: {item.title}",
+        details={"orderId": order_id, "siteId": item.site_id, "severity": item.severity, "status": item.status},
+    )
     db.commit()
     return _tracking_response(db, order_id)
 
 
 @router.delete("/orders/{order_id}/issues/{issue_id}")
-def delete_project_issue(order_id: str, issue_id: str, db: Session = Depends(get_db)) -> dict:
+def delete_project_issue(
+    order_id: str,
+    issue_id: str,
+    db: Session = Depends(get_db),
+    _: object = Depends(require_permission("update_tracking")),
+    current_user=Depends(get_current_user),
+) -> dict:
+    _ensure_order_access(db, order_id, current_user)
     item = db.get(ProjectIssue, issue_id)
     if not item or item.order_id != order_id:
         raise not_found()
+    record_audit(
+        db,
+        action="tracking.issue.deleted",
+        entity_type="ProjectIssue",
+        entity_id=item.id,
+        actor_user_id=actor_id(current_user),
+        summary=f"Tracking issue deleted: {item.title}",
+        details={"orderId": order_id, "siteId": item.site_id, "severity": item.severity, "status": item.status},
+    )
     db.delete(item)
     db.commit()
     return _tracking_response(db, order_id)
 
 
 @router.post("/orders/{order_id}/materials", status_code=201)
-def create_project_material(order_id: str, payload: ProjectMaterialLogPayload, db: Session = Depends(get_db)) -> dict:
-    if not db.get(Order, order_id):
-        raise not_found()
+def create_project_material(
+    order_id: str,
+    payload: ProjectMaterialLogPayload,
+    db: Session = Depends(get_db),
+    _: object = Depends(require_permission("update_tracking")),
+    current_user=Depends(get_current_user),
+) -> dict:
+    _ensure_order_access(db, order_id, current_user)
     _ensure_site_belongs_to_order(db, order_id, payload.siteId)
     ensure(bool(payload.materialName.strip()), "Materialname fehlt.")
     item = ProjectMaterialLog(
@@ -1970,14 +2388,30 @@ def create_project_material(order_id: str, payload: ProjectMaterialLogPayload, d
         notes=_normalize_optional_text(payload.notes),
     )
     db.add(item)
+    db.flush()
+    record_audit(
+        db,
+        action="tracking.material.created",
+        entity_type="ProjectMaterialLog",
+        entity_id=item.id,
+        actor_user_id=actor_id(current_user),
+        summary=f"Material log created: {item.material_name}",
+        details={"orderId": order_id, "siteId": item.site_id, "status": item.status},
+    )
     db.commit()
     return _tracking_response(db, order_id)
 
 
 @router.patch("/orders/{order_id}/materials/{material_id}")
 def update_project_material(
-    order_id: str, material_id: str, payload: ProjectMaterialLogPayload, db: Session = Depends(get_db)
+    order_id: str,
+    material_id: str,
+    payload: ProjectMaterialLogPayload,
+    db: Session = Depends(get_db),
+    _: object = Depends(require_permission("update_tracking")),
+    current_user=Depends(get_current_user),
 ) -> dict:
+    _ensure_order_access(db, order_id, current_user)
     item = db.get(ProjectMaterialLog, material_id)
     if not item or item.order_id != order_id:
         raise not_found()
@@ -1988,15 +2422,40 @@ def update_project_material(
     item.quantity = _normalize_optional_text(payload.quantity)
     item.status = payload.status or "needed"
     item.notes = _normalize_optional_text(payload.notes)
+    record_audit(
+        db,
+        action="tracking.material.updated",
+        entity_type="ProjectMaterialLog",
+        entity_id=item.id,
+        actor_user_id=actor_id(current_user),
+        summary=f"Material log updated: {item.material_name}",
+        details={"orderId": order_id, "siteId": item.site_id, "status": item.status},
+    )
     db.commit()
     return _tracking_response(db, order_id)
 
 
 @router.delete("/orders/{order_id}/materials/{material_id}")
-def delete_project_material(order_id: str, material_id: str, db: Session = Depends(get_db)) -> dict:
+def delete_project_material(
+    order_id: str,
+    material_id: str,
+    db: Session = Depends(get_db),
+    _: object = Depends(require_permission("update_tracking")),
+    current_user=Depends(get_current_user),
+) -> dict:
+    _ensure_order_access(db, order_id, current_user)
     item = db.get(ProjectMaterialLog, material_id)
     if not item or item.order_id != order_id:
         raise not_found()
+    record_audit(
+        db,
+        action="tracking.material.deleted",
+        entity_type="ProjectMaterialLog",
+        entity_id=item.id,
+        actor_user_id=actor_id(current_user),
+        summary=f"Material log deleted: {item.material_name}",
+        details={"orderId": order_id, "siteId": item.site_id, "status": item.status},
+    )
     db.delete(item)
     db.commit()
     return _tracking_response(db, order_id)
@@ -2004,10 +2463,16 @@ def delete_project_material(order_id: str, material_id: str, db: Session = Depen
 
 
 @router.delete("/sites/{site_id}")
-def delete_site(site_id: str, db: Session = Depends(get_db)) -> dict:
+def delete_site(
+    site_id: str,
+    _: object = Depends(require_permission("manage_company")),
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+) -> dict:
     item = db.get(Site, site_id)
     if not item:
         raise not_found()
+    _ensure_order_access(db, item.order_id, current_user)
     try:
         db.delete(item)
         db.commit()
@@ -2018,20 +2483,37 @@ def delete_site(site_id: str, db: Session = Depends(get_db)) -> dict:
 
 
 @router.get("/assignments")
-def list_assignments(siteId: str | None = Query(default=None), db: Session = Depends(get_db)) -> list[dict]:
+def list_assignments(
+    siteId: str | None = Query(default=None),
+    _: object = Depends(require_permission("manage_users")),
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+) -> list[dict]:
     stmt = (
         select(EmployeeAssignment)
         .options(joinedload(EmployeeAssignment.employee), joinedload(EmployeeAssignment.site))
         .order_by(EmployeeAssignment.created_at.desc())
     )
     if siteId:
+        _ensure_site_access(db, siteId, current_user)
         stmt = stmt.where(EmployeeAssignment.site_id == siteId)
+    else:
+        tenant_id = _tenant_id(current_user)
+        if tenant_id:
+            stmt = stmt.join(Site, EmployeeAssignment.site_id == Site.id).join(Order, Site.order_id == Order.id).where(Order.tenant_id == tenant_id)
     items = db.scalars(stmt).all()
     return [assignment_payload(item, include_employee=True, include_site=True) for item in items]
 
 
 @router.post("/assignments", status_code=201)
-def create_assignment(payload: AssignmentPayload, db: Session = Depends(get_db)) -> dict:
+def create_assignment(
+    payload: AssignmentPayload,
+    _: object = Depends(require_permission("manage_users")),
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+) -> dict:
+    _ensure_site_access(db, payload.siteId, current_user)
+    _ensure_employee_access(db, payload.employeeId, current_user)
     item = EmployeeAssignment(
         employee_id=payload.employeeId,
         site_id=payload.siteId,
@@ -2055,10 +2537,17 @@ def create_assignment(payload: AssignmentPayload, db: Session = Depends(get_db))
 
 
 @router.put("/assignments/{assignment_id}")
-def update_assignment(assignment_id: str, payload: AssignmentUpdatePayload, db: Session = Depends(get_db)) -> dict:
+def update_assignment(
+    assignment_id: str,
+    payload: AssignmentUpdatePayload,
+    _: object = Depends(require_permission("manage_users")),
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+) -> dict:
     item = db.get(EmployeeAssignment, assignment_id)
     if not item:
         raise not_found()
+    _ensure_site_access(db, item.site_id, current_user)
     item.start_date = as_datetime(payload.startDate)
     item.end_date = as_datetime(payload.endDate)
     item.notes = payload.notes
@@ -2068,10 +2557,16 @@ def update_assignment(assignment_id: str, payload: AssignmentUpdatePayload, db: 
 
 
 @router.delete("/assignments/{assignment_id}")
-def delete_assignment(assignment_id: str, db: Session = Depends(get_db)) -> dict:
+def delete_assignment(
+    assignment_id: str,
+    _: object = Depends(require_permission("manage_users")),
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+) -> dict:
     item = db.get(EmployeeAssignment, assignment_id)
     if not item:
         raise not_found()
+    _ensure_site_access(db, item.site_id, current_user)
     try:
         db.delete(item)
         db.commit()
@@ -2082,7 +2577,11 @@ def delete_assignment(assignment_id: str, db: Session = Depends(get_db)) -> dict
 
 
 @router.get("/work-entries")
-def list_work_entries(db: Session = Depends(get_db)) -> list[dict]:
+def list_work_entries(
+    _: object = Depends(require_permission("manage_users")),
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+) -> list[dict]:
     stmt = (
         select(WorkEntry)
         .options(
@@ -2093,12 +2592,20 @@ def list_work_entries(db: Session = Depends(get_db)) -> list[dict]:
         )
         .order_by(WorkEntry.work_date.desc())
     )
+    tenant_id = _tenant_id(current_user)
+    if tenant_id:
+        stmt = stmt.join(Order, WorkEntry.order_id == Order.id).where(Order.tenant_id == tenant_id)
     items = db.execute(stmt).unique().scalars().all()
     return [work_entry_payload(item) for item in items]
 
 
 @router.get("/work-entries/{work_entry_id}")
-def get_work_entry(work_entry_id: str, db: Session = Depends(get_db)) -> dict:
+def get_work_entry(
+    work_entry_id: str,
+    _: object = Depends(require_permission("manage_users")),
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+) -> dict:
     stmt = (
         select(WorkEntry)
         .options(
@@ -2112,15 +2619,21 @@ def get_work_entry(work_entry_id: str, db: Session = Depends(get_db)) -> dict:
     item = db.execute(stmt).unique().scalar_one_or_none()
     if not item:
         raise not_found()
+    _ensure_order_access(db, item.order_id, current_user)
     return work_entry_payload(item)
 
 
 @router.post("/work-entries", status_code=201)
-def create_work_entry(payload: WorkEntryPayload, db: Session = Depends(get_db)) -> dict:
+def create_work_entry(
+    payload: WorkEntryPayload,
+    _: object = Depends(require_permission("manage_users")),
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+) -> dict:
     work_date = as_date_only(payload.workDate)
-    site = db.get(Site, payload.siteId)
-    order = db.get(Order, payload.orderId)
-    ensure(site is not None and order is not None, "Ungueltige Auswahl (Auftrag/Baustelle).")
+    order = _ensure_order_access(db, payload.orderId, current_user)
+    site = _ensure_site_access(db, payload.siteId, current_user)
+    _ensure_employee_access(db, payload.employeeId, current_user)
     ensure(site.order_id == payload.orderId, "Die Baustelle gehoert nicht zum Auftrag.")
 
     day_type = normalize_day_type(payload.dayType, payload.isSick)
@@ -2178,19 +2691,26 @@ def create_work_entry(payload: WorkEntryPayload, db: Session = Depends(get_db)) 
 
 
 @router.put("/work-entries/{work_entry_id}")
-def update_work_entry(work_entry_id: str, payload: WorkEntryPayload, db: Session = Depends(get_db)) -> dict:
+def update_work_entry(
+    work_entry_id: str,
+    payload: WorkEntryPayload,
+    _: object = Depends(require_permission("manage_users")),
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+) -> dict:
+    item = db.get(WorkEntry, work_entry_id)
+    if not item:
+        raise not_found()
+    _ensure_order_access(db, item.order_id, current_user)
+
     check = _can_modify_work_entry(db, work_entry_id)
     if not check["ok"]:
         raise german_error(check["reason"], 409)
 
-    item = db.get(WorkEntry, work_entry_id)
-    if not item:
-        raise not_found()
-
     work_date = as_date_only(payload.workDate)
-    site = db.get(Site, payload.siteId)
-    order = db.get(Order, payload.orderId)
-    ensure(site is not None and order is not None, "Ungueltige Auswahl (Auftrag/Baustelle).")
+    order = _ensure_order_access(db, payload.orderId, current_user)
+    site = _ensure_site_access(db, payload.siteId, current_user)
+    _ensure_employee_access(db, payload.employeeId, current_user)
     ensure(site.order_id == payload.orderId, "Die Baustelle gehoert nicht zum Auftrag.")
 
     day_type = normalize_day_type(payload.dayType, payload.isSick)
@@ -2264,14 +2784,20 @@ def update_work_entry(work_entry_id: str, payload: WorkEntryPayload, db: Session
 
 
 @router.delete("/work-entries/{work_entry_id}")
-def delete_work_entry(work_entry_id: str, db: Session = Depends(get_db)) -> dict:
-    check = _can_modify_work_entry(db, work_entry_id)
-    if not check["ok"]:
-        raise german_error(check["reason"], 409)
-
+def delete_work_entry(
+    work_entry_id: str,
+    _: object = Depends(require_permission("manage_users")),
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+) -> dict:
     item = db.get(WorkEntry, work_entry_id)
     if not item:
         raise not_found()
+    _ensure_order_access(db, item.order_id, current_user)
+
+    check = _can_modify_work_entry(db, work_entry_id)
+    if not check["ok"]:
+        raise german_error(check["reason"], 409)
 
     try:
         invoice_line_id = check.get("invoiceLineId")
@@ -2300,7 +2826,9 @@ def report_hours(
     groupBy: str = Query(default="employee"),
     from_date: str | None = Query(default=None, alias="from"),
     to_date: str | None = Query(default=None, alias="to"),
+    _: object = Depends(require_permission("manage_company")),
     db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
 ) -> dict:
     ensure(groupBy in {"employee", "site", "order"}, "Ungueltiges groupBy.")
 
@@ -2313,6 +2841,9 @@ def report_hours(
         .options(joinedload(WorkEntry.employee), joinedload(WorkEntry.site), joinedload(WorkEntry.order))
         .order_by(WorkEntry.work_date.desc())
     )
+    tenant_id = _tenant_id(current_user)
+    if tenant_id:
+        stmt = stmt.join(Order, WorkEntry.order_id == Order.id).where(Order.tenant_id == tenant_id)
     if from_dt:
         stmt = stmt.where(WorkEntry.work_date >= from_dt)
     if to_dt:
@@ -2337,7 +2868,11 @@ def report_hours(
 
 
 @router.get("/settings/invoice-sequence")
-def get_invoice_sequence(year: int | None = Query(default=None), db: Session = Depends(get_db)) -> dict:
+def get_invoice_sequence(
+    year: int | None = Query(default=None),
+    _: object = Depends(require_permission("manage_invoices")),
+    db: Session = Depends(get_db),
+) -> dict:
     value = parse_year(year)
     state = get_invoice_sequence_state(db, value)
     state["effectiveInvoiceNumber"] = f"RE {str(value % 100).zfill(2)}-{str(int(state['effectiveNextSeq'])).zfill(4)}"
@@ -2345,7 +2880,11 @@ def get_invoice_sequence(year: int | None = Query(default=None), db: Session = D
 
 
 @router.put("/settings/invoice-sequence")
-def update_invoice_sequence(payload: InvoiceSequenceUpdatePayload, db: Session = Depends(get_db)) -> dict:
+def update_invoice_sequence(
+    payload: InvoiceSequenceUpdatePayload,
+    _: object = Depends(require_permission("manage_invoices")),
+    db: Session = Depends(get_db),
+) -> dict:
     year = parse_year(payload.year)
     raw = parse_seq(payload.nextSeq)
     state_before = get_invoice_sequence_state(db, year)
@@ -2366,12 +2905,24 @@ def update_invoice_sequence(payload: InvoiceSequenceUpdatePayload, db: Session =
 
 
 @router.get("/timesheets")
-def get_timesheet(employeeId: str, month: int, year: int, db: Session = Depends(get_db)) -> dict:
+def get_timesheet(
+    employeeId: str,
+    month: int,
+    year: int,
+    _: object = Depends(require_permission("manage_users")),
+    db: Session = Depends(get_db),
+) -> dict:
     return compute_timesheet_data(db, employeeId, year, month)
 
 
 @router.get("/timesheets/pdf")
-def timesheet_pdf(employeeId: str, month: int, year: int, db: Session = Depends(get_db)) -> Response:
+def timesheet_pdf(
+    employeeId: str,
+    month: int,
+    year: int,
+    _: object = Depends(require_permission("manage_users")),
+    db: Session = Depends(get_db),
+) -> Response:
     data = compute_timesheet_data(db, employeeId, year, month)
     payload = build_timesheet_pdf(data)
     filename = f"stundenzettel-{data['employee']['lastName']}-{year}-{str(month).zfill(2)}.pdf"
@@ -2383,7 +2934,13 @@ def timesheet_pdf(employeeId: str, month: int, year: int, db: Session = Depends(
 
 
 @router.get("/timesheets/word")
-def timesheet_word(employeeId: str, month: int, year: int, db: Session = Depends(get_db)) -> Response:
+def timesheet_word(
+    employeeId: str,
+    month: int,
+    year: int,
+    _: object = Depends(require_permission("manage_users")),
+    db: Session = Depends(get_db),
+) -> Response:
     data = compute_timesheet_data(db, employeeId, year, month)
     payload = build_timesheet_docx(data)
     filename = f"stundenzettel-{data['employee']['lastName']}-{year}-{str(month).zfill(2)}.docx"
@@ -2400,6 +2957,7 @@ def list_payments(
     order_id: str | None = Query(default=None, alias="orderId"),
     invoice_id: str | None = Query(default=None, alias="invoiceId"),
     proposal_id: str | None = Query(default=None, alias="proposalId"),
+    _: object = Depends(require_permission("manage_invoices")),
     db: Session = Depends(get_db),
 ) -> list[dict]:
     stmt = select(PaymentRecord).order_by(PaymentRecord.created_at.desc())
@@ -2415,7 +2973,11 @@ def list_payments(
 
 
 @router.post("/payments", status_code=201)
-def create_payment(payload: PaymentRecordPayload, db: Session = Depends(get_db)) -> dict:
+def create_payment(
+    payload: PaymentRecordPayload,
+    _: object = Depends(require_permission("manage_invoices")),
+    db: Session = Depends(get_db),
+) -> dict:
     item = PaymentRecord()
     _apply_payment_payload(item, payload)
     db.add(item)
@@ -2425,7 +2987,12 @@ def create_payment(payload: PaymentRecordPayload, db: Session = Depends(get_db))
 
 
 @router.put("/payments/{payment_id}")
-def update_payment(payment_id: str, payload: PaymentRecordPayload, db: Session = Depends(get_db)) -> dict:
+def update_payment(
+    payment_id: str,
+    payload: PaymentRecordPayload,
+    _: object = Depends(require_permission("manage_invoices")),
+    db: Session = Depends(get_db),
+) -> dict:
     item = db.get(PaymentRecord, payment_id)
     if not item:
         raise not_found()
@@ -2436,7 +3003,7 @@ def update_payment(payment_id: str, payload: PaymentRecordPayload, db: Session =
 
 
 @router.delete("/payments/{payment_id}")
-def delete_payment(payment_id: str, db: Session = Depends(get_db)) -> dict:
+def delete_payment(payment_id: str, _: object = Depends(require_permission("manage_invoices")), db: Session = Depends(get_db)) -> dict:
     item = db.get(PaymentRecord, payment_id)
     if not item:
         raise not_found()

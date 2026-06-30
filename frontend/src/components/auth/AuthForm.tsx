@@ -1,12 +1,14 @@
 'use client';
 
 import { zodResolver } from '@hookform/resolvers/zod';
+import Link from 'next/link';
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { useForm, type Resolver } from 'react-hook-form';
 import { z } from 'zod';
 import { useI18n } from '../../lib/i18n';
 import { apiJson } from '../../lib/api';
+import { dashboardPathForUser } from '../../lib/access';
 
 const passwordPattern = /(?=.*\d)(?=.*[!@#$%^&*()_+\-=[\]{};':"\\|,.<>/?]).+/;
 const phonePattern = /^\+?[1-9]\d{7,14}$/;
@@ -28,6 +30,11 @@ type AuthResponse = {
     id: string;
     email: string;
     phone?: string | null;
+    tenantId?: string | null;
+    accountLevel?: string;
+    tenantName?: string | null;
+    role?: string | null;
+    permissions?: string[];
     companyProfileComplete?: boolean;
   };
 };
@@ -75,6 +82,11 @@ export function AuthForm({ mode }: AuthFormProps) {
   });
 
   const phoneField = register('phone');
+  const demoAccounts = [
+    { label: 'OMRAN dashboard', email: 'platform@omran.local', password: 'OmranAdmin1!' },
+    { label: 'Company manager', email: 'manager@demo.omran.local', password: 'CompanyManager1!' },
+    { label: 'Company user', email: 'user@demo.omran.local', password: 'CompanyUser1!' },
+  ];
 
   const onSubmit = async (data: AuthFormValues) => {
     setApiError('');
@@ -96,7 +108,7 @@ export function AuthForm({ mode }: AuthFormProps) {
       window.dispatchEvent(new Event('omran-auth-changed'));
       const message = mode === 'signup' ? msgs.authPage.validation.successSignup : msgs.authPage.validation.successLogin;
       setStatus(message);
-      router.push(response.user.companyProfileComplete ? '/' : '/setup');
+      router.push(dashboardPathForUser(response.user));
     } catch (error) {
       setApiError(error instanceof Error ? error.message : msgs.authPage.validation.genericError || 'Authentication failed.');
     }
@@ -107,6 +119,22 @@ export function AuthForm({ mode }: AuthFormProps) {
       <div className="auth-hero">
         <h2>{mode === 'login' ? msgs.authPage.loginTitle : msgs.authPage.signupTitle}</h2>
       </div>
+
+      {mode === 'login' ? (
+        <div className="auth-demo-access" aria-label="SaaS demo accounts">
+          <Link href="/viewer-dashboard" className="auth-viewer-link">
+            <strong>Guest viewer mode</strong>
+            <span>Explore a limited read-only preview without registration</span>
+          </Link>
+          {demoAccounts.map((account) => (
+            <div key={account.email}>
+              <strong>{account.label}</strong>
+              <span>{account.email}</span>
+              <code>{account.password}</code>
+            </div>
+          ))}
+        </div>
+      ) : null}
 
       <form className="auth-form" onSubmit={handleSubmit(onSubmit)} noValidate>
           <div className="auth-field">

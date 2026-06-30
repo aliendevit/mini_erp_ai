@@ -17,6 +17,11 @@ class AuthLoginPayload(BaseModel):
     password: str
 
 
+class AuthChangePasswordPayload(BaseModel):
+    currentPassword: str
+    newPassword: str
+
+
 class CompanyProfilePayload(BaseModel):
     companyName: str
     legalName: str | None = None
@@ -42,6 +47,11 @@ class AuthUserResponse(BaseModel):
     id: str
     email: str
     phone: str | None = None
+    tenantId: str | None = None
+    accountLevel: str = "company_manager"
+    tenantName: str | None = None
+    role: str = "company_manager"
+    permissions: list[str] = Field(default_factory=list)
     createdAt: datetime | None = None
     lastLoginAt: datetime | None = None
     companyProfileComplete: bool = False
@@ -50,6 +60,99 @@ class AuthUserResponse(BaseModel):
 class AuthResponse(BaseModel):
     token: str
     user: AuthUserResponse
+
+
+class AccountControlFeatureResponse(BaseModel):
+    key: str
+    title: str
+    description: str
+    permission: str
+    enabled: bool
+
+
+class AccountControlUserResponse(BaseModel):
+    id: str
+    email: str
+    phone: str | None = None
+    accountLevel: str
+    role: str
+    tenantName: str | None = None
+    permissions: list[str] = Field(default_factory=list)
+    aiFeatures: list[AccountControlFeatureResponse] = Field(default_factory=list)
+    isActive: bool = True
+    lastLoginAt: datetime | None = None
+    createdAt: datetime | None = None
+
+
+class AccountControlResponse(BaseModel):
+    currentUser: AccountControlUserResponse
+    companyProfile: CompanyProfileResponse | None = None
+    companyUsers: list[AccountControlUserResponse] = Field(default_factory=list)
+    canManageUsers: bool = False
+    userLimit: int | None = None
+    userUsed: int = 0
+
+
+class AccountControlPermissionsPayload(BaseModel):
+    permissions: list[str] = Field(default_factory=list)
+
+
+class ManagerCreateUserPayload(BaseModel):
+    email: str
+    password: str
+    phone: str | None = None
+    accountLevel: Literal["company_user", "company_viewer"] = "company_user"
+
+
+class PlatformCreateCompanyPayload(BaseModel):
+    companyName: str
+    managerEmail: str | None = None
+    managerPassword: str | None = None
+    contactEmail: str | None = None
+    planName: str = "AI Business"
+    status: Literal["active", "trial", "suspended"] = "active"
+    userLimit: int = Field(default=2, ge=0, le=500)
+    subscriptionAmount: float | None = Field(default=None, ge=0)
+
+
+class PlatformCreateCompanyResponse(BaseModel):
+    tenantId: str
+    companyName: str
+    userLimit: int
+    manager: AuthUserResponse
+    managerEmail: str
+    managerPassword: str
+
+
+class PlatformResetManagerPasswordPayload(BaseModel):
+    password: str | None = None
+
+
+class PlatformResetManagerPasswordResponse(BaseModel):
+    tenantId: str
+    companyName: str
+    managerEmail: str
+    managerPassword: str
+
+
+class PlatformSaasInvoicePayload(BaseModel):
+    tenantId: str
+    amount: float = Field(ge=0)
+    currency: str = "EUR"
+    periodLabel: str | None = None
+    issueDate: datetime | date | None = None
+    dueDate: datetime | date | None = None
+    status: Literal["draft", "sent", "paid", "canceled"] = "sent"
+    notes: str | None = None
+
+
+class PlatformSaasPaymentPayload(BaseModel):
+    amount: float = Field(ge=0)
+    currency: str = "EUR"
+    paidDate: datetime | date | None = None
+    method: str | None = None
+    reference: str | None = None
+    notes: str | None = None
 
 
 class CustomerPayload(BaseModel):
@@ -240,8 +343,9 @@ class ProjectMonitoringAlertUpdatePayload(BaseModel):
 
 
 class InvoiceUpdatePayload(BaseModel):
-    status: Literal["draft", "final", "sent", "paid", "canceled"] | None = None
+    status: Literal["draft", "final", "sent", "partial_paid", "paid", "canceled"] | None = None
     issueDate: datetime | date | None = None
+    dueDate: datetime | date | None = None
     notes: str | None = None
     pauschalAmount: float | None = None
 

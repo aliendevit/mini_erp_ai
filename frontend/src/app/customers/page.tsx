@@ -5,6 +5,7 @@ import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 
 import { useI18n } from '../../lib/i18n';
+import { appConfirm } from '../../lib/dialog';
 import { apiGet, apiJson } from '../../lib/api';
 import {
   CustomerFormData,
@@ -150,7 +151,7 @@ export default function CustomersPage() {
   }
 
   async function del(id: string) {
-    if (!confirm(m.common.deleteConfirm)) return;
+    if (!(await appConfirm(m.common.deleteConfirm))) return;
     try {
       await apiJson(`/customers/${id}`, 'DELETE');
       await load();

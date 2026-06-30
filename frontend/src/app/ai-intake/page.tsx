@@ -7,6 +7,7 @@ import { API_BASE, apiForm, apiGet, apiJson, authHeaders } from '../../lib/api';
 import { type BrowserSpeechRecognition } from '../../lib/browser-speech';
 import { type NativeAudioRecordingSession, isNativeAudioRecordingSupported, startNativeAudioRecording } from '../../lib/native-audio-recorder';
 import { useI18n } from '../../lib/i18n';
+import { appConfirm } from '../../lib/dialog';
 import { type WavRecordingSession, isWavRecordingSupported, startMonoWavRecording, transcodeBlobToMonoWav } from '../../lib/wav-recorder';
 import { ListPager } from '../ui/ListPager';
 
@@ -260,10 +261,63 @@ type RagSource = {
   id: string;
   proposalId?: string | null;
   orderId?: string | null;
+  customerId?: string | null;
+  siteId?: string | null;
   sourceType: string;
+  sourceEntityType?: string | null;
+  sourceEntityId?: string | null;
+  documentType?: string | null;
   title?: string | null;
+  originalFileName?: string | null;
+  mimeType?: string | null;
+  language?: string | null;
   ingestionStatus: string;
+  extractionMethod?: string | null;
+  extractorVersion?: string | null;
+  metadata?: Record<string, unknown>;
+  createdByUserId?: string | null;
   createdAt?: string | null;
+  updatedAt?: string | null;
+};
+
+type RagChunk = {
+  id: string;
+  sourceId: string;
+  sourceType: string;
+  chunkType: string;
+  trustLevel: string;
+  text: string;
+  chunkIndex: number;
+  tokenCount?: number | null;
+  language?: string | null;
+  metadata?: Record<string, unknown>;
+  layout?: Record<string, unknown>;
+  headingPath?: string[];
+  embeddingModel?: string | null;
+  embeddingDim?: number | null;
+  hasEmbedding: boolean;
+  createdAt?: string | null;
+};
+
+type RagJob = {
+  id: string;
+  sourceId: string;
+  status: string;
+  stage?: string | null;
+  errorMessage?: string | null;
+  startedAt?: string | null;
+  finishedAt?: string | null;
+  createdAt?: string | null;
+  updatedAt?: string | null;
+};
+
+type RagSourceDetail = RagSource & {
+  chunks: RagChunk[];
+  jobs: RagJob[];
+};
+
+type RagQueryItem = RagChunk & {
+  score: number;
 };
 
 const SELECTED_INTAKE_STORAGE_KEY = 'ai_intake_selected_id';
@@ -312,7 +366,9 @@ type IconName =
   | 'wrench'
   | 'check'
   | 'info'
-  | 'bill';
+  | 'bill'
+  | 'refresh'
+  | 'search';
 
 const ICON_PATHS: Record<IconName, string[]> = {
   plus: ['M12 5v14', 'M5 12h14'],
@@ -328,6 +384,8 @@ const ICON_PATHS: Record<IconName, string[]> = {
   check: ['M20 6 9 17l-5-5'],
   info: ['M12 22a10 10 0 1 0 0-20 10 10 0 0 0 0 20Z', 'M12 16v-4', 'M12 8h.01'],
   bill: ['M6 2h12v20l-3-2-3 2-3-2-3 2V2Z', 'M9 7h6', 'M9 11h6', 'M9 15h4'],
+  refresh: ['M21 12a9 9 0 0 1-15.5 6.2L3 15', 'M3 21v-6h6', 'M3 12A9 9 0 0 1 18.5 5.8L21 9', 'M21 3v6h-6'],
+  search: ['M21 21l-4.3-4.3', 'M10.8 18a7.2 7.2 0 1 0 0-14.4 7.2 7.2 0 0 0 0 14.4Z'],
 };
 
 function Icon({ name }: { name: IconName }) {
@@ -594,6 +652,28 @@ function extraLabels(locale: string) {
       ragCaptured: "RAG memory updated.",
       ragFailed: "RAG update failed.",
       ragNoSources: "No RAG sources yet.",
+      ragManage: "\u0625\u062f\u0627\u0631\u0629 \u0627\u0644\u0630\u0627\u0643\u0631\u0629",
+      ragHideManager: "\u0625\u062e\u0641\u0627\u0621 \u0627\u0644\u0625\u062f\u0627\u0631\u0629",
+      ragManagerTitle: "\u0625\u062f\u0627\u0631\u0629 \u0630\u0627\u0643\u0631\u0629 RAG",
+      ragManagerDesc: "\u0631\u0627\u062c\u0639 \u0627\u0644\u0645\u0635\u0627\u062f\u0631 \u0648\u0627\u0644\u0645\u0642\u0627\u0637\u0639 \u0648\u0627\u0644\u0645\u0635\u0627\u062f\u0631 \u0627\u0644\u062a\u064a \u0633\u064a\u0633\u062a\u062e\u062f\u0645\u0647\u0627 \u0627\u0644\u0630\u0643\u0627\u0621 \u0644\u0647\u0630\u0627 \u0627\u0644\u0645\u062f\u062e\u0644.",
+      ragOpenDetails: "\u0627\u0644\u062a\u0641\u0627\u0635\u064a\u0644",
+      ragReprocess: "\u0625\u0639\u0627\u062f\u0629 \u0627\u0644\u0645\u0639\u0627\u0644\u062c\u0629",
+      ragDelete: "\u062d\u0630\u0641",
+      ragDeleteConfirm: "\u062d\u0630\u0641 \u0647\u0630\u0627 \u0627\u0644\u0645\u0635\u062f\u0631 \u0648\u0645\u0642\u0627\u0637\u0639\u0647\u061f",
+      ragChunks: "\u0627\u0644\u0645\u0642\u0627\u0637\u0639",
+      ragJobs: "\u0645\u0647\u0627\u0645 \u0627\u0644\u0645\u0639\u0627\u0644\u062c\u0629",
+      ragPreviewTitle: "\u0645\u0635\u0627\u062f\u0631 \u0633\u064a\u0633\u062a\u062e\u062f\u0645\u0647\u0627 \u0627\u0644\u0630\u0643\u0627\u0621",
+      ragPreviewDesc: "\u0627\u0643\u062a\u0628 \u0633\u0624\u0627\u0644\u0627\u064b \u0644\u0645\u0639\u0631\u0641\u0629 \u0623\u064a \u0645\u0635\u0627\u062f\u0631 \u0633\u062a\u062f\u062e\u0644 \u0641\u064a \u0625\u062c\u0627\u0628\u0629 \u0627\u0644\u0630\u0643\u0627\u0621.",
+      ragPreviewPlaceholder: "\u0645\u0627\u0630\u0627 \u064a\u0642\u0648\u0644 \u0630\u0627\u0643\u0631\u0629 \u0627\u0644\u0645\u0634\u0631\u0648\u0639 \u0639\u0646 \u0627\u0644\u062f\u0641\u0639 \u0648\u0627\u0644\u0648\u0631\u0634\u061f",
+      ragPreviewRun: "\u0639\u0631\u0636 \u0627\u0644\u0645\u0635\u0627\u062f\u0631",
+      ragNoPreview: "\u0644\u0627 \u062a\u0648\u062c\u062f \u0646\u062a\u0627\u0626\u062c \u0628\u0639\u062f.",
+      ragScore: "\u0627\u0644\u062a\u0637\u0627\u0628\u0642",
+      ragTrust: "\u0645\u0633\u062a\u0648\u0649 \u0627\u0644\u062b\u0642\u0629",
+      ragChunkType: "\u0646\u0648\u0639 \u0627\u0644\u0645\u0642\u0637\u0639",
+      ragSourceType: "\u0646\u0648\u0639 \u0627\u0644\u0645\u0635\u062f\u0631",
+      ragCreated: "\u062a\u0627\u0631\u064a\u062e \u0627\u0644\u0625\u0646\u0634\u0627\u0621",
+      ragEmbedding: "\u0627\u0644\u062a\u0636\u0645\u064a\u0646",
+      ragCloseDetails: "\u0625\u063a\u0644\u0627\u0642 \u0627\u0644\u062a\u0641\u0627\u0635\u064a\u0644",
     };
   }
   if (locale === 'en') {
@@ -711,6 +791,28 @@ function extraLabels(locale: string) {
       ragCaptured: 'RAG memory updated.',
       ragFailed: 'RAG update failed.',
       ragNoSources: 'No RAG sources yet.',
+      ragManage: 'Manage memory',
+      ragHideManager: 'Hide manager',
+      ragManagerTitle: 'RAG memory management',
+      ragManagerDesc: 'Review sources, chunks, processing jobs, and the sources AI will use for this intake.',
+      ragOpenDetails: 'Details',
+      ragReprocess: 'Reprocess',
+      ragDelete: 'Delete',
+      ragDeleteConfirm: 'Delete this RAG source and its chunks?',
+      ragChunks: 'Chunks',
+      ragJobs: 'Processing jobs',
+      ragPreviewTitle: 'Sources AI will use',
+      ragPreviewDesc: 'Ask a question to preview the exact memory chunks that will be retrieved for an AI answer.',
+      ragPreviewPlaceholder: 'What does project memory say about payment and workshops?',
+      ragPreviewRun: 'Preview sources',
+      ragNoPreview: 'No retrieval results yet.',
+      ragScore: 'Score',
+      ragTrust: 'Trust',
+      ragChunkType: 'Chunk type',
+      ragSourceType: 'Source type',
+      ragCreated: 'Created',
+      ragEmbedding: 'Embedding',
+      ragCloseDetails: 'Close details',
     };
   }
   return {
@@ -827,6 +929,28 @@ function extraLabels(locale: string) {
     ragCaptured: 'RAG-Speicher aktualisiert.',
     ragFailed: 'RAG-Aktualisierung fehlgeschlagen.',
     ragNoSources: 'Noch keine RAG-Quellen.',
+    ragManage: 'Speicher verwalten',
+    ragHideManager: 'Verwaltung ausblenden',
+    ragManagerTitle: 'RAG-Speicherverwaltung',
+    ragManagerDesc: 'Quellen, Chunks, Verarbeitungsjobs und die Quellen pruefen, die die KI fuer diesen Intake nutzt.',
+    ragOpenDetails: 'Details',
+    ragReprocess: 'Neu verarbeiten',
+    ragDelete: 'Loeschen',
+    ragDeleteConfirm: 'Diese RAG-Quelle und ihre Chunks loeschen?',
+    ragChunks: 'Chunks',
+    ragJobs: 'Verarbeitungsjobs',
+    ragPreviewTitle: 'Quellen, die die KI nutzt',
+    ragPreviewDesc: 'Stelle eine Frage, um die abgerufenen Speicher-Chunks fuer eine KI-Antwort zu sehen.',
+    ragPreviewPlaceholder: 'Was sagt der Projektspeicher zu Zahlung und Workshops?',
+    ragPreviewRun: 'Quellen anzeigen',
+    ragNoPreview: 'Noch keine Abruf-Ergebnisse.',
+    ragScore: 'Trefferwert',
+    ragTrust: 'Vertrauen',
+    ragChunkType: 'Chunk-Typ',
+    ragSourceType: 'Quellentyp',
+    ragCreated: 'Erstellt',
+    ragEmbedding: 'Embedding',
+    ragCloseDetails: 'Details schliessen',
   };
 }
 
@@ -1009,6 +1133,13 @@ export default function AIIntakePage() {
   const [recommendations, setRecommendations] = useState<RecommendationPayload | null>(null);
   const [ragSources, setRagSources] = useState<RagSource[]>([]);
   const [ragStatus, setRagStatus] = useState<'idle' | 'capturing' | 'uploading' | 'done' | 'error'>('idle');
+  const [ragManagerOpen, setRagManagerOpen] = useState(false);
+  const [selectedRagSourceId, setSelectedRagSourceId] = useState<string | null>(null);
+  const [ragSourceDetail, setRagSourceDetail] = useState<RagSourceDetail | null>(null);
+  const [ragManaging, setRagManaging] = useState<'idle' | 'loading' | 'deleting' | 'reingesting' | 'querying'>('idle');
+  const [ragQuestion, setRagQuestion] = useState('');
+  const [ragQueryItems, setRagQueryItems] = useState<RagQueryItem[]>([]);
+  const [ragManagerError, setRagManagerError] = useState('');
   const [chatInput, setChatInput] = useState('');
   const [busy, setBusy] = useState(false);
   const [deletingMessageId, setDeletingMessageId] = useState<string | null>(null);
@@ -1066,6 +1197,75 @@ export default function AIIntakePage() {
     }
   }
 
+  async function openRagSourceDetails(sourceId: string) {
+    setRagManaging('loading');
+    setRagManagerError('');
+    try {
+      const detail = await apiGet<RagSourceDetail>(`/rag/sources/${sourceId}`);
+      setSelectedRagSourceId(sourceId);
+      setRagSourceDetail(detail);
+    } catch (error: any) {
+      setRagManagerError(error.message || x.ragFailed);
+    } finally {
+      setRagManaging('idle');
+    }
+  }
+
+  async function deleteSelectedRagSource(sourceId: string) {
+    if (!(await appConfirm(x.ragDeleteConfirm))) return;
+    setRagManaging('deleting');
+    setRagManagerError('');
+    try {
+      await apiJson<{ ok: boolean }>(`/rag/sources/${sourceId}`, 'DELETE');
+      if (selectedId) await loadRagSourcesForIntake(selectedId);
+      if (selectedRagSourceId === sourceId) {
+        setSelectedRagSourceId(null);
+        setRagSourceDetail(null);
+      }
+      setRagQueryItems((items) => items.filter((item) => item.sourceId !== sourceId));
+      setRagStatus('done');
+    } catch (error: any) {
+      setRagManagerError(error.message || x.ragFailed);
+    } finally {
+      setRagManaging('idle');
+    }
+  }
+
+  async function reprocessRagSource(sourceId: string) {
+    setRagManaging('reingesting');
+    setRagManagerError('');
+    try {
+      const detail = await apiJson<RagSourceDetail>(`/rag/sources/${sourceId}/reingest`, 'POST');
+      setSelectedRagSourceId(detail.id);
+      setRagSourceDetail(detail);
+      if (selectedId) await loadRagSourcesForIntake(selectedId);
+      setRagStatus('done');
+    } catch (error: any) {
+      setRagManagerError(error.message || x.ragFailed);
+    } finally {
+      setRagManaging('idle');
+    }
+  }
+
+  async function previewRagRetrieval() {
+    if (!selectedId || !ragQuestion.trim()) return;
+    setRagManaging('querying');
+    setRagManagerError('');
+    try {
+      const response = await apiJson<{ items: RagQueryItem[] }>('/rag/query', 'POST', {
+        proposalId: selectedId,
+        orderId: draft.convertedOrderId || undefined,
+        question: ragQuestion.trim(),
+        limit: 8,
+      });
+      setRagQueryItems(response.items || []);
+    } catch (error: any) {
+      setRagManagerError(error.message || x.ragFailed);
+    } finally {
+      setRagManaging('idle');
+    }
+  }
+
   async function loadLists(preferredId?: string, pageOverride = intakePage) {
     const [intakePageData, customerRows] = await Promise.all([
       apiGet<PaginatedResponse<ProposalDraft>>(`/ai/intakes?paginated=true&page=${pageOverride}&pageSize=${INTAKE_PAGE_SIZE}`),
@@ -1103,6 +1303,12 @@ export default function AIIntakePage() {
       setRecommendations(null);
       setRagSources([]);
       setRagStatus('idle');
+      setRagManagerOpen(false);
+      setSelectedRagSourceId(null);
+      setRagSourceDetail(null);
+      setRagQuestion('');
+      setRagQueryItems([]);
+      setRagManagerError('');
       setExistingCustomerId('');
       setLastResult(null);
     }
@@ -1127,6 +1333,11 @@ export default function AIIntakePage() {
     setMessages(intake.messages || []);
     setShowAllMessages(false);
     setHistoryCollapsed(false);
+    setSelectedRagSourceId(null);
+    setRagSourceDetail(null);
+    setRagQuestion('');
+    setRagQueryItems([]);
+    setRagManagerError('');
     const nextRecommendations = normalizeRecommendations(intake.recommendedTeam);
     setRecommendations(nextRecommendations);
     await loadRagSourcesForIntake(id);
@@ -1597,7 +1808,7 @@ export default function AIIntakePage() {
 
   async function clearMessages() {
     if (!selectedId) return alert(m.aiIntakePage.createIntakeFirst);
-    if (!window.confirm(m.aiIntakePage.clearConversationConfirm)) return;
+    if (!(await appConfirm(m.aiIntakePage.clearConversationConfirm))) return;
 
     setBusy(true);
     try {
@@ -1621,7 +1832,7 @@ export default function AIIntakePage() {
 
   async function deleteMessage(messageId: string) {
     if (!selectedId) return alert(m.aiIntakePage.createIntakeFirst);
-    if (!window.confirm(m.aiIntakePage.deleteMessageConfirm)) return;
+    if (!(await appConfirm(m.aiIntakePage.deleteMessageConfirm))) return;
 
     setDeletingMessageId(messageId);
     try {
@@ -1642,7 +1853,7 @@ export default function AIIntakePage() {
 
   async function clearAllFields() {
     if (!selectedId) return alert(m.aiIntakePage.createIntakeFirst);
-    if (!window.confirm(m.aiIntakePage.clearAllFieldsConfirm)) return;
+    if (!(await appConfirm(m.aiIntakePage.clearAllFieldsConfirm))) return;
 
     setBusy(true);
     try {
@@ -1689,7 +1900,7 @@ export default function AIIntakePage() {
   }
 
   async function deleteIntakeSession(intakeId: string) {
-    if (!window.confirm(m.aiIntakePage.deleteIntakeConfirm)) return;
+    if (!(await appConfirm(m.aiIntakePage.deleteIntakeConfirm))) return;
 
     setDeletingIntakeId(intakeId);
     try {
@@ -2140,6 +2351,34 @@ export default function AIIntakePage() {
     }
   }
 
+  function formatRagDate(value?: string | null): string {
+    if (!value) return '-';
+    const date = new Date(value);
+    if (Number.isNaN(date.getTime())) return value;
+    return date.toLocaleString(locale === 'ar' ? 'ar' : locale === 'de' ? 'de-DE' : 'en-US', {
+      dateStyle: 'medium',
+      timeStyle: 'short',
+    });
+  }
+
+  function ragSourceLabel(source?: Pick<RagSource, 'title' | 'originalFileName' | 'sourceType' | 'id'> | null): string {
+    if (!source) return '-';
+    return source.title || source.originalFileName || source.sourceType || source.id;
+  }
+
+  function ragSourceForChunk(sourceId: string): RagSource | undefined {
+    return ragSources.find((source) => source.id === sourceId) || (ragSourceDetail?.id === sourceId ? ragSourceDetail : undefined);
+  }
+
+  function ragScoreText(score?: number): string {
+    if (typeof score !== 'number' || Number.isNaN(score)) return '-';
+    return `${Math.round(score * 100)}%`;
+  }
+
+  function shortRagId(value?: string | null): string {
+    return value ? value.slice(0, 8) : '-';
+  }
+
   function workshopOptionsForSite(siteIndex: number): WorkshopRecommendation[] {
     const suggestionMap = new Map<string, WorkshopRecommendation>();
     const recommendationSite = recommendationSiteMap.get(siteIndex);
@@ -2453,9 +2692,160 @@ export default function AIIntakePage() {
                 onChange={uploadRagTextSource}
                 data-testid="rag-file-input"
               />
+              <button
+                className="btn with-icon"
+                onClick={() => setRagManagerOpen((open) => !open)}
+                disabled={!selectedId}
+                data-testid="rag-manage"
+              >
+                <Icon name="info" />
+                {ragManagerOpen ? x.ragHideManager : x.ragManage}
+              </button>
             </div>
             {ragStatusText && <div className={`ai-rag-status ${ragStatus}`}>{ragStatusText}</div>}
           </div>
+
+          {ragManagerOpen && (
+            <section className="ai-rag-manager" data-testid="rag-manager">
+              <div className="ai-rag-manager-head">
+                <div>
+                  <span>{x.ragManagerTitle}</span>
+                  <p>{x.ragManagerDesc}</p>
+                </div>
+                <button
+                  className="btn with-icon"
+                  onClick={() => selectedId && loadRagSourcesForIntake(selectedId)}
+                  disabled={!selectedId || ragManaging !== 'idle'}
+                >
+                  <Icon name="refresh" />
+                  {m.common.refresh}
+                </button>
+              </div>
+
+              {ragManagerError && <div className="ai-rag-error">{ragManagerError}</div>}
+
+              <div className="ai-rag-manager-grid">
+                <div className="ai-rag-source-list">
+                  {ragSources.length === 0 ? (
+                    <div className="ai-rag-empty">{x.ragNoSources}</div>
+                  ) : (
+                    ragSources.map((source) => (
+                      <article
+                        key={source.id}
+                        className={`ai-rag-source-row ${selectedRagSourceId === source.id ? 'active' : ''}`}
+                      >
+                        <button type="button" onClick={() => openRagSourceDetails(source.id)}>
+                          <strong>{ragSourceLabel(source)}</strong>
+                          <span>{x.ragSourceType}: {source.sourceType}</span>
+                          <em>{source.ingestionStatus} · {formatRagDate(source.createdAt)}</em>
+                        </button>
+                        <div className="ai-rag-row-actions">
+                          <button className="icon-btn" title={x.ragOpenDetails} onClick={() => openRagSourceDetails(source.id)} disabled={ragManaging !== 'idle'}>
+                            <Icon name="info" />
+                          </button>
+                          <button className="icon-btn" title={x.ragReprocess} onClick={() => reprocessRagSource(source.id)} disabled={ragManaging !== 'idle'}>
+                            <Icon name="refresh" />
+                          </button>
+                          <button className="icon-btn danger" title={x.ragDelete} onClick={() => deleteSelectedRagSource(source.id)} disabled={ragManaging !== 'idle'}>
+                            <Icon name="trash" />
+                          </button>
+                        </div>
+                      </article>
+                    ))
+                  )}
+                </div>
+
+                <div className="ai-rag-detail-panel">
+                  {ragSourceDetail ? (
+                    <>
+                      <div className="ai-rag-detail-title">
+                        <div>
+                          <strong>{ragSourceLabel(ragSourceDetail)}</strong>
+                          <span>{shortRagId(ragSourceDetail.id)} · {ragSourceDetail.ingestionStatus}</span>
+                        </div>
+                        <button className="btn with-icon" onClick={() => setRagSourceDetail(null)}>
+                          <Icon name="x" />
+                          {x.ragCloseDetails}
+                        </button>
+                      </div>
+
+                      <div className="ai-rag-meta-grid">
+                        <div><span>{x.ragSourceType}</span><strong>{ragSourceDetail.sourceType}</strong></div>
+                        <div><span>{x.ragCreated}</span><strong>{formatRagDate(ragSourceDetail.createdAt)}</strong></div>
+                        <div><span>{x.ragEmbedding}</span><strong>{ragSourceDetail.chunks.some((chunk) => chunk.hasEmbedding) ? 'ready' : 'missing'}</strong></div>
+                        <div><span>{x.ragChunks}</span><strong>{ragSourceDetail.chunks.length}</strong></div>
+                      </div>
+
+                      <div className="ai-rag-section-title">{x.ragChunks}</div>
+                      <div className="ai-rag-chunk-list">
+                        {ragSourceDetail.chunks.map((chunk) => (
+                          <article key={chunk.id} className="ai-rag-chunk-card">
+                            <div className="ai-rag-chunk-meta">
+                              <span>#{chunk.chunkIndex + 1}</span>
+                              <span>{x.ragChunkType}: {chunk.chunkType}</span>
+                              <span>{x.ragTrust}: {chunk.trustLevel}</span>
+                              <span>{chunk.hasEmbedding ? x.ragEmbedding : 'No embedding'}</span>
+                            </div>
+                            <p>{chunk.text}</p>
+                          </article>
+                        ))}
+                      </div>
+
+                      <div className="ai-rag-section-title">{x.ragJobs}</div>
+                      <div className="ai-rag-job-list">
+                        {ragSourceDetail.jobs.map((job) => (
+                          <div key={job.id}>
+                            <strong>{job.status}</strong>
+                            <span>{job.stage || '-'} · {formatRagDate(job.finishedAt || job.startedAt || job.createdAt)}</span>
+                            {job.errorMessage && <em>{job.errorMessage}</em>}
+                          </div>
+                        ))}
+                      </div>
+                    </>
+                  ) : (
+                    <div className="ai-rag-empty">{x.ragOpenDetails}</div>
+                  )}
+                </div>
+              </div>
+
+              <div className="ai-rag-preview">
+                <div>
+                  <span>{x.ragPreviewTitle}</span>
+                  <p>{x.ragPreviewDesc}</p>
+                </div>
+                <div className="ai-rag-preview-form">
+                  <input
+                    value={ragQuestion}
+                    onChange={(event) => setRagQuestion(event.target.value)}
+                    placeholder={x.ragPreviewPlaceholder}
+                    disabled={!selectedId || ragManaging !== 'idle'}
+                  />
+                  <button className="btn primary with-icon" onClick={previewRagRetrieval} disabled={!selectedId || !ragQuestion.trim() || ragManaging !== 'idle'}>
+                    <Icon name="search" />
+                    {x.ragPreviewRun}
+                  </button>
+                </div>
+                <div className="ai-rag-preview-results">
+                  {ragQueryItems.length === 0 ? (
+                    <div className="ai-rag-empty">{x.ragNoPreview}</div>
+                  ) : (
+                    ragQueryItems.map((item) => {
+                      const source = ragSourceForChunk(item.sourceId);
+                      return (
+                        <article key={item.id} className="ai-rag-result-card">
+                          <div>
+                            <strong>{ragSourceLabel(source)}</strong>
+                            <span>{x.ragScore}: {ragScoreText(item.score)} · {x.ragChunkType}: {item.chunkType}</span>
+                          </div>
+                          <p>{item.text}</p>
+                        </article>
+                      );
+                    })
+                  )}
+                </div>
+              </div>
+            </section>
+          )}
 
           {proposalGenerationStatus !== 'idle' && (
             <>

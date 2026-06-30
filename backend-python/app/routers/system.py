@@ -12,11 +12,11 @@ from uuid import uuid4
 
 from fastapi import APIRouter, Depends, File, Form, Header, HTTPException, UploadFile, status
 from fastapi.responses import FileResponse
-from sqlalchemy import desc, func, or_, select
+from sqlalchemy import and_, desc, func, or_, select
 
 from ..database import SessionLocal, engine, init_db
-from ..models import AuditLog, UserAccount
-from ..routers.auth import _bearer_token, _hash_token, get_current_user
+from ..models import AuditLog, SaasTenant, UserAccount
+from ..routers.auth import _bearer_token, _hash_token, require_any_permission, require_permission
 from ..services.audit import record_audit
 from ..settings import get_settings
 
@@ -28,13 +28,41 @@ UPLOADS_ROOT = ROOT / "uploads"
 BACKUP_PREFIX = "omran-backup-"
 BACKUP_SUFFIX = ".zip"
 AUDIT_ACTIONS = {
+    "platform.company.created",
+    "platform.manager_password.reset",
+    "platform.invoice.created",
+    "platform.invoice.updated",
+    "platform.invoice.deleted",
+    "platform.invoice.payment.added",
+    "platform.invoice.payment.deleted",
+    "user.created",
+    "user.ai_permissions.updated",
+    "user.password.changed",
     "invoice.updated",
     "invoice.deleted",
+    "invoice.payment.added",
+    "invoice.payment.deleted",
     "order.created",
+    "order.updated",
     "order.deleted",
     "ai.proposal.confirmed",
+    "ai_intake.confirmed",
+    "tracking.baseline.updated",
+    "tracking.progress.created",
+    "tracking.progress.updated",
+    "tracking.progress.deleted",
+    "tracking.task.created",
+    "tracking.task.updated",
+    "tracking.task.deleted",
+    "tracking.issue.created",
+    "tracking.issue.updated",
+    "tracking.issue.deleted",
+    "tracking.material.created",
+    "tracking.material.updated",
+    "tracking.material.deleted",
     "backup.restored",
     "monitoring.alert.updated",
+    "monitoring_alert.updated",
 }
 
 
@@ -116,14 +144,38 @@ def _dump_postgres_database(target: Path) -> None:
     )
 
 
+def _reset_postgres_public_schema(parts: dict[str, str]) -> None:
+    _run_postgres_tool(
+        [
+            "psql",
+            "--host",
+            parts["host"],
+            "--port",
+            parts["port"],
+            "--username",
+            parts["user"],
+            "--dbname",
+            parts["database"],
+            "--command",
+            (
+                'DROP SCHEMA IF EXISTS public CASCADE; '
+                'CREATE SCHEMA public; '
+                f'GRANT ALL ON SCHEMA public TO "{parts["user"]}"; '
+                "GRANT ALL ON SCHEMA public TO public;"
+            ),
+        ],
+        parts["password"],
+    )
+
+
 def _restore_postgres_database(source: Path) -> None:
     parts = _postgres_connection_parts()
     engine.dispose()
+    _reset_postgres_public_schema(parts)
     _run_postgres_tool(
         [
             "pg_restore",
-            "--clean",
-            "--if-exists",
+            "--single-transaction",
             "--no-owner",
             "--host",
             parts["host"],
@@ -273,8 +325,46 @@ def _audit_log_payload(item: AuditLog, actor_email: str | None) -> dict:
     }
 
 
+@router.get("/audit-scopes")
+def list_audit_scopes(
+    current_user: UserAccount = Depends(require_any_permission("view_audit_log", "view_platform_audit")),
+) -> dict:
+    db = SessionLocal()
+    try:
+        if current_user.account_level == "platform_admin":
+            tenants = db.scalars(select(SaasTenant).order_by(SaasTenant.company_name)).all()
+            return {
+                "defaultScope": "platform",
+                "scopes": [
+                    {"id": "platform", "label": "OMRAN Platform", "kind": "platform"},
+                    *[
+                        {"id": tenant.id, "label": tenant.company_name, "kind": "company"}
+                        for tenant in tenants
+                    ],
+                ],
+            }
+        if current_user.tenant_id:
+            tenant = db.get(SaasTenant, current_user.tenant_id)
+            return {
+                "defaultScope": current_user.tenant_id,
+                "scopes": [
+                    {
+                        "id": current_user.tenant_id,
+                        "label": tenant.company_name if tenant else current_user.tenant_name or "Company",
+                        "kind": "company",
+                    }
+                ],
+            }
+        return {
+            "defaultScope": "my-account",
+            "scopes": [{"id": "my-account", "label": current_user.email, "kind": "legacy"}],
+        }
+    finally:
+        db.close()
+
+
 @router.get("/backups")
-def list_backups(_: UserAccount = Depends(get_current_user)) -> dict:
+def list_backups(_: UserAccount = Depends(require_permission("restore_backups"))) -> dict:
     BACKUP_ROOT.mkdir(parents=True, exist_ok=True)
     backups = sorted(BACKUP_ROOT.glob(f"{BACKUP_PREFIX}*{BACKUP_SUFFIX}"), key=lambda item: item.stat().st_mtime, reverse=True)
     return {"items": [_backup_info(item) for item in backups[:20]]}
@@ -286,14 +376,51 @@ def list_audit_logs(
     pageSize: int = 20,
     action: str | None = None,
     entityType: str | None = None,
+    scope: str | None = None,
+    tenantId: str | None = None,
     q: str | None = None,
-    _: UserAccount = Depends(get_current_user),
+    _: UserAccount = Depends(require_any_permission("view_audit_log", "view_platform_audit")),
 ) -> dict:
+    current_user = _
     page = max(page, 1)
     page_size = _parse_positive_int(pageSize, 20, maximum=50)
     db = SessionLocal()
     try:
         filters = []
+        scope_filters = []
+        requested_scope = tenantId or scope
+        if current_user.account_level == "platform_admin":
+            if requested_scope and requested_scope not in {"platform", "global"}:
+                tenant = db.get(SaasTenant, requested_scope)
+                if not tenant:
+                    raise HTTPException(status.HTTP_404_NOT_FOUND, "Audit company scope not found.")
+                scope_filters.append(
+                    or_(
+                        AuditLog.tenant_id == tenant.id,
+                        and_(AuditLog.tenant_id.is_(None), UserAccount.tenant_id == tenant.id),
+                    )
+                )
+            else:
+                scope_filters.append(
+                    and_(
+                        AuditLog.tenant_id.is_(None),
+                        or_(
+                            AuditLog.actor_user_id.is_(None),
+                            UserAccount.id.is_(None),
+                            UserAccount.tenant_id.is_(None),
+                            UserAccount.account_level == "platform_admin",
+                        ),
+                    )
+                )
+        elif current_user.tenant_id:
+            scope_filters.append(
+                or_(
+                    AuditLog.tenant_id == current_user.tenant_id,
+                    and_(AuditLog.tenant_id.is_(None), UserAccount.tenant_id == current_user.tenant_id),
+                )
+            )
+        else:
+            scope_filters.extend([AuditLog.tenant_id.is_(None), AuditLog.actor_user_id == current_user.id])
         if action and action != "all":
             filters.append(AuditLog.action == action)
         if entityType and entityType != "all":
@@ -313,9 +440,9 @@ def list_audit_logs(
 
         base_query = select(AuditLog, UserAccount.email).outerjoin(UserAccount, AuditLog.actor_user_id == UserAccount.id)
         count_query = select(func.count(AuditLog.id)).outerjoin(UserAccount, AuditLog.actor_user_id == UserAccount.id)
-        if filters:
-            base_query = base_query.where(*filters)
-            count_query = count_query.where(*filters)
+        if scope_filters or filters:
+            base_query = base_query.where(*scope_filters, *filters)
+            count_query = count_query.where(*scope_filters, *filters)
 
         total = db.scalar(count_query) or 0
         rows = db.execute(
@@ -324,21 +451,26 @@ def list_audit_logs(
             .limit(page_size)
         ).all()
 
+        def scoped_count(*extra_filters):
+            return (
+                db.scalar(
+                    select(func.count(AuditLog.id))
+                    .outerjoin(UserAccount, AuditLog.actor_user_id == UserAccount.id)
+                    .where(*scope_filters, *extra_filters)
+                )
+                or 0
+            )
+
         stats = {
-            "total": db.scalar(select(func.count(AuditLog.id))) or 0,
-            "invoiceChanges": db.scalar(
-                select(func.count(AuditLog.id)).where(AuditLog.action.in_(["invoice.updated", "invoice.deleted"]))
-            )
-            or 0,
-            "backupRestores": db.scalar(select(func.count(AuditLog.id)).where(AuditLog.action == "backup.restored")) or 0,
-            "monitoringResolutions": db.scalar(
-                select(func.count(AuditLog.id)).where(AuditLog.action == "monitoring.alert.updated")
-            )
-            or 0,
-            "aiConfirmations": db.scalar(
-                select(func.count(AuditLog.id)).where(AuditLog.action == "ai.proposal.confirmed")
-            )
-            or 0,
+            "total": scoped_count(),
+            "invoiceChanges": scoped_count(
+                AuditLog.action.in_(
+                    ["invoice.updated", "invoice.deleted", "invoice.payment.added", "invoice.payment.deleted"]
+                )
+            ),
+            "backupRestores": scoped_count(AuditLog.action == "backup.restored"),
+            "monitoringResolutions": scoped_count(AuditLog.action.in_(["monitoring.alert.updated", "monitoring_alert.updated"])),
+            "aiConfirmations": scoped_count(AuditLog.action.in_(["ai.proposal.confirmed", "ai_intake.confirmed"])),
         }
 
         return {
@@ -354,12 +486,12 @@ def list_audit_logs(
 
 
 @router.post("/backups", status_code=status.HTTP_201_CREATED)
-def create_backup(_: UserAccount = Depends(get_current_user)) -> dict:
+def create_backup(_: UserAccount = Depends(require_permission("restore_backups"))) -> dict:
     return _create_backup_archive()
 
 
 @router.get("/backups/{file_name}")
-def download_backup(file_name: str, _: UserAccount = Depends(get_current_user)) -> FileResponse:
+def download_backup(file_name: str, _: UserAccount = Depends(require_permission("restore_backups"))) -> FileResponse:
     path = _safe_backup_path(file_name)
     return FileResponse(path, media_type="application/zip", filename=path.name)
 
@@ -368,7 +500,8 @@ def download_backup(file_name: str, _: UserAccount = Depends(get_current_user)) 
 async def restore_backup(
     backupFile: UploadFile = File(...),
     confirmation: str = Form(...),
-    current_user_id: str = Depends(_require_authenticated_user_id),
+    current_user: UserAccount = Depends(require_permission("restore_backups")),
+    current_user_id: str | None = None,
 ) -> dict:
     if confirmation != "RESTORE":
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "Restore confirmation is required.")
@@ -426,7 +559,7 @@ async def restore_backup(
                 action="backup.restored",
                 entity_type="SystemBackup",
                 entity_id=backupFile.filename,
-                actor_user_id=current_user_id,
+                actor_user_id=current_user_id or current_user.id,
                 summary="Backup restored from uploaded archive",
                 details={"fileName": backupFile.filename, "safetyBackup": safety_backup.get("fileName")},
             )

@@ -4,6 +4,7 @@ import Link from 'next/link';
 import { useEffect, useMemo, useState } from 'react';
 
 import { useI18n } from '../../lib/i18n';
+import { appConfirm } from '../../lib/dialog';
 import { apiGet, apiJson } from '../../lib/api';
 import { toYMD } from '../../lib/date';
 import { DateInput } from '../ui/DateInput';
@@ -17,9 +18,17 @@ type Invoice = {
   invoiceNumber?: string | null;
   customer: Customer;
   createdAt: string;
+  issueDate?: string | null;
+  dueDate?: string | null;
   totalHours?: number;
   lineCount?: number;
   pauschalAmount?: string | number | null;
+  totalAmount?: number;
+  overdue?: boolean;
+  paymentSummary?: {
+    paidAmount: number;
+    remainingBalance: number;
+  };
 };
 
 type PaginatedResponse<T> = {
@@ -27,6 +36,17 @@ type PaginatedResponse<T> = {
   total: number;
   page: number;
   pageSize: number;
+  metrics?: {
+    total: number;
+    draft: number;
+    sent: number;
+    partialPaid: number;
+    paid: number;
+    overdue: number;
+    outstandingBalance: number;
+    paidAmount: number;
+    currency: string;
+  };
 };
 
 const LIST_PAGE_SIZE = 12;
@@ -35,6 +55,7 @@ export default function InvoicesPage() {
   const { locale, messages: m } = useI18n();
   const [items, setItems] = useState<Invoice[]>([]);
   const [totalItems, setTotalItems] = useState(0);
+  const [metrics, setMetrics] = useState<PaginatedResponse<Invoice>['metrics'] | null>(null);
   const [page, setPage] = useState(1);
   const [status, setStatus] = useState<string>('');
   const [from, setFrom] = useState<Date | undefined>(undefined);
@@ -61,6 +82,7 @@ export default function InvoicesPage() {
     const data = await apiGet<PaginatedResponse<Invoice>>(`/invoices${query}`);
     setItems(data.items);
     setTotalItems(data.total);
+    setMetrics(data.metrics || null);
   }
 
   useEffect(() => {
@@ -69,7 +91,7 @@ export default function InvoicesPage() {
   }, [query]);
 
   async function del(id: string) {
-    if (!confirm(m.common.deleteConfirm)) return;
+    if (!(await appConfirm(m.common.deleteConfirm))) return;
     try {
       await apiJson(`/invoices/${id}`, 'DELETE');
       await load();
@@ -103,9 +125,10 @@ export default function InvoicesPage() {
           <p>{pageCopy.description}</p>
         </div>
         <div className="entity-hero-stats">
-            <div className="entity-stat"><strong>{totalItems}</strong><span>{m.nav.invoices}</span></div>
-            <div className="entity-stat"><strong>{items.filter((item) => item.status === 'draft').length}</strong><span>{m.statuses.invoice.draft}</span></div>
-            <div className="entity-stat"><strong>{items.filter((item) => item.status === 'paid').length}</strong><span>{m.statuses.invoice.paid}</span></div>
+            <div className="entity-stat"><strong>{metrics?.total ?? totalItems}</strong><span>{m.nav.invoices}</span></div>
+            <div className="entity-stat"><strong>{metrics?.draft ?? 0}</strong><span>{m.statuses.invoice.draft}</span></div>
+            <div className="entity-stat"><strong>{metrics?.overdue ?? 0}</strong><span>Overdue</span></div>
+            <div className="entity-stat"><strong>{Number(metrics?.outstandingBalance ?? 0).toFixed(2)}</strong><span>Outstanding</span></div>
         </div>
       </section>
 
@@ -120,6 +143,7 @@ export default function InvoicesPage() {
             <option value="draft">{m.statuses.invoice.draft}</option>
             <option value="final">{m.statuses.invoice.final}</option>
             <option value="sent">{m.statuses.invoice.sent}</option>
+            <option value="partial_paid">Partial paid</option>
             <option value="paid">{m.statuses.invoice.paid}</option>
             <option value="canceled">{m.statuses.invoice.canceled}</option>
           </select>
@@ -158,6 +182,8 @@ export default function InvoicesPage() {
             <th>{m.common.hours}</th>
             <th>{m.invoicesPage.positions}</th>
             <th>{m.common.amount}</th>
+            <th>Paid / Due</th>
+            <th>Due date</th>
             <th>{m.common.created}</th>
             <th style={{ width: 260 }}>{m.common.actions}</th>
           </tr>
@@ -167,10 +193,12 @@ export default function InvoicesPage() {
             <tr key={invoice.id}>
               <td>{invoice.invoiceNumber || m.common.none}</td>
               <td>{invoice.customer?.companyName || m.common.none}</td>
-              <td>{statusLabel(invoice.status)}</td>
+              <td>{invoice.overdue ? 'Overdue' : statusLabel(invoice.status)}</td>
               <td>{Number(invoice.totalHours ?? 0).toFixed(2)}</td>
               <td>{invoice.lineCount ?? m.common.none}</td>
-              <td>{invoice.pauschalAmount != null ? Number(invoice.pauschalAmount).toFixed(2) : m.common.none}</td>
+              <td>{Number(invoice.totalAmount ?? invoice.pauschalAmount ?? 0).toFixed(2)}</td>
+              <td>{Number(invoice.paymentSummary?.paidAmount ?? 0).toFixed(2)} / {Number(invoice.paymentSummary?.remainingBalance ?? 0).toFixed(2)}</td>
+              <td>{invoice.dueDate?.substring(0, 10) || m.common.none}</td>
               <td>{invoice.createdAt?.substring(0, 10)}</td>
               <td>
                 <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
@@ -188,7 +216,7 @@ export default function InvoicesPage() {
           ))}
           {items.length === 0 && (
             <tr>
-              <td colSpan={8} className="muted">{m.invoicesPage.noInvoices}</td>
+              <td colSpan={10} className="muted">{m.invoicesPage.noInvoices}</td>
             </tr>
           )}
         </tbody>

@@ -3,6 +3,7 @@
 import { useEffect, useState } from 'react';
 
 import { useI18n } from '../../lib/i18n';
+import { appConfirm } from '../../lib/dialog';
 import { apiGet, apiJson } from '../../lib/api';
 
 type AvailabilityBlock = {
@@ -157,7 +158,7 @@ export default function EmployeesPage() {
   }
 
   async function del(id: string) {
-    if (!confirm(m.common.deleteConfirm)) return;
+    if (!(await appConfirm(m.common.deleteConfirm))) return;
     try {
       await apiJson(`/employees/${id}`, 'DELETE');
       await load();

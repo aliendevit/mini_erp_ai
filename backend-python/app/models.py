@@ -15,6 +15,7 @@ class InvoiceStatus(str, Enum):
     draft = "draft"
     final = "final"
     sent = "sent"
+    partial_paid = "partial_paid"
     paid = "paid"
     canceled = "canceled"
 
@@ -51,6 +52,11 @@ class UserAccount(Base):
     email: Mapped[str] = mapped_column(String, nullable=False)
     password_hash: Mapped[str] = mapped_column("passwordHash", String, nullable=False)
     phone: Mapped[str | None] = mapped_column(String)
+    tenant_id: Mapped[str | None] = mapped_column("tenantId", String(36), ForeignKey("SaasTenant.id"))
+    account_level: Mapped[str] = mapped_column("accountLevel", String, nullable=False, default="company_manager", server_default="company_manager")
+    tenant_name: Mapped[str | None] = mapped_column("tenantName", String)
+    role: Mapped[str] = mapped_column(String, nullable=False, default="company_manager", server_default="company_manager")
+    permissions_json: Mapped[str | None] = mapped_column("permissionsJson", Text)
     session_token_hash: Mapped[str | None] = mapped_column("sessionTokenHash", String)
     session_created_at: Mapped[datetime | None] = mapped_column("sessionCreatedAt", DateTime(timezone=True))
     last_login_at: Mapped[datetime | None] = mapped_column("lastLoginAt", DateTime(timezone=True))
@@ -62,6 +68,72 @@ class UserAccount(Base):
 
     company_profile: Mapped["CompanyProfile | None"] = relationship(
         back_populates="owner", uselist=False, cascade="all, delete-orphan"
+    )
+
+
+class SaasTenant(Base):
+    __tablename__ = "SaasTenant"
+    __table_args__ = (
+        UniqueConstraint("companyName", name="SaasTenant_companyName_key"),
+        Index("SaasTenant_status_idx", "status"),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid4()))
+    company_name: Mapped[str] = mapped_column("companyName", String, nullable=False)
+    contact_email: Mapped[str | None] = mapped_column("contactEmail", String)
+    plan_name: Mapped[str] = mapped_column("planName", String, nullable=False, default="AI Business", server_default="AI Business")
+    status: Mapped[str] = mapped_column(String, nullable=False, default="active", server_default="active")
+    user_count: Mapped[int] = mapped_column("userCount", Integer, nullable=False, default=1, server_default="1")
+    notes: Mapped[str | None] = mapped_column(Text)
+    created_at: Mapped[datetime] = mapped_column("createdAt", DateTime(timezone=True), server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(
+        "updatedAt", DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
+    )
+
+
+class SaasInvoice(Base):
+    __tablename__ = "SaasInvoice"
+    __table_args__ = (
+        UniqueConstraint("invoiceNumber", name="SaasInvoice_invoiceNumber_key"),
+        Index("SaasInvoice_tenantId_idx", "tenantId"),
+        Index("SaasInvoice_status_idx", "status"),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid4()))
+    tenant_id: Mapped[str] = mapped_column("tenantId", String(36), ForeignKey("SaasTenant.id"), nullable=False)
+    invoice_number: Mapped[str] = mapped_column("invoiceNumber", String, nullable=False)
+    status: Mapped[str] = mapped_column(String, nullable=False, default="sent", server_default="sent")
+    amount: Mapped[Decimal] = mapped_column(Numeric(10, 2), nullable=False, default=0, server_default="0")
+    currency: Mapped[str] = mapped_column(String, nullable=False, default="EUR", server_default="EUR")
+    period_label: Mapped[str | None] = mapped_column("periodLabel", String)
+    issue_date: Mapped[datetime | None] = mapped_column("issueDate", DateTime(timezone=True))
+    due_date: Mapped[datetime | None] = mapped_column("dueDate", DateTime(timezone=True))
+    notes: Mapped[str | None] = mapped_column(Text)
+    created_at: Mapped[datetime] = mapped_column("createdAt", DateTime(timezone=True), server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(
+        "updatedAt", DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
+    )
+
+
+class SaasPayment(Base):
+    __tablename__ = "SaasPayment"
+    __table_args__ = (
+        Index("SaasPayment_tenantId_idx", "tenantId"),
+        Index("SaasPayment_invoiceId_idx", "invoiceId"),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid4()))
+    tenant_id: Mapped[str] = mapped_column("tenantId", String(36), ForeignKey("SaasTenant.id"), nullable=False)
+    invoice_id: Mapped[str] = mapped_column("invoiceId", String(36), ForeignKey("SaasInvoice.id"), nullable=False)
+    amount: Mapped[Decimal] = mapped_column(Numeric(10, 2), nullable=False, default=0, server_default="0")
+    currency: Mapped[str] = mapped_column(String, nullable=False, default="EUR", server_default="EUR")
+    paid_date: Mapped[datetime | None] = mapped_column("paidDate", DateTime(timezone=True))
+    method: Mapped[str | None] = mapped_column(String)
+    reference: Mapped[str | None] = mapped_column(String)
+    notes: Mapped[str | None] = mapped_column(Text)
+    created_at: Mapped[datetime] = mapped_column("createdAt", DateTime(timezone=True), server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(
+        "updatedAt", DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
     )
 
 
@@ -99,6 +171,7 @@ class AuditLog(Base):
         Index("AuditLog_action_idx", "action"),
         Index("AuditLog_entity_idx", "entityType", "entityId"),
         Index("AuditLog_actorUserId_idx", "actorUserId"),
+        Index("AuditLog_tenantId_idx", "tenantId"),
         Index("AuditLog_createdAt_idx", "createdAt"),
     )
 
@@ -107,6 +180,7 @@ class AuditLog(Base):
     entity_type: Mapped[str] = mapped_column("entityType", String, nullable=False)
     entity_id: Mapped[str | None] = mapped_column("entityId", String)
     actor_user_id: Mapped[str | None] = mapped_column("actorUserId", String(36))
+    tenant_id: Mapped[str | None] = mapped_column("tenantId", String(36), ForeignKey("SaasTenant.id"))
     summary: Mapped[str | None] = mapped_column(Text)
     details_json: Mapped[str | None] = mapped_column("detailsJson", Text)
     created_at: Mapped[datetime] = mapped_column("createdAt", DateTime(timezone=True), server_default=func.now())
@@ -116,6 +190,7 @@ class Customer(Base):
     __tablename__ = "Customer"
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid4()))
+    tenant_id: Mapped[str | None] = mapped_column("tenantId", String(36), ForeignKey("SaasTenant.id"))
     company_name: Mapped[str] = mapped_column("companyName", String, nullable=False)
     street: Mapped[str | None] = mapped_column(String)
     zip_code: Mapped[str | None] = mapped_column("zipCode", String)
@@ -215,6 +290,7 @@ class Order(Base):
     __tablename__ = "Order"
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid4()))
+    tenant_id: Mapped[str | None] = mapped_column("tenantId", String(36), ForeignKey("SaasTenant.id"))
     customer_id: Mapped[str] = mapped_column("customerId", String(36), ForeignKey("Customer.id"), nullable=False)
     order_number: Mapped[str | None] = mapped_column("orderNumber", String, unique=True)
     title: Mapped[str] = mapped_column(String, nullable=False)
@@ -317,6 +393,7 @@ class Employee(Base):
     __tablename__ = "Employee"
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid4()))
+    tenant_id: Mapped[str | None] = mapped_column("tenantId", String(36), ForeignKey("SaasTenant.id"))
     first_name: Mapped[str] = mapped_column("firstName", String, nullable=False)
     last_name: Mapped[str] = mapped_column("lastName", String, nullable=False)
     birth_date: Mapped[datetime | None] = mapped_column("birthDate", DateTime(timezone=True))
@@ -595,10 +672,12 @@ class Invoice(Base):
     __tablename__ = "Invoice"
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid4()))
+    tenant_id: Mapped[str | None] = mapped_column("tenantId", String(36), ForeignKey("SaasTenant.id"))
     invoice_number: Mapped[str | None] = mapped_column("invoiceNumber", String, unique=True)
     status: Mapped[InvoiceStatus] = mapped_column(String, nullable=False, default=InvoiceStatus.draft.value)
     customer_id: Mapped[str] = mapped_column("customerId", String(36), ForeignKey("Customer.id"), nullable=False)
     issue_date: Mapped[datetime | None] = mapped_column("issueDate", DateTime(timezone=True))
+    due_date: Mapped[datetime | None] = mapped_column("dueDate", DateTime(timezone=True))
     period_start: Mapped[datetime | None] = mapped_column("periodStart", DateTime(timezone=True))
     period_end: Mapped[datetime | None] = mapped_column("periodEnd", DateTime(timezone=True))
     notes: Mapped[str | None] = mapped_column(Text)
@@ -680,6 +759,7 @@ class Proposal(Base):
     __tablename__ = "Proposal"
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid4()))
+    tenant_id: Mapped[str | None] = mapped_column("tenantId", String(36), ForeignKey("SaasTenant.id"))
     status: Mapped[ProposalStatus] = mapped_column(String, nullable=False, default=ProposalStatus.intake.value)
     customer_company_name: Mapped[str | None] = mapped_column("customerCompanyName", String)
     customer_street: Mapped[str | None] = mapped_column("customerStreet", String)
@@ -765,6 +845,7 @@ class RagSource(Base):
     )
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid4()))
+    tenant_id: Mapped[str | None] = mapped_column("tenantId", String(36), ForeignKey("SaasTenant.id"))
     proposal_id: Mapped[str | None] = mapped_column("proposalId", String(36), ForeignKey("Proposal.id"))
     order_id: Mapped[str | None] = mapped_column("orderId", String(36), ForeignKey("Order.id"))
     customer_id: Mapped[str | None] = mapped_column("customerId", String(36), ForeignKey("Customer.id"))

@@ -5,6 +5,7 @@ import { usePathname } from 'next/navigation';
 import { useEffect, useState } from 'react';
 
 import { useI18n } from '../../lib/i18n';
+import { readStoredAccessUser, type StoredAccessUser } from '../../lib/access';
 
 type IconName = 'dashboard' | 'orders' | 'intake' | 'monitoring' | 'more' | 'customers' | 'sites' | 'workshops' | 'drafts' | 'invoices';
 
@@ -49,6 +50,7 @@ export function MobileBottomNav() {
   const { locale, messages } = useI18n();
   const pathname = usePathname();
   const [moreOpen, setMoreOpen] = useState(false);
+  const [authUser, setAuthUser] = useState<StoredAccessUser | null>(null);
   const moreLabel = locale === 'ar' ? '\u0627\u0644\u0645\u0632\u064a\u062f' : locale === 'de' ? 'Mehr' : 'More';
   const mobileLabels = locale === 'ar'
     ? { close: '\u0625\u063a\u0644\u0627\u0642 \u0627\u0644\u0642\u0627\u0626\u0645\u0629', nav: '\u062a\u0646\u0642\u0644 \u0627\u0644\u0647\u0627\u062a\u0641' }
@@ -60,19 +62,38 @@ export function MobileBottomNav() {
     setMoreOpen(false);
   }, [pathname]);
 
+  useEffect(() => {
+    function readAuthUser() {
+      setAuthUser(readStoredAccessUser());
+    }
+
+    readAuthUser();
+    window.addEventListener('storage', readAuthUser);
+    window.addEventListener('focus', readAuthUser);
+    window.addEventListener('omran-auth-changed', readAuthUser);
+    return () => {
+      window.removeEventListener('storage', readAuthUser);
+      window.removeEventListener('focus', readAuthUser);
+      window.removeEventListener('omran-auth-changed', readAuthUser);
+    };
+  }, []);
+
+  if (authUser?.accountLevel === 'platform_admin') return null;
+
+  const permissions = new Set(authUser?.permissions || []);
   const primaryItems = [
-    { href: '/', label: messages.nav.dashboard, icon: 'dashboard' as IconName },
-    { href: '/orders', label: messages.nav.orders, icon: 'orders' as IconName },
-    { href: '/ai-intake', label: messages.nav.aiIntake, icon: 'intake' as IconName },
-    { href: '/monitoring', label: messages.nav.aiMonitoring, icon: 'monitoring' as IconName },
-  ];
+    { href: authUser?.accountLevel === 'company_viewer' ? '/viewer-dashboard' : '/', label: messages.nav.dashboard, icon: 'dashboard' as IconName, show: true },
+    { href: '/orders', label: messages.nav.orders, icon: 'orders' as IconName, show: permissions.has('view_projects') },
+    { href: '/ai-intake', label: messages.nav.aiIntake, icon: 'intake' as IconName, show: permissions.has('use_ai_intake') },
+    { href: '/monitoring', label: messages.nav.aiMonitoring, icon: 'monitoring' as IconName, show: permissions.has('use_ai_monitoring') },
+  ].filter((item) => item.show);
   const moreItems = [
-    { href: '/customers', label: messages.nav.customers, icon: 'customers' as IconName },
-    { href: '/sites', label: messages.nav.sites, icon: 'sites' as IconName },
-    { href: '/workshops', label: messages.nav.workshops, icon: 'workshops' as IconName },
-    { href: '/invoices/drafts', label: messages.nav.invoiceDrafts, icon: 'drafts' as IconName },
-    { href: '/invoices', label: messages.nav.invoices, icon: 'invoices' as IconName },
-  ];
+    { href: '/customers', label: messages.nav.customers, icon: 'customers' as IconName, show: permissions.has('manage_company') },
+    { href: '/sites', label: messages.nav.sites, icon: 'sites' as IconName, show: permissions.has('view_projects') },
+    { href: '/workshops', label: messages.nav.workshops, icon: 'workshops' as IconName, show: permissions.has('manage_company') },
+    { href: '/invoices/drafts', label: messages.nav.invoiceDrafts, icon: 'drafts' as IconName, show: permissions.has('manage_invoices') },
+    { href: '/invoices', label: messages.nav.invoices, icon: 'invoices' as IconName, show: permissions.has('manage_invoices') },
+  ].filter((item) => item.show);
   const moreActive = moreItems.some((item) => isActive(pathname, item.href));
 
   return (

@@ -15,7 +15,7 @@ from sqlalchemy.orm import Session, selectinload
 
 from ..database import get_db
 from ..models import Proposal, ProposalMessage, Workshop
-from ..routers.auth import get_current_user
+from ..routers.auth import get_current_user, require_permission, tenant_id_for_user
 from ..schemas import (
     AIIntakeConfirmPayload,
     AIIntakeCreatePayload,
@@ -49,7 +49,7 @@ from ..services.rag import (
 )
 from ..utils import as_datetime, end_of_utc_day, ensure, json_dumps, json_loads, not_found, proposal_payload
 
-router = APIRouter(dependencies=[Depends(get_current_user)])
+router = APIRouter(dependencies=[Depends(get_current_user), Depends(require_permission("use_ai_intake"))])
 logger = logging.getLogger(__name__)
 
 SUPPORTED_WAV_CONTENT_TYPES = {
@@ -93,10 +93,22 @@ def _proposal_query():
     return select(Proposal).options(selectinload(Proposal.messages), selectinload(Proposal.facts)).order_by(Proposal.updated_at.desc())
 
 
-def _get_proposal(db: Session, proposal_id: str) -> Proposal:
+def _tenant_id(user) -> str | None:
+    return tenant_id_for_user(user)
+
+
+def _ensure_same_tenant(item, user) -> None:
+    tenant_id = _tenant_id(user)
+    if tenant_id and getattr(item, "tenant_id", None) != tenant_id:
+        raise not_found()
+
+
+def _get_proposal(db: Session, proposal_id: str, user=None) -> Proposal:
     proposal = db.execute(_proposal_query().where(Proposal.id == proposal_id)).scalar_one_or_none()
     if not proposal:
         raise not_found()
+    if user is not None:
+        _ensure_same_tenant(proposal, user)
     return proposal
 
 
@@ -192,8 +204,13 @@ def work_summary(payload: AIWorkSummaryPayload, db: Session = Depends(get_db)) -
 
 
 @router.post("/ai/intakes", status_code=201)
-def create_intake(payload: AIIntakeCreatePayload, db: Session = Depends(get_db)) -> dict:
+def create_intake(
+    payload: AIIntakeCreatePayload,
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+) -> dict:
     proposal = Proposal(
+        tenant_id=_tenant_id(current_user),
         status="intake",
         customer_company_name=payload.customerCompanyName,
         order_title=payload.orderTitle,
@@ -211,21 +228,29 @@ def list_intakes(
     page: int = Query(default=1, ge=1),
     pageSize: int = Query(default=20, ge=1, le=100),
     db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
 ) -> list[dict] | dict:
+    tenant_id = _tenant_id(current_user)
+    stmt = _proposal_query()
+    if tenant_id:
+        stmt = stmt.where(Proposal.tenant_id == tenant_id)
     if not paginated:
-        proposals = db.execute(_proposal_query()).scalars().all()
+        proposals = db.execute(stmt).scalars().all()
         return [proposal_payload(item) for item in proposals]
     safe_page, safe_page_size = _page_params(page, pageSize)
-    total = db.scalar(select(func.count()).select_from(Proposal)) or 0
+    count_stmt = select(func.count()).select_from(Proposal)
+    if tenant_id:
+        count_stmt = count_stmt.where(Proposal.tenant_id == tenant_id)
+    total = db.scalar(count_stmt) or 0
     proposals = db.execute(
-        _proposal_query().offset((safe_page - 1) * safe_page_size).limit(safe_page_size)
+        stmt.offset((safe_page - 1) * safe_page_size).limit(safe_page_size)
     ).scalars().all()
     return _paginated_response([proposal_payload(item) for item in proposals], total, safe_page, safe_page_size)
 
 
 @router.get("/ai/intakes/{proposal_id}")
-def get_intake(proposal_id: str, db: Session = Depends(get_db)) -> dict:
-    proposal = _get_proposal(db, proposal_id)
+def get_intake(proposal_id: str, db: Session = Depends(get_db), current_user=Depends(get_current_user)) -> dict:
+    proposal = _get_proposal(db, proposal_id, current_user)
     return proposal_payload(proposal, include_messages=True)
 
 
@@ -234,8 +259,9 @@ def get_intake_pdf(
     proposal_id: str,
     locale: Literal["de", "en", "ar"] | None = None,
     db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
 ) -> StreamingResponse:
-    proposal = _get_proposal(db, proposal_id)
+    proposal = _get_proposal(db, proposal_id, current_user)
     pdf_bytes = build_proposal_pdf(proposal_payload(proposal, include_messages=True), locale=locale or "en")
     headers = {"Content-Disposition": f"inline; filename=\"{_proposal_pdf_filename(proposal)}\""}
     return StreamingResponse(io.BytesIO(pdf_bytes), media_type="application/pdf", headers=headers)
@@ -248,7 +274,7 @@ def update_intake(
     db: Session = Depends(get_db),
     current_user=Depends(get_current_user),
 ) -> dict:
-    proposal = _get_proposal(db, proposal_id)
+    proposal = _get_proposal(db, proposal_id, current_user)
     apply_proposal_update(proposal, payload)
     capture_proposal_snapshot_for_rag(db, proposal, created_by_user_id=actor_id(current_user))
     db.commit()
@@ -257,8 +283,12 @@ def update_intake(
 
 
 @router.delete("/ai/intakes/{proposal_id}")
-def delete_intake(proposal_id: str, db: Session = Depends(get_db)) -> dict:
-    proposal = _get_proposal(db, proposal_id)
+def delete_intake(
+    proposal_id: str,
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+) -> dict:
+    proposal = _get_proposal(db, proposal_id, current_user)
     delete_rag_for_proposal(db, proposal.id)
     db.delete(proposal)
     db.commit()
@@ -266,8 +296,12 @@ def delete_intake(proposal_id: str, db: Session = Depends(get_db)) -> dict:
 
 
 @router.delete("/ai/intakes/{proposal_id}/messages")
-def clear_intake_messages(proposal_id: str, db: Session = Depends(get_db)) -> dict:
-    proposal = _get_proposal(db, proposal_id)
+def clear_intake_messages(
+    proposal_id: str,
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+) -> dict:
+    proposal = _get_proposal(db, proposal_id, current_user)
     delete_rag_for_proposal_messages(db, proposal.id)
     proposal.messages.clear()
     clear_proposal_memory(db, proposal)
@@ -279,8 +313,13 @@ def clear_intake_messages(proposal_id: str, db: Session = Depends(get_db)) -> di
 
 
 @router.delete("/ai/intakes/{proposal_id}/messages/{message_id}")
-def delete_intake_message(proposal_id: str, message_id: str, db: Session = Depends(get_db)) -> dict:
-    proposal = _get_proposal(db, proposal_id)
+def delete_intake_message(
+    proposal_id: str,
+    message_id: str,
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+) -> dict:
+    proposal = _get_proposal(db, proposal_id, current_user)
     message = db.get(ProposalMessage, message_id)
     if not message or message.proposal_id != proposal.id:
         raise not_found()
@@ -302,7 +341,7 @@ def delete_intake_message(proposal_id: str, message_id: str, db: Session = Depen
     proposal.updated_at = datetime.now(timezone.utc)
     db.add(proposal)
     db.commit()
-    return proposal_payload(_get_proposal(db, proposal_id), include_messages=True)
+    return proposal_payload(_get_proposal(db, proposal_id, current_user), include_messages=True)
 
 
 @router.post("/ai/intakes/{proposal_id}/messages/stream")
@@ -312,10 +351,10 @@ def intake_message_stream(
     db: Session = Depends(get_db),
     current_user=Depends(get_current_user),
 ) -> StreamingResponse:
-    proposal = _get_proposal(db, proposal_id)
+    proposal = _get_proposal(db, proposal_id, current_user)
     user_message = append_message(db, proposal, "user", payload.content)
     db.commit()
-    proposal = _get_proposal(db, proposal_id)
+    proposal = _get_proposal(db, proposal_id, current_user)
     try:
         refresh_proposal_memory_locally(db, proposal, proposal.messages)
         capture_chat_message_for_rag(db, proposal, user_message, created_by_user_id=actor_id(current_user))
@@ -323,7 +362,7 @@ def intake_message_stream(
     except Exception as exc:
         db.rollback()
         logger.warning("AI intake memory/RAG refresh failed: proposal_id=%s error=%s", proposal_id, exc)
-    proposal = _get_proposal(db, proposal_id)
+    proposal = _get_proposal(db, proposal_id, current_user)
     ensure_gemini_ready()
 
     def generate() -> Iterable[str]:
@@ -356,8 +395,12 @@ def intake_message_stream(
 
 
 @router.get("/ai/intakes/{proposal_id}/memory")
-def get_intake_memory(proposal_id: str, db: Session = Depends(get_db)) -> dict:
-    proposal = _get_proposal(db, proposal_id)
+def get_intake_memory(
+    proposal_id: str,
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+) -> dict:
+    proposal = _get_proposal(db, proposal_id, current_user)
     payload = proposal_payload(proposal, include_messages=True)
     return {
         "proposalId": proposal.id,
@@ -370,12 +413,16 @@ def get_intake_memory(proposal_id: str, db: Session = Depends(get_db)) -> dict:
 
 
 @router.post("/ai/intakes/{proposal_id}/memory/refresh")
-def refresh_intake_memory(proposal_id: str, db: Session = Depends(get_db)) -> dict:
-    proposal = _get_proposal(db, proposal_id)
+def refresh_intake_memory(
+    proposal_id: str,
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+) -> dict:
+    proposal = _get_proposal(db, proposal_id, current_user)
     ensure(bool(proposal.messages), "Bitte zuerst eine Unterhaltung fuehren.")
     refresh_proposal_memory(db, proposal, proposal.messages)
     db.commit()
-    proposal = _get_proposal(db, proposal_id)
+    proposal = _get_proposal(db, proposal_id, current_user)
     payload = proposal_payload(proposal, include_messages=True)
     return {
         "proposalId": proposal.id,
@@ -388,8 +435,12 @@ def refresh_intake_memory(proposal_id: str, db: Session = Depends(get_db)) -> di
 
 
 @router.delete("/ai/intakes/{proposal_id}/memory")
-def delete_intake_memory(proposal_id: str, db: Session = Depends(get_db)) -> dict:
-    proposal = _get_proposal(db, proposal_id)
+def delete_intake_memory(
+    proposal_id: str,
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+) -> dict:
+    proposal = _get_proposal(db, proposal_id, current_user)
     clear_proposal_memory(db, proposal)
     proposal.updated_at = datetime.now(timezone.utc)
     db.commit()
@@ -404,8 +455,9 @@ async def transcribe_intake_audio(
     locale_hint: Literal["de", "en", "ar"] | None = Form(default=None, alias="localeHint"),
     duration_ms_hint: int | None = Form(default=None, alias="durationMs"),
     db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
 ) -> dict:
-    _get_proposal(db, proposal_id)
+    _get_proposal(db, proposal_id, current_user)
 
     try:
         raw_content_type = (audio.content_type or "").lower()
@@ -480,13 +532,13 @@ def generate_proposal(
     db: Session = Depends(get_db),
     current_user=Depends(get_current_user),
 ) -> dict:
-    proposal = _get_proposal(db, proposal_id)
+    proposal = _get_proposal(db, proposal_id, current_user)
     ensure(bool(proposal.messages), "Bitte zuerst eine Unterhaltung fuehren.")
     try:
         refresh_proposal_memory_locally(db, proposal, proposal.messages)
     except Exception as exc:
         db.rollback()
-        proposal = _get_proposal(db, proposal_id)
+        proposal = _get_proposal(db, proposal_id, current_user)
         logger.warning("AI intake local memory refresh before proposal failed: proposal_id=%s error=%s", proposal_id, exc)
     extract_proposal_from_messages(proposal, proposal.messages)
     capture_proposal_snapshot_for_rag(db, proposal, created_by_user_id=actor_id(current_user))
@@ -653,8 +705,12 @@ def _workshop_recommendations_for_proposal(db: Session, proposal: Proposal) -> d
 
 
 @router.post("/ai/intakes/{proposal_id}/recommend-assignments")
-def recommend_assignments(proposal_id: str, db: Session = Depends(get_db)) -> dict:
-    proposal = _get_proposal(db, proposal_id)
+def recommend_assignments(
+    proposal_id: str,
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+) -> dict:
+    proposal = _get_proposal(db, proposal_id, current_user)
     recommendations = _workshop_recommendations_for_proposal(db, proposal)
     proposal.recommended_team_json = json_dumps(recommendations)
     if proposal.status == "draft":
@@ -673,8 +729,9 @@ def explain_recommendation_stream(
     site_index: int,
     locale: Literal["de", "en", "ar"] | None = None,
     db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
 ) -> StreamingResponse:
-    proposal = _get_proposal(db, proposal_id)
+    proposal = _get_proposal(db, proposal_id, current_user)
     recommendations = _workshop_recommendations_for_proposal(db, proposal)
     sites = recommendations.get("sites") or []
     if site_index < 0 or site_index >= len(sites):
@@ -702,7 +759,7 @@ def confirm_intake(
     db: Session = Depends(get_db),
     current_user=Depends(get_current_user),
 ) -> dict:
-    proposal = _get_proposal(db, proposal_id)
+    proposal = _get_proposal(db, proposal_id, current_user)
     site_assignments = {item.siteIndex: item.employeeIds for item in payload.siteAssignments}
     result = confirm_proposal(
         db,
@@ -715,7 +772,7 @@ def confirm_intake(
     capture_proposal_snapshot_for_rag(db, proposal, created_by_user_id=actor_id(current_user))
     record_audit(
         db,
-        action="ai_intake.confirmed",
+        action="ai.proposal.confirmed",
         entity_type="Proposal",
         entity_id=proposal.id,
         actor_user_id=actor_id(current_user),
