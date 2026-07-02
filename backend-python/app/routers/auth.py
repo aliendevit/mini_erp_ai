@@ -36,6 +36,7 @@ EMAIL_RE = re.compile(r"^[^\s@]+@[^\s@]+\.[^\s@]+$")
 PHONE_RE = re.compile(r"^\+?[0-9]{8,15}$")
 PASSWORD_RE = re.compile(r"^(?=.*\d)(?=.*[!@#$%^&*()_+\-=\[\]{};':\"\\|,.<>/?]).{8,}$")
 HASH_ITERATIONS = 210_000
+MAX_FAILED_LOGIN_ATTEMPTS = 5
 PLATFORM_DEFAULT_PERMISSIONS = [
     "manage_platform",
     "manage_tenants",
@@ -118,6 +119,23 @@ def _validate_phone(phone: str | None) -> str | None:
     if not PHONE_RE.match(normalized):
         raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, "Phone must contain only numbers and optional +.")
     return normalized
+
+
+def _validate_display_name(value: str | None) -> str:
+    name = (value or "").strip()
+    if not name:
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, "User name is required.")
+    if len(name) > 120:
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, "User name is too long.")
+    return name
+
+
+def _as_aware_utc(value: datetime | None) -> datetime | None:
+    if not value:
+        return None
+    if value.tzinfo is None:
+        return value.replace(tzinfo=timezone.utc)
+    return value.astimezone(timezone.utc)
 
 
 def _hash_password(password: str, salt: str | None = None) -> str:
@@ -231,6 +249,7 @@ def _user_response(user: UserAccount, db: Session) -> AuthUserResponse:
     return AuthUserResponse(
         id=user.id,
         email=user.email,
+        displayName=user.display_name,
         phone=user.phone,
         tenantId=user.tenant_id,
         accountLevel=user.account_level,
@@ -265,9 +284,11 @@ def _ai_feature_response(user: UserAccount) -> list[AccountControlFeatureRespons
 
 
 def _account_control_user_response(user: UserAccount) -> AccountControlUserResponse:
+    failed_attempts = int(user.failed_login_attempts or 0)
     return AccountControlUserResponse(
         id=user.id,
         email=user.email,
+        displayName=user.display_name,
         phone=user.phone,
         accountLevel=user.account_level,
         role=user.role,
@@ -275,6 +296,9 @@ def _account_control_user_response(user: UserAccount) -> AccountControlUserRespo
         permissions=permissions_for_user(user),
         aiFeatures=_ai_feature_response(user),
         isActive=user.is_active,
+        failedLoginAttempts=failed_attempts,
+        remainingLoginAttempts=max(0, MAX_FAILED_LOGIN_ATTEMPTS - failed_attempts),
+        lockedUntil=user.locked_until,
         lastLoginAt=user.last_login_at,
         createdAt=user.created_at,
     )
@@ -328,11 +352,13 @@ def get_current_user(authorization: str | None = Header(default=None), db: Sessi
 @router.post("/register", response_model=AuthResponse, status_code=status.HTTP_201_CREATED)
 def register(payload: AuthRegisterPayload, db: Session = Depends(get_db)) -> AuthResponse:
     email = _validate_email(payload.email)
+    display_name = _clean_text(payload.displayName) or email.split("@", 1)[0]
     password = _validate_password(payload.password)
     phone = _validate_phone(payload.phone)
 
     user = UserAccount(
         email=email,
+        display_name=display_name,
         password_hash=_hash_password(password),
         phone=phone,
         account_level="company_manager",
@@ -355,10 +381,33 @@ def register(payload: AuthRegisterPayload, db: Session = Depends(get_db)) -> Aut
 def login(payload: AuthLoginPayload, db: Session = Depends(get_db)) -> AuthResponse:
     email = _validate_email(payload.email)
     user = db.scalar(select(UserAccount).where(UserAccount.email == email))
-    if not user or not user.is_active or not _verify_password(payload.password, user.password_hash):
+    now = datetime.now(timezone.utc)
+    if user and user.locked_until:
+        raise HTTPException(
+            status.HTTP_429_TOO_MANY_REQUESTS,
+            "Account locked after too many wrong password attempts. A manager must reset login attempts.",
+        )
+
+    if not user or not user.is_active:
         raise HTTPException(status.HTTP_401_UNAUTHORIZED, "Invalid email or password.")
 
+    if not _verify_password(payload.password, user.password_hash):
+        user.failed_login_attempts = int(user.failed_login_attempts or 0) + 1
+        if user.failed_login_attempts >= MAX_FAILED_LOGIN_ATTEMPTS:
+            user.locked_until = now
+            user.failed_login_attempts = MAX_FAILED_LOGIN_ATTEMPTS
+            db.commit()
+            raise HTTPException(
+                status.HTTP_429_TOO_MANY_REQUESTS,
+                "Account locked after too many wrong password attempts. A manager must reset login attempts.",
+            )
+        db.commit()
+        remaining = MAX_FAILED_LOGIN_ATTEMPTS - user.failed_login_attempts
+        raise HTTPException(status.HTTP_401_UNAUTHORIZED, f"Invalid email or password. {remaining} attempts remaining.")
+
     token = _issue_session(user)
+    user.failed_login_attempts = 0
+    user.locked_until = None
     db.commit()
     db.refresh(user)
     return _auth_payload(user, token, db)
@@ -379,6 +428,8 @@ def change_password(
         raise HTTPException(status.HTTP_401_UNAUTHORIZED, "Current password is incorrect.")
     new_password = _validate_password(payload.newPassword)
     user.password_hash = _hash_password(new_password)
+    user.failed_login_attempts = 0
+    user.locked_until = None
     user.updated_at = datetime.now(timezone.utc)
     record_audit(
         db,
@@ -480,6 +531,7 @@ def create_company_user(
         raise HTTPException(status.HTTP_403_FORBIDDEN, "Only company managers can create company users.")
 
     email = _validate_email(payload.email)
+    display_name = _validate_display_name(payload.displayName)
     password = _validate_password(payload.password)
     phone = _validate_phone(payload.phone)
     tenant, user_used = _tenant_user_usage(db, manager.tenant_id)
@@ -496,6 +548,7 @@ def create_company_user(
     role = "project_user" if account_level == "company_user" else "viewer"
     user = UserAccount(
         email=email,
+        display_name=display_name,
         password_hash=_hash_password(password),
         phone=phone,
         tenant_id=manager.tenant_id,
@@ -513,8 +566,8 @@ def create_company_user(
         entity_type="UserAccount",
         entity_id=user.id,
         actor_user_id=actor_id(manager),
-        summary=f"Company user created: {user.email}",
-        details={"accountLevel": account_level, "tenantId": manager.tenant_id},
+        summary=f"Company user created: {user.display_name or user.email}",
+        details={"accountLevel": account_level, "tenantId": manager.tenant_id, "displayName": display_name},
     )
     db.commit()
     db.refresh(user)
@@ -548,6 +601,36 @@ def update_company_user_ai_permissions(
         actor_user_id=actor_id(manager),
         summary=f"AI permissions updated for {target.email}",
         details={"permissions": sorted(requested_ai_permissions), "email": target.email},
+    )
+    db.commit()
+    db.refresh(target)
+    return _account_control_user_response(target)
+
+
+@router.post("/account-control/users/{user_id}/reset-login-attempts", response_model=AccountControlUserResponse)
+def reset_company_user_login_attempts(
+    user_id: str,
+    manager: UserAccount = Depends(require_permission("manage_users")),
+    db: Session = Depends(get_db),
+) -> AccountControlUserResponse:
+    if manager.account_level != "company_manager" or not manager.tenant_id:
+        raise HTTPException(status.HTTP_403_FORBIDDEN, "Only company managers can reset user login attempts.")
+
+    target = db.get(UserAccount, user_id)
+    if not target or target.tenant_id != manager.tenant_id or target.account_level not in {"company_user", "company_viewer"}:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "User not found.")
+
+    target.failed_login_attempts = 0
+    target.locked_until = None
+    target.updated_at = datetime.now(timezone.utc)
+    record_audit(
+        db,
+        action="user.login_attempts.reset",
+        entity_type="UserAccount",
+        entity_id=target.id,
+        actor_user_id=actor_id(manager),
+        summary=f"Login attempts reset for user: {target.display_name or target.email}",
+        details={"tenantId": manager.tenant_id, "targetEmail": target.email},
     )
     db.commit()
     db.refresh(target)

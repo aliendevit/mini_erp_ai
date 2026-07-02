@@ -208,6 +208,12 @@ def _ensure_user_access_columns() -> None:
         statements.append("ALTER TABLE \"UserAccount\" ADD COLUMN role VARCHAR DEFAULT 'company_manager' NOT NULL")
     if "permissionsJson" not in column_names:
         statements.append('ALTER TABLE "UserAccount" ADD COLUMN "permissionsJson" TEXT')
+    if "displayName" not in column_names:
+        statements.append('ALTER TABLE "UserAccount" ADD COLUMN "displayName" VARCHAR')
+    if "failedLoginAttempts" not in column_names:
+        statements.append('ALTER TABLE "UserAccount" ADD COLUMN "failedLoginAttempts" INTEGER DEFAULT 0 NOT NULL')
+    if "lockedUntil" not in column_names:
+        statements.append('ALTER TABLE "UserAccount" ADD COLUMN "lockedUntil" TIMESTAMP')
 
     if not statements:
         return

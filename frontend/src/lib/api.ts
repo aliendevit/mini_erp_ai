@@ -20,6 +20,38 @@ export function authHeaders(): Record<string, string> {
   return token ? { Authorization: `Bearer ${token}` } : {};
 }
 
+function isPublicAuthPath(path: string) {
+  return path === '/auth/login' || path === '/auth/register';
+}
+
+function handleAuthFailure(message = 'Please sign in again.') {
+  if (typeof window === 'undefined') return;
+  localStorage.removeItem('omran_auth_token');
+  localStorage.removeItem('omran_auth_user');
+  window.dispatchEvent(new Event('omran-auth-changed'));
+  window.dispatchEvent(new CustomEvent('omran:alert', { detail: { message, kind: 'error' } }));
+  if (!['/auth', '/register', '/registration'].includes(window.location.pathname)) {
+    window.location.replace('/auth');
+  }
+}
+
+function headersForPath(path: string, extra: Record<string, string> = {}) {
+  const headers = { ...extra, ...authHeaders() };
+  if (!isPublicAuthPath(path) && typeof window !== 'undefined' && !headers.Authorization) {
+    handleAuthFailure();
+    throw new Error('Please sign in again.');
+  }
+  return headers;
+}
+
+async function handleResponseError(res: Response, path: string): Promise<never> {
+  const msg = await safeMessage(res);
+  if (!isPublicAuthPath(path) && res.status === 401) {
+    handleAuthFailure(msg || 'Please sign in again.');
+  }
+  throw new Error(msg);
+}
+
 function downloadFileName(path: string, fallback = 'download') {
   const cleanPath = path.split('?')[0] || '';
   return cleanPath.split('/').filter(Boolean).pop() || fallback;
@@ -45,10 +77,9 @@ export async function downloadAuthBlob(path: string, fileName?: string): Promise
 }
 
 export async function apiGet<T>(path: string): Promise<T> {
-  const res = await fetch(`${API_BASE}${path}`, { cache: 'no-store', headers: authHeaders() });
+  const res = await fetch(`${API_BASE}${path}`, { cache: 'no-store', headers: headersForPath(path) });
   if (!res.ok) {
-    const msg = await safeMessage(res);
-    throw new Error(msg);
+    await handleResponseError(res, path);
   }
   return res.json();
 }
@@ -56,11 +87,10 @@ export async function apiGet<T>(path: string): Promise<T> {
 export async function apiAuthGet<T>(path: string): Promise<T> {
   const res = await fetch(`${API_BASE}${path}`, {
     cache: 'no-store',
-    headers: authHeaders(),
+    headers: headersForPath(path),
   });
   if (!res.ok) {
-    const msg = await safeMessage(res);
-    throw new Error(msg);
+    await handleResponseError(res, path);
   }
   try {
     return (await res.json()) as T;
@@ -76,12 +106,11 @@ export async function apiJson<T>(
 ): Promise<T> {
   const res = await fetch(`${API_BASE}${path}`, {
     method,
-    headers: { 'Content-Type': 'application/json', ...authHeaders() },
+    headers: headersForPath(path, { 'Content-Type': 'application/json' }),
     body: body ? JSON.stringify(body) : undefined,
   });
   if (!res.ok) {
-    const msg = await safeMessage(res);
-    throw new Error(msg);
+    await handleResponseError(res, path);
   }
   try {
     return (await res.json()) as T;
@@ -97,12 +126,11 @@ export async function apiAuthJson<T>(
 ): Promise<T> {
   const res = await fetch(`${API_BASE}${path}`, {
     method,
-    headers: { 'Content-Type': 'application/json', ...authHeaders() },
+    headers: headersForPath(path, { 'Content-Type': 'application/json' }),
     body: body ? JSON.stringify(body) : undefined,
   });
   if (!res.ok) {
-    const msg = await safeMessage(res);
-    throw new Error(msg);
+    await handleResponseError(res, path);
   }
   try {
     return (await res.json()) as T;
@@ -118,12 +146,11 @@ export async function apiAuthForm<T>(
 ): Promise<T> {
   const res = await fetch(`${API_BASE}${path}`, {
     method,
-    headers: authHeaders(),
+    headers: headersForPath(path),
     body,
   });
   if (!res.ok) {
-    const msg = await safeMessage(res);
-    throw new Error(msg);
+    await handleResponseError(res, path);
   }
   try {
     return (await res.json()) as T;
@@ -135,11 +162,10 @@ export async function apiAuthForm<T>(
 export async function apiAuthBlob(path: string): Promise<Blob> {
   const res = await fetch(`${API_BASE}${path}`, {
     cache: 'no-store',
-    headers: authHeaders(),
+    headers: headersForPath(path),
   });
   if (!res.ok) {
-    const msg = await safeMessage(res);
-    throw new Error(msg);
+    await handleResponseError(res, path);
   }
   return res.blob();
 }
@@ -152,12 +178,11 @@ export async function apiForm<T>(
 ): Promise<T> {
   const res = await fetch(`${API_BASE}${path}`, {
     method,
-    headers: authHeaders(),
+    headers: headersForPath(path),
     body,
   });
   if (!res.ok) {
-    const msg = await safeMessage(res);
-    throw new Error(msg);
+    await handleResponseError(res, path);
   }
   try {
     return (await res.json()) as T;

@@ -9204,56 +9204,6 @@ html[data-theme="construction"] .auth-layout .auth-actions .btn.primary {
   }
 }
 
-/* SaaS access dashboards and demo account presentation */
-.auth-demo-access {
-  display: grid;
-  gap: 8px;
-  margin: 0 0 14px;
-  padding: 10px;
-  border: 1px solid color-mix(in srgb, var(--border) 72%, transparent);
-  border-radius: 8px;
-  background: color-mix(in srgb, var(--card) 86%, var(--accent, #4f7cff) 8%);
-}
-
-.auth-demo-access > div,
-.auth-viewer-link {
-  display: grid;
-  gap: 3px;
-  min-width: 0;
-  padding: 8px;
-  border-radius: 8px;
-  background: color-mix(in srgb, var(--btnBg) 48%, transparent);
-}
-
-.auth-viewer-link {
-  border: 1px solid rgba(34, 197, 94, 0.34);
-  background: rgba(34, 197, 94, 0.10);
-  text-decoration: none;
-}
-
-.auth-viewer-link:hover {
-  border-color: rgba(34, 197, 94, 0.58);
-  text-decoration: none;
-}
-
-.auth-demo-access strong {
-  color: var(--text);
-  font-size: 0.75rem;
-  font-weight: 900;
-}
-
-.auth-demo-access span,
-.auth-demo-access code {
-  color: var(--muted);
-  font-size: 0.72rem;
-  overflow-wrap: anywhere;
-}
-
-.auth-demo-access code {
-  color: var(--text);
-  font-weight: 800;
-}
-
 .auth-page {
   background:
     radial-gradient(circle at 18% 12%, color-mix(in srgb, var(--link) 18%, transparent), transparent 28rem),
@@ -10538,4 +10488,311 @@ html[data-theme="light"] .a2ui-card {
   background:
     linear-gradient(180deg, rgba(255, 255, 255, 0.92), rgba(248, 250, 252, 0.88)),
     var(--card);
+}
+
+/* Auth performance pass: keep the premium surface, remove expensive continuous paint work. */
+.auth-page::before,
+.auth-page::after,
+.auth-card::before,
+.auth-container::before,
+.auth-container::after,
+.auth-visual-lines i {
+  animation: none !important;
+}
+
+.auth-page::before {
+  filter: none !important;
+  opacity: 0.42 !important;
+  transform: none !important;
+}
+
+.auth-page::after {
+  background-position: 0 0 !important;
+}
+
+.auth-container::before,
+.auth-container::after {
+  filter: blur(1px) !important;
+  opacity: 0.45 !important;
+  transform: translate3d(0, 0, 0) !important;
+}
+
+.auth-card {
+  box-shadow:
+    0 22px 58px rgba(0, 0, 0, 0.32),
+    0 0 0 1px rgba(255, 255, 255, 0.035) !important;
+}
+
+.auth-layout .tab-button,
+.auth-layout .auth-actions .btn.primary,
+.auth-page .auth-input {
+  transition-duration: 120ms !important;
+}
+
+.auth-layout .auth-actions .btn.primary::before {
+  display: none !important;
+}
+
+.auth-layout .auth-actions .btn.primary:hover:not(:disabled),
+.auth-layout .tab-button:hover:not(.active),
+.auth-layout .tab-button.active,
+.auth-layout .tab-button.active:hover {
+  transform: translateY(-1px) !important;
+}
+
+.auth-page .auth-input:focus {
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--link) 16%, transparent) !important;
+}
+
+@media (max-width: 900px) {
+  .auth-page::before,
+  .auth-page::after,
+  .auth-container::before,
+  .auth-container::after,
+  .auth-card::before {
+    display: none !important;
+  }
+
+  .auth-card {
+    box-shadow: 0 16px 34px rgba(0, 0, 0, 0.22) !important;
+  }
+}
+
+/* Final platform/auth dashboard polish. */
+.app-header .settings-menu-panel::before,
+html[dir='rtl'] .app-header .settings-menu-panel::before,
+.app-utility-dock .settings-menu-panel::before,
+html[dir='rtl'] .app-utility-dock .settings-menu-panel::before {
+  display: block !important;
+  top: -7px !important;
+  width: 12px !important;
+  height: 12px !important;
+  border-top: 1px solid color-mix(in srgb, var(--border, #344256) 82%, transparent) !important;
+  border-left: 1px solid color-mix(in srgb, var(--border, #344256) 82%, transparent) !important;
+  background: var(--menu-arrow-bg) !important;
+  transform: rotate(45deg) !important;
+}
+
+.app-header .settings-menu-panel,
+html[dir='rtl'] .app-header .settings-menu-panel,
+.app-utility-dock .settings-menu-panel,
+html[dir='rtl'] .app-utility-dock .settings-menu-panel {
+  top: calc(100% + 10px) !important;
+  border-radius: 16px !important;
+  overflow: visible !important;
+}
+
+.auth-layout .auth-tabs {
+  display: grid !important;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.app-guest-header-link {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 44px;
+  min-height: 42px;
+  padding: 7px !important;
+  border-radius: 12px;
+  border: 1px solid color-mix(in srgb, var(--accent, #4f7cff) 34%, var(--border));
+  background:
+    linear-gradient(135deg, color-mix(in srgb, var(--accent, #4f7cff) 18%, transparent), rgba(255, 255, 255, 0.04)),
+    var(--menu-trigger-bg);
+  color: var(--text);
+  font-weight: 900;
+  text-decoration: none;
+  box-shadow: 0 10px 24px rgba(0, 0, 0, 0.12);
+}
+
+.app-guest-header-link:hover {
+  border-color: color-mix(in srgb, var(--accent, #4f7cff) 58%, transparent);
+  text-decoration: none;
+  transform: translateY(-1px);
+}
+
+.app-guest-header-link img {
+  width: 26px;
+  height: 26px;
+  object-fit: contain;
+  filter: drop-shadow(0 5px 10px rgba(0, 0, 0, 0.18));
+}
+
+.app-utility-dock .app-header-toggles:has(.app-guest-header-link) {
+  grid-template-columns: auto auto 44px;
+}
+
+@media (max-width: 560px) {
+  .app-guest-header-link {
+    width: 40px;
+    min-height: 38px;
+    padding: 6px !important;
+  }
+
+  .app-guest-header-link img {
+    width: 24px;
+    height: 24px;
+  }
+}
+
+.user-dashboard-shell .dashboard-hero {
+  grid-template-columns: minmax(0, 1.25fr) minmax(260px, 0.75fr);
+}
+
+.user-dashboard-profile {
+  grid-template-columns: 1fr !important;
+  align-content: stretch;
+}
+
+.user-dashboard-profile > div {
+  min-width: 0;
+}
+
+.user-dashboard-profile strong {
+  overflow-wrap: anywhere;
+}
+
+.user-dashboard-tool-card {
+  cursor: default;
+}
+
+.user-dashboard-tool-card .btn {
+  width: fit-content;
+  margin-top: 4px;
+}
+
+.user-dashboard-tool-card.disabled {
+  opacity: 0.64;
+}
+
+.user-dashboard-tool-card.disabled > span {
+  color: #ef4444;
+}
+
+.user-dashboard-boundary-grid .dashboard-module-card {
+  cursor: default;
+}
+
+.user-dashboard-boundary-grid .dashboard-module-card:hover {
+  transform: none;
+}
+
+@media (max-width: 900px) {
+  .user-dashboard-shell .dashboard-hero {
+    grid-template-columns: 1fr;
+  }
+
+  .auth-layout .auth-tabs {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 420px) {
+  .auth-layout .tab-button {
+    min-height: 34px !important;
+    padding-inline: 8px !important;
+    font-size: 0.76rem !important;
+  }
+}
+
+/* Final auth theme compatibility: readable hero banner across all themes. */
+.auth-layout .auth-hero {
+  border: 1px solid color-mix(in srgb, var(--border, #344256) 70%, var(--link, #4f7cff) 30%) !important;
+  background:
+    linear-gradient(135deg, color-mix(in srgb, var(--link, #4f7cff) 18%, transparent), color-mix(in srgb, var(--accent, #4f7cff) 10%, transparent)),
+    color-mix(in srgb, var(--card) 82%, var(--bg) 18%) !important;
+  color: var(--text) !important;
+  box-shadow: inset 0 1px 0 color-mix(in srgb, #ffffff 12%, transparent);
+}
+
+.auth-layout .auth-hero h2 {
+  color: var(--text) !important;
+  text-shadow: none !important;
+}
+
+html[data-theme="light"] .auth-layout .auth-hero {
+  background:
+    linear-gradient(135deg, rgba(37, 99, 235, 0.10), rgba(20, 184, 166, 0.08)),
+    rgba(255, 255, 255, 0.92) !important;
+  color: #0f172a !important;
+}
+
+html[data-theme="light"] .auth-layout .auth-hero h2 {
+  color: #0f172a !important;
+}
+
+html[data-theme="construction"] .auth-layout .auth-hero {
+  border-color: rgba(251, 146, 60, 0.34) !important;
+  background:
+    linear-gradient(135deg, rgba(249, 115, 22, 0.18), rgba(124, 58, 237, 0.08)),
+    rgba(24, 12, 7, 0.72) !important;
+  color: #fff7ed !important;
+}
+
+html[data-theme="construction"] .auth-layout .auth-hero h2 {
+  color: #fff7ed !important;
+}
+
+/* Final AI Intake example-card theme compatibility. */
+.ai-quick-prompts {
+  border-color: color-mix(in srgb, var(--border) 68%, var(--link) 32%) !important;
+  background:
+    linear-gradient(135deg, color-mix(in srgb, var(--link) 10%, transparent), color-mix(in srgb, var(--accent) 7%, transparent)),
+    color-mix(in srgb, var(--card) 86%, var(--bg) 14%) !important;
+}
+
+.ai-quick-prompt {
+  border-color: color-mix(in srgb, var(--border) 78%, var(--link) 22%) !important;
+  background: color-mix(in srgb, var(--card) 88%, var(--bg) 12%) !important;
+  color: var(--text) !important;
+  box-shadow: 0 10px 24px color-mix(in srgb, #000 12%, transparent);
+}
+
+.ai-quick-prompt:hover:not(:disabled) {
+  border-color: color-mix(in srgb, var(--link) 58%, var(--border)) !important;
+  background: color-mix(in srgb, var(--card) 78%, var(--link) 10%) !important;
+}
+
+.ai-quick-prompt span {
+  color: var(--link) !important;
+}
+
+.ai-quick-prompt p {
+  color: var(--muted) !important;
+}
+
+html[data-theme="construction"] .ai-quick-prompts {
+  border-color: rgba(251, 146, 60, 0.28) !important;
+  background:
+    linear-gradient(135deg, rgba(249, 115, 22, 0.14), rgba(124, 58, 237, 0.06)),
+    color-mix(in srgb, var(--card) 88%, var(--bg) 12%) !important;
+}
+
+html[data-theme="construction"] .ai-quick-prompt {
+  border-color: rgba(251, 146, 60, 0.24) !important;
+  background: color-mix(in srgb, var(--card) 86%, #2b1a11 14%) !important;
+}
+
+html[data-theme="construction"] .ai-quick-prompt span {
+  color: #ffb987 !important;
+}
+
+.account-control-user-actions {
+  display: grid;
+  justify-items: end;
+  gap: 8px;
+  min-width: 150px;
+}
+
+.account-control-user-actions .btn {
+  min-height: 34px;
+  padding: 6px 10px;
+  font-size: 0.78rem;
+}
+
+@media (max-width: 640px) {
+  .account-control-user-actions {
+    justify-items: start;
+    min-width: 0;
+  }
 }

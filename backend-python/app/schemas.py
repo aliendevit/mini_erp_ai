@@ -9,6 +9,7 @@ from pydantic import BaseModel, ConfigDict, Field
 class AuthRegisterPayload(BaseModel):
     email: str
     password: str
+    displayName: str | None = None
     phone: str | None = None
 
 
@@ -46,6 +47,7 @@ class CompanyProfileResponse(CompanyProfilePayload):
 class AuthUserResponse(BaseModel):
     id: str
     email: str
+    displayName: str | None = None
     phone: str | None = None
     tenantId: str | None = None
     accountLevel: str = "company_manager"
@@ -73,6 +75,7 @@ class AccountControlFeatureResponse(BaseModel):
 class AccountControlUserResponse(BaseModel):
     id: str
     email: str
+    displayName: str | None = None
     phone: str | None = None
     accountLevel: str
     role: str
@@ -80,6 +83,9 @@ class AccountControlUserResponse(BaseModel):
     permissions: list[str] = Field(default_factory=list)
     aiFeatures: list[AccountControlFeatureResponse] = Field(default_factory=list)
     isActive: bool = True
+    failedLoginAttempts: int = 0
+    remainingLoginAttempts: int = 5
+    lockedUntil: datetime | None = None
     lastLoginAt: datetime | None = None
     createdAt: datetime | None = None
 
@@ -98,6 +104,7 @@ class AccountControlPermissionsPayload(BaseModel):
 
 
 class ManagerCreateUserPayload(BaseModel):
+    displayName: str
     email: str
     password: str
     phone: str | None = None

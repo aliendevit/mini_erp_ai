@@ -8,6 +8,7 @@ import { zodResolver } from '@hookform/resolvers/zod';
 import { useI18n } from '../../lib/i18n';
 import { appConfirm } from '../../lib/dialog';
 import { apiGet, apiJson } from '../../lib/api';
+import { hasPermission, readStoredAccessUser } from '../../lib/access';
 import { fieldClass, SiteFormData, siteSchema, validationCopy } from '../../lib/form-validation';
 import { getPageSlice, ListPager } from '../ui/ListPager';
 
@@ -52,6 +53,7 @@ export default function SitesPage() {
   const [items, setItems] = useState<Site[]>([]);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [page, setPage] = useState(1);
+  const [canManageCompany, setCanManageCompany] = useState(false);
   const v = validationCopy(locale);
   const schema = useMemo(() => siteSchema(v, {
     orderId: m.common.order,
@@ -65,6 +67,11 @@ export default function SitesPage() {
     : locale === 'de'
       ? { kicker: 'Arbeitsbereiche', description: 'Projektstandorte organisieren und jeden Standort mit dem aktiven Auftrag verbinden.' }
       : { kicker: 'Work Areas', description: 'Organize project locations and connect each site back to its active order.' };
+  const readOnlyCopy = locale === 'ar'
+    ? { title: '\u0639\u0631\u0636 \u0627\u0644\u0645\u0648\u0627\u0642\u0639 \u0641\u0642\u0637', body: '\u064a\u0645\u0643\u0646\u0643 \u0645\u0631\u0627\u062c\u0639\u0629 \u0645\u0648\u0627\u0642\u0639 \u0627\u0644\u0639\u0645\u0644 \u0648\u0641\u062a\u062d \u0627\u0644\u0637\u0644\u0628 \u0627\u0644\u0645\u0631\u062a\u0628\u0637. \u0625\u0646\u0634\u0627\u0621 \u0623\u0648 \u062a\u0639\u062f\u064a\u0644 \u0627\u0644\u0645\u0648\u0627\u0642\u0639 \u064a\u062d\u062a\u0627\u062c \u0635\u0644\u0627\u062d\u064a\u0629 \u0627\u0644\u0645\u062f\u064a\u0631.' }
+    : locale === 'de'
+      ? { title: 'Standorte im Lesemodus', body: 'Sie koennen Standorte pruefen und den zugehoerigen Auftrag oeffnen. Standortverwaltung erfordert Managerrechte.' }
+      : { title: 'Read-only site list', body: 'You can review work sites and open their related orders. Site management requires manager access.' };
 
   const { register, handleSubmit, reset, setValue, getValues, formState: { errors } } = useForm<SiteFormData>({
     resolver: zodResolver(schema) as any,
@@ -74,10 +81,13 @@ export default function SitesPage() {
   });
 
   async function load() {
+    const user = readStoredAccessUser();
+    const canManage = hasPermission(user, 'manage_company');
+    setCanManageCompany(canManage);
     const [nextOrders, nextSites] = await Promise.all([apiGet<Order[]>('/orders'), apiGet<Site[]>('/sites')]);
     setOrders(nextOrders);
     setItems(nextSites);
-    if (!editingId && !getValues('orderId') && nextOrders.length > 0) {
+    if (canManage && !editingId && !getValues('orderId') && nextOrders.length > 0) {
       setValue('orderId', nextOrders[0].id, { shouldValidate: true });
     }
   }
@@ -88,11 +98,13 @@ export default function SitesPage() {
   }, []);
 
   function startNew() {
+    if (!canManageCompany) return;
     setEditingId(null);
     reset({ ...empty, orderId: orders[0]?.id || '' });
   }
 
   function startEdit(site: Site) {
+    if (!canManageCompany) return;
     setEditingId(site.id);
     reset({
       orderId: site.orderId,
@@ -106,6 +118,7 @@ export default function SitesPage() {
   }
 
   async function save(data: SiteFormData) {
+    if (!canManageCompany) return;
     try {
       const payload = {
         orderId: data.orderId,
@@ -129,6 +142,7 @@ export default function SitesPage() {
   }
 
   async function del(id: string) {
+    if (!canManageCompany) return;
     if (!(await appConfirm(m.common.deleteConfirm))) return;
     try {
       await apiJson(`/sites/${id}`, 'DELETE');
@@ -156,62 +170,69 @@ export default function SitesPage() {
         </div>
       </section>
 
-      <form className="card entity-panel validated-form" onSubmit={handleSubmit(save)} noValidate>
-        <h2>{m.sitesPage.heading}</h2>
-        <div className="muted">{m.sitesPage.description}</div>
-        <div className="form-required-note"><span>*</span> {v.requiredLabel}</div>
+      {canManageCompany ? (
+        <form className="card entity-panel validated-form" onSubmit={handleSubmit(save)} noValidate>
+          <h2>{m.sitesPage.heading}</h2>
+          <div className="muted">{m.sitesPage.description}</div>
+          <div className="form-required-note"><span>*</span> {v.requiredLabel}</div>
 
-        <div className="spacer" />
+          <div className="spacer" />
 
-        <div className="row">
-          <div className="form-field">
-            <label>{m.common.order} *</label>
-            <select {...register('orderId')} className={fieldClass(!!errors.orderId)} aria-invalid={!!errors.orderId}>
-              {orders.map((order) => (
-                <option key={order.id} value={order.id}>{order.title} ({order.customer?.companyName || m.common.none})</option>
-              ))}
-              {orders.length === 0 && <option value="">{m.sitesPage.noOrdersOption}</option>}
-            </select>
-            <FieldError message={errors.orderId?.message} />
+          <div className="row">
+            <div className="form-field">
+              <label>{m.common.order} *</label>
+              <select {...register('orderId')} className={fieldClass(!!errors.orderId)} aria-invalid={!!errors.orderId}>
+                {orders.map((order) => (
+                  <option key={order.id} value={order.id}>{order.title} ({order.customer?.companyName || m.common.none})</option>
+                ))}
+                {orders.length === 0 && <option value="">{m.sitesPage.noOrdersOption}</option>}
+              </select>
+              <FieldError message={errors.orderId?.message} />
+            </div>
+            <div className="form-field">
+              <label>{m.common.name} *</label>
+              <input {...register('siteName')} className={fieldClass(!!errors.siteName)} aria-invalid={!!errors.siteName} />
+              <FieldError message={errors.siteName?.message} />
+            </div>
+            <div className="form-field">
+              <label>{m.common.city} *</label>
+              <input {...register('city')} className={fieldClass(!!errors.city)} />
+              <FieldError message={errors.city?.message} />
+            </div>
           </div>
-          <div className="form-field">
-            <label>{m.common.name} *</label>
-            <input {...register('siteName')} className={fieldClass(!!errors.siteName)} aria-invalid={!!errors.siteName} />
-            <FieldError message={errors.siteName?.message} />
+
+          <div className="spacer" />
+
+          <div className="row">
+            <div className="form-field">
+              <label>{m.common.street} *</label>
+              <input {...register('street')} className={fieldClass(!!errors.street)} />
+              <FieldError message={errors.street?.message} />
+            </div>
+            <div className="form-field">
+              <label>{m.common.zipCode} <OptionalBadge label={v.optional} /></label>
+              <input {...register('zipCode')} className={fieldClass(!!errors.zipCode)} />
+              <FieldError message={errors.zipCode?.message} />
+            </div>
+            <div className="form-field">
+              <label>{m.common.notes} *</label>
+              <input {...register('notes')} className={fieldClass(!!errors.notes)} />
+              <FieldError message={errors.notes?.message} />
+            </div>
           </div>
-          <div className="form-field">
-            <label>{m.common.city} *</label>
-            <input {...register('city')} className={fieldClass(!!errors.city)} />
-            <FieldError message={errors.city?.message} />
+
+          <div className="spacer" />
+          <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+            <button className="btn primary" type="submit">{editingId ? m.common.save : m.common.create}</button>
+            <button className="btn" type="button" onClick={startNew}>{m.common.createNew}</button>
           </div>
+        </form>
+      ) : (
+        <div className="card entity-panel">
+          <h2>{readOnlyCopy.title}</h2>
+          <div className="muted">{readOnlyCopy.body}</div>
         </div>
-
-        <div className="spacer" />
-
-        <div className="row">
-          <div className="form-field">
-            <label>{m.common.street} *</label>
-            <input {...register('street')} className={fieldClass(!!errors.street)} />
-            <FieldError message={errors.street?.message} />
-          </div>
-          <div className="form-field">
-            <label>{m.common.zipCode} <OptionalBadge label={v.optional} /></label>
-            <input {...register('zipCode')} className={fieldClass(!!errors.zipCode)} />
-            <FieldError message={errors.zipCode?.message} />
-          </div>
-          <div className="form-field">
-            <label>{m.common.notes} *</label>
-            <input {...register('notes')} className={fieldClass(!!errors.notes)} />
-            <FieldError message={errors.notes?.message} />
-          </div>
-        </div>
-
-        <div className="spacer" />
-        <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-          <button className="btn primary" type="submit">{editingId ? m.common.save : m.common.create}</button>
-          <button className="btn" type="button" onClick={startNew}>{m.common.createNew}</button>
-        </div>
-      </form>
+      )}
 
       <div className="card entity-panel">
         <table className="table">
@@ -232,8 +253,8 @@ export default function SitesPage() {
                 <td>
                   <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
                     <Link className="btn" href={`/orders/${site.orderId}`}>{m.sitesPage.toOrder}</Link>
-                    <button className="btn" onClick={() => startEdit(site)}>{m.common.edit}</button>
-                    <button className="btn danger" onClick={() => del(site.id)}>{m.common.delete}</button>
+                    {canManageCompany && <button className="btn" onClick={() => startEdit(site)}>{m.common.edit}</button>}
+                    {canManageCompany && <button className="btn danger" onClick={() => del(site.id)}>{m.common.delete}</button>}
                   </div>
                 </td>
               </tr>

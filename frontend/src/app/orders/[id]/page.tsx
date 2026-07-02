@@ -7,6 +7,7 @@ import { useParams, useRouter } from 'next/navigation';
 import { useI18n } from '../../../lib/i18n';
 import { appConfirm } from '../../../lib/dialog';
 import { apiGet, apiJson } from '../../../lib/api';
+import { hasPermission, readStoredAccessUser } from '../../../lib/access';
 
 type Customer = { id: string; companyName: string };
 
@@ -135,6 +136,9 @@ export default function OrderDetailPage() {
   const [editingSiteId, setEditingSiteId] = useState<string | null>(null);
   const [assignmentForm, setAssignmentForm] = useState<AssignmentForm>(emptyAssignment);
   const [editingAssignmentId, setEditingAssignmentId] = useState<string | null>(null);
+  const [canManageCompany, setCanManageCompany] = useState(false);
+  const [canManageInvoices, setCanManageInvoices] = useState(false);
+  const [canUseAiMonitoring, setCanUseAiMonitoring] = useState(false);
 
   const siteOptions = useMemo(() => order?.sites || [], [order]);
   const activeWorkshops = useMemo(() => workshops.filter((workshop) => workshop.isActive && workshop.availabilityStatus !== 'not_available'), [workshops]);
@@ -145,14 +149,19 @@ export default function OrderDetailPage() {
   }, [activeWorkshops, assignmentForm.workshopId, editingAssignmentId, workshops]);
 
   async function load() {
+    const user = readStoredAccessUser();
+    const nextCanManageCompany = hasPermission(user, 'manage_company');
+    setCanManageCompany(nextCanManageCompany);
+    setCanManageInvoices(hasPermission(user, 'manage_invoices'));
+    setCanUseAiMonitoring(hasPermission(user, 'use_ai_monitoring'));
     const [nextOrder, nextCustomers, nextWorkshops, nextWorkshopAssignments] = await Promise.all([
       apiGet<Order>(`/orders/${id}`),
-      apiGet<Customer[]>('/customers'),
-      apiGet<Workshop[]>('/workshops?activeOnly=true'),
+      nextCanManageCompany ? apiGet<Customer[]>('/customers') : Promise.resolve([]),
+      nextCanManageCompany ? apiGet<Workshop[]>('/workshops?activeOnly=true') : Promise.resolve([]),
       apiGet<WorkshopAssignment[]>(`/orders/${id}/workshop-assignments`),
     ]);
     setOrder(nextOrder);
-    setCustomers(nextCustomers);
+    setCustomers(nextCanManageCompany ? nextCustomers : nextOrder.customer ? [nextOrder.customer] : []);
     setWorkshops(nextWorkshops);
     setWorkshopAssignments(nextWorkshopAssignments);
     setOrderForm({
@@ -179,6 +188,7 @@ export default function OrderDetailPage() {
   }, [id]);
 
   async function saveOrder() {
+    if (!canManageCompany) return;
     if (!orderForm.customerId) return alert(m.ordersPage.customerRequired);
     if (!orderForm.title?.trim()) return alert(m.ordersPage.titleRequired);
 
@@ -200,6 +210,7 @@ export default function OrderDetailPage() {
   }
 
   async function deleteOrder() {
+    if (!canManageCompany) return;
     if (!(await appConfirm(m.common.deleteConfirm))) return;
     try {
       await apiJson(`/orders/${id}`, 'DELETE');
@@ -210,11 +221,13 @@ export default function OrderDetailPage() {
   }
 
   function startNewSite() {
+    if (!canManageCompany) return;
     setEditingSiteId(null);
     setSiteForm({ ...emptySite });
   }
 
   function startEditSite(site: Site) {
+    if (!canManageCompany) return;
     setEditingSiteId(site.id);
     setSiteForm({
       id: site.id,
@@ -228,6 +241,7 @@ export default function OrderDetailPage() {
   }
 
   async function saveSite() {
+    if (!canManageCompany) return;
     if (!siteForm.siteName?.trim()) return alert(m.orderDetailPage.siteNameRequired);
     try {
       const payload = {
@@ -252,6 +266,7 @@ export default function OrderDetailPage() {
   }
 
   async function deleteSite(siteId: string) {
+    if (!canManageCompany) return;
     if (!(await appConfirm(m.common.deleteConfirm))) return;
     try {
       await apiJson(`/sites/${siteId}`, 'DELETE');
@@ -263,6 +278,7 @@ export default function OrderDetailPage() {
   }
 
   function startEditWorkshopAssignment(assignment: WorkshopAssignment) {
+    if (!canManageCompany) return;
     setEditingAssignmentId(assignment.id);
     setAssignmentForm({
       siteId: assignment.siteId,
@@ -276,6 +292,7 @@ export default function OrderDetailPage() {
   }
 
   function cancelWorkshopAssignmentEdit() {
+    if (!canManageCompany) return;
     setEditingAssignmentId(null);
     setAssignmentForm((current) => ({
       ...emptyAssignment,
@@ -285,6 +302,7 @@ export default function OrderDetailPage() {
   }
 
   async function saveWorkshopAssignment() {
+    if (!canManageCompany) return;
     if (!id) return;
     if (!assignmentForm.siteId) return alert(trackingLabels.selectSiteRequired || 'Please select a site.');
     if (!assignmentForm.workshopId) return alert(trackingLabels.selectWorkshopRequired || 'Please select a workshop.');
@@ -313,6 +331,7 @@ export default function OrderDetailPage() {
   }
 
   async function removeWorkshopAssignment(assignmentId: string) {
+    if (!canManageCompany) return;
     if (!(await appConfirm(m.common.deleteConfirm))) return;
     try {
       await apiJson(`/workshop-assignments/${assignmentId}`, 'DELETE');
@@ -338,6 +357,11 @@ export default function OrderDetailPage() {
     : locale === 'de'
       ? { track: 'TRACK', ai: 'KI', bill: 'RECHNUNG', workshopInvoice: 'Werkstattrechnung', workshopInvoiceDescription: 'Pauschalrechnung f?r Standorte und Werkstatt-Leistungspakete erstellen.' }
       : { track: 'TRACK', ai: 'AI', bill: 'BILL', workshopInvoice: 'Workshop invoice', workshopInvoiceDescription: 'Create a fixed invoice for site and workshop work packages.' };
+  const readOnlyCopy = locale === 'ar'
+    ? { title: '\u0648\u0636\u0639 \u0627\u0644\u0639\u0631\u0636', body: '\u064a\u0645\u0643\u0646\u0643 \u0645\u0631\u0627\u062c\u0639\u0629 \u0628\u064a\u0627\u0646\u0627\u062a \u0627\u0644\u0637\u0644\u0628 \u0648\u0627\u0644\u0645\u0648\u0627\u0642\u0639 \u0648\u0641\u062a\u062d \u0627\u0644\u062a\u062a\u0628\u0639. \u0625\u062f\u0627\u0631\u0629 \u0627\u0644\u0637\u0644\u0628\u0627\u062a \u0648\u0627\u0644\u0645\u0648\u0627\u0642\u0639 \u0648\u0627\u0644\u0648\u0631\u0634 \u0644\u0644\u0645\u062f\u064a\u0631 \u0641\u0642\u0637.' }
+    : locale === 'de'
+      ? { title: 'Lesemodus', body: 'Sie koennen Auftragsdaten, Standorte und Tracking oeffnen. Auftrags-, Standort- und Werkstattverwaltung ist nur fuer Manager verfuegbar.' }
+      : { title: 'Read-only mode', body: 'You can review order data, sites, and tracking. Order, site, and workshop management is available only to managers.' };
 
   return (
     <div className="card">
@@ -348,7 +372,7 @@ export default function OrderDetailPage() {
         </div>
         <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
           <Link className="btn" href="/orders">{m.common.back}</Link>
-          <button className="btn danger" onClick={deleteOrder}>{m.orderDetailPage.deleteOrder}</button>
+          {canManageCompany && <button className="btn danger" onClick={deleteOrder}>{m.orderDetailPage.deleteOrder}</button>}
         </div>
       </div>
 
@@ -363,108 +387,125 @@ export default function OrderDetailPage() {
           </span>
           <b>{'>'}</b>
         </Link>
-        <Link className="order-action-card monitoring" href={`/orders/${order.id}/monitoring`}>
-          <span className="order-action-icon">{actionCopy.ai}</span>
-          <span>
-            <strong>{trackingLabels.openMonitoring || m.trackingPage.aiAnalysis.title}</strong>
-            <small>{m.trackingPage.aiAnalysis.description}</small>
-          </span>
-          <b>{'>'}</b>
-        </Link>
-        <Link className="order-action-card" href={`/invoices/new?orderId=${order.id}`}>
-          <span className="order-action-icon">{actionCopy.bill}</span>
-          <span>
-            <strong>{actionCopy.workshopInvoice}</strong>
-            <small>{actionCopy.workshopInvoiceDescription}</small>
-          </span>
-          <b>{'>'}</b>
-        </Link>
+        {canUseAiMonitoring && (
+          <Link className="order-action-card monitoring" href={`/orders/${order.id}/monitoring`}>
+            <span className="order-action-icon">{actionCopy.ai}</span>
+            <span>
+              <strong>{trackingLabels.openMonitoring || m.trackingPage.aiAnalysis.title}</strong>
+              <small>{m.trackingPage.aiAnalysis.description}</small>
+            </span>
+            <b>{'>'}</b>
+          </Link>
+        )}
+        {canManageInvoices && (
+          <Link className="order-action-card" href={`/invoices/new?orderId=${order.id}`}>
+            <span className="order-action-icon">{actionCopy.bill}</span>
+            <span>
+              <strong>{actionCopy.workshopInvoice}</strong>
+              <small>{actionCopy.workshopInvoiceDescription}</small>
+            </span>
+            <b>{'>'}</b>
+          </Link>
+        )}
       </div>
 
       <div className="spacer" />
 
-      <h3>{m.orderDetailPage.editHeading}</h3>
-      <div className="row">
-        <div>
-          <label>{m.common.customer} *</label>
-          <select value={orderForm.customerId || ''} onChange={(event) => setOrderForm({ ...orderForm, customerId: event.target.value })}>
-            {customers.map((customer) => <option key={customer.id} value={customer.id}>{customer.companyName}</option>)}
-            {customers.length === 0 && <option value="">{m.orderDetailPage.noCustomersOption}</option>}
-          </select>
-        </div>
-        <div>
-          <label>{m.ordersPage.orderNumber}</label>
-          <input value={(orderForm.orderNumber as string) || ''} onChange={(event) => setOrderForm({ ...orderForm, orderNumber: event.target.value })} />
-        </div>
-        <div>
-          <label>{m.common.status}</label>
-          <select value={orderForm.status || 'open'} onChange={(event) => setOrderForm({ ...orderForm, status: event.target.value })}>
-            <option value="open">{statusLabels.open}</option>
-            <option value="paused">{statusLabels.paused}</option>
-            <option value="closed">{statusLabels.closed}</option>
-          </select>
-        </div>
-      </div>
+      {canManageCompany ? (
+        <>
+          <h3>{m.orderDetailPage.editHeading}</h3>
+          <div className="row">
+            <div>
+              <label>{m.common.customer} *</label>
+              <select value={orderForm.customerId || ''} onChange={(event) => setOrderForm({ ...orderForm, customerId: event.target.value })}>
+                {customers.map((customer) => <option key={customer.id} value={customer.id}>{customer.companyName}</option>)}
+                {customers.length === 0 && <option value="">{m.orderDetailPage.noCustomersOption}</option>}
+              </select>
+            </div>
+            <div>
+              <label>{m.ordersPage.orderNumber}</label>
+              <input value={(orderForm.orderNumber as string) || ''} onChange={(event) => setOrderForm({ ...orderForm, orderNumber: event.target.value })} />
+            </div>
+            <div>
+              <label>{m.common.status}</label>
+              <select value={orderForm.status || 'open'} onChange={(event) => setOrderForm({ ...orderForm, status: event.target.value })}>
+                <option value="open">{statusLabels.open}</option>
+                <option value="paused">{statusLabels.paused}</option>
+                <option value="closed">{statusLabels.closed}</option>
+              </select>
+            </div>
+          </div>
 
-      <div className="spacer" />
+          <div className="spacer" />
 
-      <div className="row">
-        <div>
-          <label>{m.common.title} *</label>
-          <input value={orderForm.title || ''} onChange={(event) => setOrderForm({ ...orderForm, title: event.target.value })} />
+          <div className="row">
+            <div>
+              <label>{m.common.title} *</label>
+              <input value={orderForm.title || ''} onChange={(event) => setOrderForm({ ...orderForm, title: event.target.value })} />
+            </div>
+            <div>
+              <label>{trackingLabels.fixedPriceNote || 'Fixed-price note / legacy hourly rate'}</label>
+              <input value={(orderForm.defaultHourlyRate as string) || ''} onChange={(event) => setOrderForm({ ...orderForm, defaultHourlyRate: event.target.value })} />
+            </div>
+          </div>
+
+          <div className="spacer" />
+          <div>
+            <label>{m.common.description}</label>
+            <textarea value={orderForm.description || ''} onChange={(event) => setOrderForm({ ...orderForm, description: event.target.value })} />
+          </div>
+
+          <div className="spacer" />
+          <button className="btn primary" onClick={saveOrder}>{m.common.save}</button>
+        </>
+      ) : (
+        <div className="card">
+          <h3>{readOnlyCopy.title}</h3>
+          <div className="muted">{readOnlyCopy.body}</div>
         </div>
-        <div>
-          <label>{trackingLabels.fixedPriceNote || 'Fixed-price note / legacy hourly rate'}</label>
-          <input value={(orderForm.defaultHourlyRate as string) || ''} onChange={(event) => setOrderForm({ ...orderForm, defaultHourlyRate: event.target.value })} />
-        </div>
-      </div>
-
-      <div className="spacer" />
-      <div>
-        <label>{m.common.description}</label>
-        <textarea value={orderForm.description || ''} onChange={(event) => setOrderForm({ ...orderForm, description: event.target.value })} />
-      </div>
-
-      <div className="spacer" />
-      <button className="btn primary" onClick={saveOrder}>{m.common.save}</button>
+      )}
 
       <div className="spacer" />
       <hr />
 
       <h3>{m.common.sites}</h3>
 
-      <div className="row">
-        <div>
-          <label>{m.common.site} *</label>
-          <input value={siteForm.siteName || ''} onChange={(event) => setSiteForm({ ...siteForm, siteName: event.target.value })} />
-        </div>
-        <div>
-          <label>{m.common.street}</label>
-          <input value={(siteForm.street as string) || ''} onChange={(event) => setSiteForm({ ...siteForm, street: event.target.value })} />
-        </div>
-        <div>
-          <label>{m.common.zipCode}</label>
-          <input value={(siteForm.zipCode as string) || ''} onChange={(event) => setSiteForm({ ...siteForm, zipCode: event.target.value })} />
-        </div>
-        <div>
-          <label>{m.common.city}</label>
-          <input value={(siteForm.city as string) || ''} onChange={(event) => setSiteForm({ ...siteForm, city: event.target.value })} />
-        </div>
-      </div>
+      {canManageCompany && (
+        <>
+          <div className="row">
+            <div>
+              <label>{m.common.site} *</label>
+              <input value={siteForm.siteName || ''} onChange={(event) => setSiteForm({ ...siteForm, siteName: event.target.value })} />
+            </div>
+            <div>
+              <label>{m.common.street}</label>
+              <input value={(siteForm.street as string) || ''} onChange={(event) => setSiteForm({ ...siteForm, street: event.target.value })} />
+            </div>
+            <div>
+              <label>{m.common.zipCode}</label>
+              <input value={(siteForm.zipCode as string) || ''} onChange={(event) => setSiteForm({ ...siteForm, zipCode: event.target.value })} />
+            </div>
+            <div>
+              <label>{m.common.city}</label>
+              <input value={(siteForm.city as string) || ''} onChange={(event) => setSiteForm({ ...siteForm, city: event.target.value })} />
+            </div>
+          </div>
 
-      <div className="spacer" />
-      <div>
-        <label>{m.common.notes}</label>
-        <textarea value={(siteForm.notes as string) || ''} onChange={(event) => setSiteForm({ ...siteForm, notes: event.target.value })} />
-      </div>
+          <div className="spacer" />
+          <div>
+            <label>{m.common.notes}</label>
+            <textarea value={(siteForm.notes as string) || ''} onChange={(event) => setSiteForm({ ...siteForm, notes: event.target.value })} />
+          </div>
 
-      <div className="spacer" />
-      <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-        <button className="btn primary" onClick={saveSite}>{editingSiteId ? m.common.save : m.orderDetailPage.addSite}</button>
-        <button className="btn" onClick={startNewSite}>{m.orderDetailPage.newSite}</button>
-      </div>
+          <div className="spacer" />
+          <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+            <button className="btn primary" onClick={saveSite}>{editingSiteId ? m.common.save : m.orderDetailPage.addSite}</button>
+            <button className="btn" onClick={startNewSite}>{m.orderDetailPage.newSite}</button>
+          </div>
 
-      <div className="spacer" />
+          <div className="spacer" />
+        </>
+      )}
 
       <table className="table">
         <thead>
@@ -489,16 +530,16 @@ export default function OrderDetailPage() {
                           <span>{assignment.workshop?.name || trackingLabels.workshop}</span>
                           <span className="muted">{listText(assignment.coveredSkills) || trackingLabels.noCoveredTrades}</span>
                           <span className="muted">{assignment.startDate && assignment.endDate ? `${String(assignment.startDate).substring(0, 10)} - ${String(assignment.endDate).substring(0, 10)}` : trackingLabels.scheduleMissing}</span>
-                          <button className="btn secondary" onClick={() => startEditWorkshopAssignment(assignment)}>{m.common.edit}</button>
-                          <button className="btn danger secondary" onClick={() => removeWorkshopAssignment(assignment.id)}>{m.common.remove}</button>
+                          {canManageCompany && <button className="btn secondary" onClick={() => startEditWorkshopAssignment(assignment)}>{m.common.edit}</button>}
+                          {canManageCompany && <button className="btn danger secondary" onClick={() => removeWorkshopAssignment(assignment.id)}>{m.common.remove}</button>}
                         </div>
                       ))
                     : m.common.none}
                 </td>
                 <td>
                   <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-                    <button className="btn" onClick={() => startEditSite(site)}>{m.common.edit}</button>
-                    <button className="btn danger" onClick={() => deleteSite(site.id)}>{m.common.delete}</button>
+                    {canManageCompany && <button className="btn" onClick={() => startEditSite(site)}>{m.common.edit}</button>}
+                    {canManageCompany && <button className="btn danger" onClick={() => deleteSite(site.id)}>{m.common.delete}</button>}
                   </div>
                 </td>
               </tr>
@@ -513,70 +554,74 @@ export default function OrderDetailPage() {
       <div className="spacer" />
       <div className="muted">{m.orderDetailPage.deleteSitesHint}</div>
 
-      <div className="spacer" />
-      <hr />
+      {canManageCompany && (
+        <>
+          <div className="spacer" />
+          <hr />
 
-      <div className="card">
-        <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12, flexWrap: 'wrap' }}>
-          <div>
-            <h3>{editingAssignmentId ? trackingLabels.editWorkshopAssignment || 'Edit workshop assignment' : trackingLabels.workshopExecution || 'Workshop execution'}</h3>
-            <div className="muted">{editingAssignmentId ? trackingLabels.editWorkshopAssignmentDescription || 'Update the existing workshop schedule, status, covered scope, or notes. This fixes schedule warnings without creating duplicate assignments.' : trackingLabels.workshopExecutionDescription || 'Assign trusted workshops to each site or work package. Employee assignment is no longer part of the main workflow.'}</div>
+          <div className="card">
+            <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12, flexWrap: 'wrap' }}>
+              <div>
+                <h3>{editingAssignmentId ? trackingLabels.editWorkshopAssignment || 'Edit workshop assignment' : trackingLabels.workshopExecution || 'Workshop execution'}</h3>
+                <div className="muted">{editingAssignmentId ? trackingLabels.editWorkshopAssignmentDescription || 'Update the existing workshop schedule, status, covered scope, or notes. This fixes schedule warnings without creating duplicate assignments.' : trackingLabels.workshopExecutionDescription || 'Assign trusted workshops to each site or work package. Employee assignment is no longer part of the main workflow.'}</div>
+              </div>
+              <Link className="btn" href="/workshops">{trackingLabels.manageWorkshops || 'Manage workshops'}</Link>
+            </div>
+            <div className="spacer" />
+            <div className="row">
+              <div>
+                <label>{m.common.site} *</label>
+                <select value={assignmentForm.siteId} onChange={(event) => setAssignmentForm({ ...assignmentForm, siteId: event.target.value })}>
+                  {siteOptions.map((site) => <option key={site.id} value={site.id}>{site.siteName}</option>)}
+                  {siteOptions.length === 0 && <option value="">{m.orderDetailPage.noSitesOption}</option>}
+                </select>
+              </div>
+              <div>
+                <label>{trackingLabels.workshop} *</label>
+                <select value={assignmentForm.workshopId} onChange={(event) => setAssignmentForm({ ...assignmentForm, workshopId: event.target.value })}>
+                  {workshopOptions.map((workshop) => <option key={workshop.id} value={workshop.id}>{workshop.name}{workshop.availabilityStatus === 'not_available' ? ` (${trackingLabels.workshopUnavailable || 'not available'})` : ''}{workshop.specialties?.length ? ` (${listText(workshop.specialties)})` : ''}</option>)}
+                  {workshopOptions.length === 0 && <option value="">{trackingLabels.noAvailableWorkshops || 'No available workshops'}</option>}
+                </select>
+              </div>
+              <div>
+                <label>{trackingLabels.status}</label>
+                <select value={assignmentForm.status} onChange={(event) => setAssignmentForm({ ...assignmentForm, status: event.target.value })}>
+                  <option value="planned">{trackingLabels.planned || 'Planned'}</option>
+                  <option value="assigned">{trackingLabels.assigned || 'Assigned'}</option>
+                  <option value="in_progress">{trackingLabels.in_progress}</option>
+                  <option value="blocked">{trackingLabels.blocked}</option>
+                  <option value="completed">{trackingLabels.completed}</option>
+                  <option value="canceled">{trackingLabels.canceled || 'Canceled'}</option>
+                </select>
+              </div>
+              <div>
+                <label>{trackingLabels.startDate || 'Start date'} *</label>
+                <input type="date" value={assignmentForm.startDate} onChange={(event) => setAssignmentForm({ ...assignmentForm, startDate: event.target.value })} />
+              </div>
+              <div>
+                <label>{trackingLabels.endDate || 'End date'} *</label>
+                <input type="date" value={assignmentForm.endDate} onChange={(event) => setAssignmentForm({ ...assignmentForm, endDate: event.target.value })} />
+              </div>
+            </div>
+            <div className="spacer" />
+            <div className="row">
+              <div>
+                <label>{trackingLabels.coveredTradesScope || trackingLabels.coveredTrades}</label>
+                <textarea value={assignmentForm.coveredSkills} onChange={(event) => setAssignmentForm({ ...assignmentForm, coveredSkills: event.target.value })} placeholder={trackingLabels.coveredTradesPlaceholder || 'tiles, waterproofing, painting'} />
+              </div>
+              <div>
+                <label>{m.common.notes}</label>
+                <textarea value={assignmentForm.notes} onChange={(event) => setAssignmentForm({ ...assignmentForm, notes: event.target.value })} />
+              </div>
+            </div>
+            <div className="spacer" />
+            <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+              <button className="btn primary" onClick={saveWorkshopAssignment} disabled={!assignmentForm.siteId || !assignmentForm.workshopId || !assignmentForm.startDate || !assignmentForm.endDate}>{editingAssignmentId ? trackingLabels.saveWorkshopAssignment || 'Save workshop assignment' : trackingLabels.assignWorkshop || 'Assign workshop'}</button>
+              {editingAssignmentId && <button className="btn" onClick={cancelWorkshopAssignmentEdit}>{trackingLabels.cancelEdit || 'Cancel edit'}</button>}
+            </div>
           </div>
-          <Link className="btn" href="/workshops">{trackingLabels.manageWorkshops || 'Manage workshops'}</Link>
-        </div>
-        <div className="spacer" />
-        <div className="row">
-          <div>
-            <label>{m.common.site} *</label>
-            <select value={assignmentForm.siteId} onChange={(event) => setAssignmentForm({ ...assignmentForm, siteId: event.target.value })}>
-              {siteOptions.map((site) => <option key={site.id} value={site.id}>{site.siteName}</option>)}
-              {siteOptions.length === 0 && <option value="">{m.orderDetailPage.noSitesOption}</option>}
-            </select>
-          </div>
-          <div>
-            <label>{trackingLabels.workshop} *</label>
-            <select value={assignmentForm.workshopId} onChange={(event) => setAssignmentForm({ ...assignmentForm, workshopId: event.target.value })}>
-              {workshopOptions.map((workshop) => <option key={workshop.id} value={workshop.id}>{workshop.name}{workshop.availabilityStatus === 'not_available' ? ` (${trackingLabels.workshopUnavailable || 'not available'})` : ''}{workshop.specialties?.length ? ` (${listText(workshop.specialties)})` : ''}</option>)}
-              {workshopOptions.length === 0 && <option value="">{trackingLabels.noAvailableWorkshops || 'No available workshops'}</option>}
-            </select>
-          </div>
-          <div>
-            <label>{trackingLabels.status}</label>
-            <select value={assignmentForm.status} onChange={(event) => setAssignmentForm({ ...assignmentForm, status: event.target.value })}>
-              <option value="planned">{trackingLabels.planned || 'Planned'}</option>
-              <option value="assigned">{trackingLabels.assigned || 'Assigned'}</option>
-              <option value="in_progress">{trackingLabels.in_progress}</option>
-              <option value="blocked">{trackingLabels.blocked}</option>
-              <option value="completed">{trackingLabels.completed}</option>
-              <option value="canceled">{trackingLabels.canceled || 'Canceled'}</option>
-            </select>
-          </div>
-          <div>
-            <label>{trackingLabels.startDate || 'Start date'} *</label>
-            <input type="date" value={assignmentForm.startDate} onChange={(event) => setAssignmentForm({ ...assignmentForm, startDate: event.target.value })} />
-          </div>
-          <div>
-            <label>{trackingLabels.endDate || 'End date'} *</label>
-            <input type="date" value={assignmentForm.endDate} onChange={(event) => setAssignmentForm({ ...assignmentForm, endDate: event.target.value })} />
-          </div>
-        </div>
-        <div className="spacer" />
-        <div className="row">
-          <div>
-            <label>{trackingLabels.coveredTradesScope || trackingLabels.coveredTrades}</label>
-            <textarea value={assignmentForm.coveredSkills} onChange={(event) => setAssignmentForm({ ...assignmentForm, coveredSkills: event.target.value })} placeholder={trackingLabels.coveredTradesPlaceholder || 'tiles, waterproofing, painting'} />
-          </div>
-          <div>
-            <label>{m.common.notes}</label>
-            <textarea value={assignmentForm.notes} onChange={(event) => setAssignmentForm({ ...assignmentForm, notes: event.target.value })} />
-          </div>
-        </div>
-        <div className="spacer" />
-        <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-          <button className="btn primary" onClick={saveWorkshopAssignment} disabled={!assignmentForm.siteId || !assignmentForm.workshopId || !assignmentForm.startDate || !assignmentForm.endDate}>{editingAssignmentId ? trackingLabels.saveWorkshopAssignment || 'Save workshop assignment' : trackingLabels.assignWorkshop || 'Assign workshop'}</button>
-          {editingAssignmentId && <button className="btn" onClick={cancelWorkshopAssignmentEdit}>{trackingLabels.cancelEdit || 'Cancel edit'}</button>}
-        </div>
-      </div>
+        </>
+      )}
 
     </div>
   );

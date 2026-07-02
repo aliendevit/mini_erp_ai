@@ -8,6 +8,7 @@ import { zodResolver } from '@hookform/resolvers/zod';
 import { useI18n } from '../../lib/i18n';
 import { appConfirm } from '../../lib/dialog';
 import { apiGet, apiJson } from '../../lib/api';
+import { hasPermission, readStoredAccessUser } from '../../lib/access';
 import { fieldClass, OrderFormData, orderSchema, sanitizeDecimalInput, validationCopy } from '../../lib/form-validation';
 import { ListPager } from '../ui/ListPager';
 
@@ -59,6 +60,7 @@ export default function OrdersPage() {
   const [editingId, setEditingId] = useState<string | null>(null);
   const [page, setPage] = useState(1);
   const [loading, setLoading] = useState(false);
+  const [canManageCompany, setCanManageCompany] = useState(false);
   const v = validationCopy(locale);
   const schema = useMemo(() => orderSchema(v, {
     customerId: m.common.customer,
@@ -72,6 +74,11 @@ export default function OrdersPage() {
     : locale === 'de'
       ? { kicker: 'Ausfuehrung', description: 'Auftraege erstellen, Projektdetails oeffnen und Tracking mit Werkstattausfuehrung verbinden.' }
       : { kicker: 'Execution', description: 'Create orders, open detailed project views, and connect tracking with workshop execution.' };
+  const readOnlyCopy = locale === 'ar'
+    ? { title: '\u0639\u0631\u0636 \u0627\u0644\u0645\u0634\u0627\u0631\u064a\u0639 \u0641\u0642\u0637', body: '\u064a\u0645\u0643\u0646\u0643 \u0641\u062a\u062d \u0627\u0644\u0645\u0634\u0627\u0631\u064a\u0639 \u0648\u0645\u062a\u0627\u0628\u0639\u0629 \u0627\u0644\u062a\u0642\u062f\u0645. \u0625\u0646\u0634\u0627\u0621 \u0623\u0648 \u062a\u0639\u062f\u064a\u0644 \u0627\u0644\u0637\u0644\u0628\u0627\u062a \u064a\u062d\u062a\u0627\u062c \u0635\u0644\u0627\u062d\u064a\u0629 \u0627\u0644\u0645\u062f\u064a\u0631.' }
+    : locale === 'de'
+      ? { title: 'Projektliste im Lesemodus', body: 'Sie koennen Projekte oeffnen und den Fortschritt verfolgen. Auftraege erstellen oder bearbeiten erfordert Managerrechte.' }
+      : { title: 'Read-only project list', body: 'You can open projects and update allowed tracking areas. Creating or editing orders requires manager access.' };
 
   const { register, handleSubmit, reset, setValue, getValues, formState: { errors } } = useForm<OrderFormData>({
     resolver: zodResolver(schema) as any,
@@ -82,14 +89,15 @@ export default function OrdersPage() {
   const hourlyRateField = register('defaultHourlyRate');
 
   async function load() {
-    const [nextCustomers, nextOrders] = await Promise.all([
-      apiGet<Customer[]>('/customers'),
-      apiGet<PaginatedResponse<Order>>(`/orders?paginated=true&page=${page}&pageSize=${LIST_PAGE_SIZE}`),
-    ]);
-    setCustomers(nextCustomers);
+    const user = readStoredAccessUser();
+    const canManage = hasPermission(user, 'manage_company');
+    setCanManageCompany(canManage);
+    const nextOrders = await apiGet<PaginatedResponse<Order>>(`/orders?paginated=true&page=${page}&pageSize=${LIST_PAGE_SIZE}`);
+    const nextCustomers = canManage ? await apiGet<Customer[]>('/customers') : [];
+    setCustomers(canManage ? nextCustomers : Array.from(new Map(nextOrders.items.map((item) => item.customer).filter(Boolean).map((customer) => [customer!.id, customer!])).values()));
     setItems(nextOrders.items);
     setTotalItems(nextOrders.total);
-    if (!editingId && !getValues('customerId') && nextCustomers.length > 0) {
+    if (canManage && !editingId && !getValues('customerId') && nextCustomers.length > 0) {
       setValue('customerId', nextCustomers[0].id, { shouldValidate: true });
     }
   }
@@ -100,11 +108,13 @@ export default function OrdersPage() {
   }, [page]);
 
   function startNew() {
+    if (!canManageCompany) return;
     setEditingId(null);
     reset({ ...empty, customerId: customers[0]?.id || '' });
   }
 
   function startEdit(order: Order) {
+    if (!canManageCompany) return;
     setEditingId(order.id);
     reset({
       customerId: order.customerId,
@@ -117,6 +127,7 @@ export default function OrdersPage() {
   }
 
   async function save(data: OrderFormData) {
+    if (!canManageCompany) return;
     setLoading(true);
     try {
       const payload = {
@@ -143,6 +154,7 @@ export default function OrdersPage() {
   }
 
   async function del(id: string) {
+    if (!canManageCompany) return;
     if (!(await appConfirm(m.common.deleteConfirm))) return;
     try {
       await apiJson(`/orders/${id}`, 'DELETE');
@@ -168,72 +180,79 @@ export default function OrdersPage() {
         </div>
       </section>
 
-      <form className="card entity-panel validated-form" onSubmit={handleSubmit(save)} noValidate>
-        <h2>{m.ordersPage.heading}</h2>
-        <div className="form-required-note"><span>*</span> {v.requiredLabel}</div>
+      {canManageCompany ? (
+        <form className="card entity-panel validated-form" onSubmit={handleSubmit(save)} noValidate>
+          <h2>{m.ordersPage.heading}</h2>
+          <div className="form-required-note"><span>*</span> {v.requiredLabel}</div>
 
-        <div className="row">
-          <div className="form-field">
-            <label>{m.common.customer} *</label>
-            <select {...register('customerId')} className={fieldClass(!!errors.customerId)} aria-invalid={!!errors.customerId}>
-              {customers.map((customer) => <option key={customer.id} value={customer.id}>{customer.companyName}</option>)}
-              {customers.length === 0 && <option value="">{m.ordersPage.noCustomersOption}</option>}
-            </select>
-            <FieldError message={errors.customerId?.message} />
+          <div className="row">
+            <div className="form-field">
+              <label>{m.common.customer} *</label>
+              <select {...register('customerId')} className={fieldClass(!!errors.customerId)} aria-invalid={!!errors.customerId}>
+                {customers.map((customer) => <option key={customer.id} value={customer.id}>{customer.companyName}</option>)}
+                {customers.length === 0 && <option value="">{m.ordersPage.noCustomersOption}</option>}
+              </select>
+              <FieldError message={errors.customerId?.message} />
+            </div>
+            <div className="form-field">
+              <label>{m.ordersPage.orderNumber} *</label>
+              <input {...register('orderNumber')} className={fieldClass(!!errors.orderNumber)} />
+              <FieldError message={errors.orderNumber?.message} />
+            </div>
+            <div className="form-field">
+              <label>{m.common.status}</label>
+              <select {...register('status')} className={fieldClass(!!errors.status)}>
+                <option value="open">{m.statuses.order.open}</option>
+                <option value="paused">{m.statuses.order.paused}</option>
+                <option value="closed">{m.statuses.order.closed}</option>
+              </select>
+              <FieldError message={errors.status?.message} />
+            </div>
           </div>
-          <div className="form-field">
-            <label>{m.ordersPage.orderNumber} *</label>
-            <input {...register('orderNumber')} className={fieldClass(!!errors.orderNumber)} />
-            <FieldError message={errors.orderNumber?.message} />
+
+          <div className="spacer" />
+
+          <div className="row">
+            <div className="form-field">
+              <label>{m.common.title} *</label>
+              <input {...register('title')} className={fieldClass(!!errors.title)} aria-invalid={!!errors.title} />
+              <FieldError message={errors.title?.message} />
+            </div>
+            <div className="form-field">
+              <label>{m.ordersPage.hourlyRate} <OptionalBadge label={v.optional} /></label>
+              <input
+                {...hourlyRateField}
+                inputMode="decimal"
+                className={fieldClass(!!errors.defaultHourlyRate)}
+                aria-invalid={!!errors.defaultHourlyRate}
+                onChange={(event) => {
+                  event.target.value = sanitizeDecimalInput(event.target.value);
+                  hourlyRateField.onChange(event);
+                }}
+              />
+              <FieldError message={errors.defaultHourlyRate?.message} />
+            </div>
           </div>
+
+          <div className="spacer" />
           <div className="form-field">
-            <label>{m.common.status}</label>
-            <select {...register('status')} className={fieldClass(!!errors.status)}>
-              <option value="open">{m.statuses.order.open}</option>
-              <option value="paused">{m.statuses.order.paused}</option>
-              <option value="closed">{m.statuses.order.closed}</option>
-            </select>
-            <FieldError message={errors.status?.message} />
+            <label>{m.common.description} *</label>
+            <textarea {...register('description')} className={fieldClass(!!errors.description)} />
+            <FieldError message={errors.description?.message} />
           </div>
+
+          <div className="spacer" />
+          <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+            <button className="btn primary" type="submit" disabled={loading}>{editingId ? m.common.save : m.common.create}</button>
+            <button className="btn" type="button" onClick={startNew} disabled={loading}>{m.common.createNew}</button>
+          </div>
+        </form>
+      ) : (
+        <div className="card entity-panel">
+          <h2>{readOnlyCopy.title}</h2>
+          <div className="muted">{readOnlyCopy.body}</div>
         </div>
-
-        <div className="spacer" />
-
-        <div className="row">
-          <div className="form-field">
-            <label>{m.common.title} *</label>
-            <input {...register('title')} className={fieldClass(!!errors.title)} aria-invalid={!!errors.title} />
-            <FieldError message={errors.title?.message} />
-          </div>
-          <div className="form-field">
-            <label>{m.ordersPage.hourlyRate} <OptionalBadge label={v.optional} /></label>
-            <input
-              {...hourlyRateField}
-              inputMode="decimal"
-              className={fieldClass(!!errors.defaultHourlyRate)}
-              aria-invalid={!!errors.defaultHourlyRate}
-              onChange={(event) => {
-                event.target.value = sanitizeDecimalInput(event.target.value);
-                hourlyRateField.onChange(event);
-              }}
-            />
-            <FieldError message={errors.defaultHourlyRate?.message} />
-          </div>
-        </div>
-
-        <div className="spacer" />
-        <div className="form-field">
-          <label>{m.common.description} *</label>
-          <textarea {...register('description')} className={fieldClass(!!errors.description)} />
-          <FieldError message={errors.description?.message} />
-        </div>
-
-        <div className="spacer" />
-        <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-          <button className="btn primary" type="submit" disabled={loading}>{editingId ? m.common.save : m.common.create}</button>
-          <button className="btn" type="button" onClick={startNew} disabled={loading}>{m.common.createNew}</button>
-        </div>
-      </form>
+      )}
 
       <div className="card entity-panel">
         <table className="table">
@@ -254,8 +273,8 @@ export default function OrdersPage() {
                 <td>
                   <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
                     <Link className="btn" href={`/orders/${order.id}`}>{m.common.open}</Link>
-                    <button className="btn" onClick={() => startEdit(order)}>{m.common.edit}</button>
-                    <button className="btn danger" onClick={() => del(order.id)}>{m.common.delete}</button>
+                    {canManageCompany && <button className="btn" onClick={() => startEdit(order)}>{m.common.edit}</button>}
+                    {canManageCompany && <button className="btn danger" onClick={() => del(order.id)}>{m.common.delete}</button>}
                   </div>
                 </td>
               </tr>

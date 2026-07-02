@@ -41,6 +41,7 @@ export function AppHeader() {
   const [companyLoaded, setCompanyLoaded] = useState(false);
   const [activeHash, setActiveHash] = useState('');
   const permissions = new Set(authUser?.permissions || []);
+  const isAuthEntryPage = pathname === '/auth' || pathname === '/register' || pathname === '/registration';
   const navItems = [
     { href: authUser ? dashboardPathForUser(authUser) : '/', label: messages.nav.dashboard, show: true },
     { href: '/customers', label: messages.nav.customers, show: permissions.has('manage_company') },
@@ -110,10 +111,10 @@ export function AppHeader() {
   }, [authUser?.id, authUser?.companyProfileComplete]);
 
   const headerCopy = locale === 'ar'
-    ? { brand: 'بوابة عمران الإدارية المدعومة بالذكاء الاصطناعي', powered: 'مدعوم بالذكاء الاصطناعي', menu: 'القائمة', nav: 'التنقل الرئيسي', account: 'الحساب', signedIn: 'مسجل الدخول', signIn: 'تسجيل الدخول', logout: 'تسجيل الخروج', phone: 'الهاتف', company: 'الشركة', completeCompany: 'إكمال بيانات الشركة', loadingCompany: 'جار تحميل بيانات الشركة', auditLog: 'سجل التدقيق', accountControl: 'تحكم الحساب', accountControlHint: 'الصلاحيات وأدوات الذكاء الاصطناعي', role: 'الدور', tenant: 'الشركة / المستأجر' }
+    ? { brand: 'بوابة عمران الإدارية المدعومة بالذكاء الاصطناعي', powered: 'مدعوم بالذكاء الاصطناعي', menu: 'القائمة', nav: 'التنقل الرئيسي', account: 'الحساب', guest: 'زائر', signedIn: 'مسجل الدخول', signIn: 'تسجيل الدخول', logout: 'تسجيل الخروج', phone: 'الهاتف', company: 'الشركة', completeCompany: 'إكمال بيانات الشركة', loadingCompany: 'جار تحميل بيانات الشركة', auditLog: 'سجل التدقيق', accountControl: 'تحكم الحساب', accountControlHint: 'الصلاحيات وأدوات الذكاء الاصطناعي', role: 'الدور', tenant: 'الشركة / المستأجر' }
     : locale === 'de'
-      ? { brand: 'Omran Verwaltungsportal mit KI', powered: 'Powered by AI', menu: 'Menü', nav: 'Hauptnavigation', account: 'Konto', signedIn: 'Angemeldet', signIn: 'Anmelden', logout: 'Abmelden', phone: 'Telefon', company: 'Firma', completeCompany: 'Firmendaten ergaenzen', loadingCompany: 'Firmendaten werden geladen', auditLog: 'Audit Log', accountControl: 'Account Control', accountControlHint: 'Berechtigungen und KI-Tools', role: 'Rolle', tenant: 'Firma / Tenant' }
-      : { brand: 'Omran management portal powered by AI', powered: 'Powered by AI', menu: 'Menu', nav: 'Main navigation', account: 'Account', signedIn: 'Signed in', signIn: 'Sign in', logout: 'Logout', phone: 'Phone', company: 'Company', completeCompany: 'Complete company info', loadingCompany: 'Loading company info', auditLog: 'Audit Log', accountControl: 'Account Control', accountControlHint: 'Permissions and AI tools', role: 'Role', tenant: 'Company / tenant' };
+      ? { brand: 'Omran Verwaltungsportal mit KI', powered: 'Powered by AI', menu: 'Menü', nav: 'Hauptnavigation', account: 'Konto', guest: 'Gast', signedIn: 'Angemeldet', signIn: 'Anmelden', logout: 'Abmelden', phone: 'Telefon', company: 'Firma', completeCompany: 'Firmendaten ergaenzen', loadingCompany: 'Firmendaten werden geladen', auditLog: 'Audit Log', accountControl: 'Account Control', accountControlHint: 'Berechtigungen und KI-Tools', role: 'Rolle', tenant: 'Firma / Tenant' }
+      : { brand: 'Omran management portal powered by AI', powered: 'Powered by AI', menu: 'Menu', nav: 'Main navigation', account: 'Account', guest: 'Guest', signedIn: 'Signed in', signIn: 'Sign in', logout: 'Logout', phone: 'Phone', company: 'Company', completeCompany: 'Complete company info', loadingCompany: 'Loading company info', auditLog: 'Audit Log', accountControl: 'Account Control', accountControlHint: 'Permissions and AI tools', role: 'Role', tenant: 'Company / tenant' };
 
   function isActive(href: string) {
     const baseHref = href.split('#')[0] || '/';
@@ -162,8 +163,6 @@ export function AppHeader() {
     { href: '/platform-dashboard', label: platformCopy.dashboard },
     { href: '/platform-dashboard#tenants', label: platformCopy.tenants },
     { href: '/platform-dashboard#billing', label: platformCopy.billing },
-    { href: '/audit-log', label: platformCopy.audit },
-    { href: '/account-control', label: platformCopy.account },
   ];
 
   if (authUser?.accountLevel === 'platform_admin') {
@@ -358,6 +357,11 @@ export function AppHeader() {
                 </div>
               ) : null}
             </div>
+            {!authUser && isAuthEntryPage ? (
+              <Link href="/viewer-dashboard" className="btn app-guest-header-link" aria-label={headerCopy.guest} title={headerCopy.guest}>
+                <img src="/omran-logo.png" alt="" aria-hidden="true" />
+              </Link>
+            ) : null}
             <AppSettingsMenu
               open={settingsOpen}
               onOpenChange={(nextOpen) => {

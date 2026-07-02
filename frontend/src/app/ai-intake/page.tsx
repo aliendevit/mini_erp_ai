@@ -4,6 +4,7 @@ import Link from 'next/link';
 import { type ChangeEvent, useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { API_BASE, apiForm, apiGet, apiJson, authHeaders } from '../../lib/api';
+import { hasPermission, readStoredAccessUser, type StoredAccessUser } from '../../lib/access';
 import { type BrowserSpeechRecognition } from '../../lib/browser-speech';
 import { type NativeAudioRecordingSession, isNativeAudioRecordingSupported, startNativeAudioRecording } from '../../lib/native-audio-recorder';
 import { useI18n } from '../../lib/i18n';
@@ -652,6 +653,7 @@ function extraLabels(locale: string) {
       ragCaptured: "RAG memory updated.",
       ragFailed: "RAG update failed.",
       ragNoSources: "No RAG sources yet.",
+      ragDisabled: "RAG knowledge is not enabled for your account. Ask your manager to enable RAG access if project memory should be used in AI answers.",
       ragManage: "\u0625\u062f\u0627\u0631\u0629 \u0627\u0644\u0630\u0627\u0643\u0631\u0629",
       ragHideManager: "\u0625\u062e\u0641\u0627\u0621 \u0627\u0644\u0625\u062f\u0627\u0631\u0629",
       ragManagerTitle: "\u0625\u062f\u0627\u0631\u0629 \u0630\u0627\u0643\u0631\u0629 RAG",
@@ -791,6 +793,7 @@ function extraLabels(locale: string) {
       ragCaptured: 'RAG memory updated.',
       ragFailed: 'RAG update failed.',
       ragNoSources: 'No RAG sources yet.',
+      ragDisabled: 'RAG knowledge is not enabled for your account. Ask your manager to enable RAG access if project memory should be used in AI answers.',
       ragManage: 'Manage memory',
       ragHideManager: 'Hide manager',
       ragManagerTitle: 'RAG memory management',
@@ -929,6 +932,7 @@ function extraLabels(locale: string) {
     ragCaptured: 'RAG-Speicher aktualisiert.',
     ragFailed: 'RAG-Aktualisierung fehlgeschlagen.',
     ragNoSources: 'Noch keine RAG-Quellen.',
+    ragDisabled: 'RAG-Wissen ist fuer dein Konto nicht aktiviert. Bitte den Manager, RAG-Zugriff zu erlauben, wenn Projektwissen in KI-Antworten genutzt werden soll.',
     ragManage: 'Speicher verwalten',
     ragHideManager: 'Verwaltung ausblenden',
     ragManagerTitle: 'RAG-Speicherverwaltung',
@@ -1140,6 +1144,7 @@ export default function AIIntakePage() {
   const [ragQuestion, setRagQuestion] = useState('');
   const [ragQueryItems, setRagQueryItems] = useState<RagQueryItem[]>([]);
   const [ragManagerError, setRagManagerError] = useState('');
+  const [authUser, setAuthUser] = useState<StoredAccessUser | null>(null);
   const [chatInput, setChatInput] = useState('');
   const [busy, setBusy] = useState(false);
   const [deletingMessageId, setDeletingMessageId] = useState<string | null>(null);
@@ -1167,6 +1172,10 @@ export default function AIIntakePage() {
   const speechErrorRef = useRef<string | null>(null);
   const speechAutoStoppedRef = useRef(false);
   const speechStopRequestedRef = useRef(false);
+
+  useEffect(() => {
+    setAuthUser(readStoredAccessUser());
+  }, []);
   const speechRetryCountRef = useRef(0);
   const recordingStartedAtRef = useRef<number | null>(null);
   const recordingModeRef = useRef<VoiceDebugState['mode'] | null>(null);
@@ -1189,6 +1198,13 @@ export default function AIIntakePage() {
   }, []);
 
   async function loadRagSourcesForIntake(id: string) {
+    const stored = readStoredAccessUser();
+    if (stored && !stored.permissions?.includes('use_rag')) {
+      setRagSources([]);
+      setRagSourceDetail(null);
+      setRagQueryItems([]);
+      return;
+    }
     try {
       const response = await apiGet<{ items: RagSource[] }>(`/rag/sources?proposalId=${encodeURIComponent(id)}`);
       setRagSources(response.items || []);
@@ -1198,6 +1214,7 @@ export default function AIIntakePage() {
   }
 
   async function openRagSourceDetails(sourceId: string) {
+    if (!canUseRag) return;
     setRagManaging('loading');
     setRagManagerError('');
     try {
@@ -1212,6 +1229,7 @@ export default function AIIntakePage() {
   }
 
   async function deleteSelectedRagSource(sourceId: string) {
+    if (!canUseRag) return;
     if (!(await appConfirm(x.ragDeleteConfirm))) return;
     setRagManaging('deleting');
     setRagManagerError('');
@@ -1232,6 +1250,7 @@ export default function AIIntakePage() {
   }
 
   async function reprocessRagSource(sourceId: string) {
+    if (!canUseRag) return;
     setRagManaging('reingesting');
     setRagManagerError('');
     try {
@@ -1248,6 +1267,7 @@ export default function AIIntakePage() {
   }
 
   async function previewRagRetrieval() {
+    if (!canUseRag) return;
     if (!selectedId || !ragQuestion.trim()) return;
     setRagManaging('querying');
     setRagManagerError('');
@@ -1267,9 +1287,11 @@ export default function AIIntakePage() {
   }
 
   async function loadLists(preferredId?: string, pageOverride = intakePage) {
+    const storedUser = readStoredAccessUser();
+    const canLoadCustomers = hasPermission(storedUser, 'manage_company');
     const [intakePageData, customerRows] = await Promise.all([
       apiGet<PaginatedResponse<ProposalDraft>>(`/ai/intakes?paginated=true&page=${pageOverride}&pageSize=${INTAKE_PAGE_SIZE}`),
-      apiGet<Customer[]>('/customers'),
+      canLoadCustomers ? apiGet<Customer[]>('/customers') : Promise.resolve([]),
     ]);
     const intakeRows = intakePageData.items;
     setIntakes(intakeRows);
@@ -1968,6 +1990,10 @@ export default function AIIntakePage() {
   }
 
   async function captureDraftToRag() {
+    if (!canUseRag) {
+      setRagManagerError(x.ragDisabled);
+      return;
+    }
     if (!selectedId) return alert(m.aiIntakePage.createIntakeFirst);
     setRagStatus('capturing');
     setBusy(true);
@@ -1984,6 +2010,11 @@ export default function AIIntakePage() {
 
   async function uploadRagTextSource(event: ChangeEvent<HTMLInputElement>) {
     const file = event.target.files?.[0];
+    if (!canUseRag) {
+      event.target.value = '';
+      setRagManagerError(x.ragDisabled);
+      return;
+    }
     if (!file || !selectedId) return;
     const form = new FormData();
     form.append('proposalId', selectedId);
@@ -2468,6 +2499,7 @@ export default function AIIntakePage() {
     },
   ];
   const quickExamples = [x.exampleProjectBasics, x.exampleScope, x.examplePaymentWorkshop];
+  const canUseRag = Boolean(authUser?.permissions?.includes('use_rag'));
   const selectedIntake = intakes.find((item) => item.id === selectedId);
   const visibleIntakes = showAllIntakes ? intakes : intakes.slice(0, INTAKE_LIST_RENDER_LIMIT);
   const hiddenIntakeCount = Math.max(0, intakes.length - visibleIntakes.length);
@@ -2662,50 +2694,52 @@ export default function AIIntakePage() {
           <div className="ai-rag-strip" aria-live="polite" data-testid="rag-strip">
             <div className="ai-rag-summary">
               <span>{x.ragMemoryTitle}</span>
-              <strong data-testid="rag-source-count">{ragSources.length}</strong>
-              <em>{ragSources.length ? `${x.ragSources}: ${latestRagSource?.title || latestRagSource?.sourceType || '-'}` : x.ragNoSources}</em>
+              <strong data-testid="rag-source-count">{canUseRag ? ragSources.length : 0}</strong>
+              <em>{canUseRag ? (ragSources.length ? `${x.ragSources}: ${latestRagSource?.title || latestRagSource?.sourceType || '-'}` : x.ragNoSources) : x.ragDisabled}</em>
             </div>
-            <div className="ai-rag-actions">
-              <button
-                className="btn with-icon"
-                onClick={captureDraftToRag}
-                disabled={!selectedId || interactionLocked}
-                data-testid="rag-capture-draft"
-              >
-                <Icon name="save" />
-                {x.ragCaptureDraft}
-              </button>
-              <button
-                className="btn with-icon"
-                onClick={() => ragFileInputRef.current?.click()}
-                disabled={!selectedId || interactionLocked}
-                data-testid="rag-upload-text"
-              >
-                <Icon name="file" />
-                {x.ragUploadText}
-              </button>
-              <input
-                ref={ragFileInputRef}
-                className="ai-hidden-file-input"
-                type="file"
-                accept=".txt,.md,.csv,.json,.xml,.log,text/plain,text/markdown,text/csv,application/json,application/xml,text/xml"
-                onChange={uploadRagTextSource}
-                data-testid="rag-file-input"
-              />
-              <button
-                className="btn with-icon"
-                onClick={() => setRagManagerOpen((open) => !open)}
-                disabled={!selectedId}
-                data-testid="rag-manage"
-              >
-                <Icon name="info" />
-                {ragManagerOpen ? x.ragHideManager : x.ragManage}
-              </button>
-            </div>
+            {canUseRag ? (
+              <div className="ai-rag-actions">
+                <button
+                  className="btn with-icon"
+                  onClick={captureDraftToRag}
+                  disabled={!selectedId || interactionLocked}
+                  data-testid="rag-capture-draft"
+                >
+                  <Icon name="save" />
+                  {x.ragCaptureDraft}
+                </button>
+                <button
+                  className="btn with-icon"
+                  onClick={() => ragFileInputRef.current?.click()}
+                  disabled={!selectedId || interactionLocked}
+                  data-testid="rag-upload-text"
+                >
+                  <Icon name="file" />
+                  {x.ragUploadText}
+                </button>
+                <input
+                  ref={ragFileInputRef}
+                  className="ai-hidden-file-input"
+                  type="file"
+                  accept=".txt,.md,.csv,.json,.xml,.log,text/plain,text/markdown,text/csv,application/json,application/xml,text/xml"
+                  onChange={uploadRagTextSource}
+                  data-testid="rag-file-input"
+                />
+                <button
+                  className="btn with-icon"
+                  onClick={() => setRagManagerOpen((open) => !open)}
+                  disabled={!selectedId}
+                  data-testid="rag-manage"
+                >
+                  <Icon name="info" />
+                  {ragManagerOpen ? x.ragHideManager : x.ragManage}
+                </button>
+              </div>
+            ) : null}
             {ragStatusText && <div className={`ai-rag-status ${ragStatus}`}>{ragStatusText}</div>}
           </div>
 
-          {ragManagerOpen && (
+          {canUseRag && ragManagerOpen && (
             <section className="ai-rag-manager" data-testid="rag-manager">
               <div className="ai-rag-manager-head">
                 <div>

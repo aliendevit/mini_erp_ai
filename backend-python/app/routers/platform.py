@@ -326,6 +326,8 @@ def reset_company_manager_password(
 
     manager_password = _validate_password(payload.password if payload and payload.password else _generated_password())
     manager.password_hash = _hash_password(manager_password)
+    manager.failed_login_attempts = 0
+    manager.locked_until = None
     manager.updated_at = datetime.now(timezone.utc)
     record_audit(
         db,

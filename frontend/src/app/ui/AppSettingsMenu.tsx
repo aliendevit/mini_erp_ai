@@ -11,7 +11,7 @@ type Theme = 'dark' | 'light' | 'construction';
 
 const THEME_STORAGE_KEY = 'sa_theme';
 const LOCALES: Locale[] = ['de', 'en', 'ar'];
-const APP_VERSION = 'v1.0.0.0';
+const APP_VERSION = 'v1.7.1.0';
 
 const LOCALE_NAMES: Record<Locale, string> = {
   de: 'Deutsch',

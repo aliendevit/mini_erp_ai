@@ -21,45 +21,81 @@ export default function UserDashboardPage() {
 
   const tools = [
     { title: 'AI Intake', desc: 'Create project requests and capture details.', permission: 'use_ai_intake', href: '/ai-intake' },
-    { title: 'RAG Memory', desc: 'Use approved project memory and uploaded notes.', permission: 'use_rag', href: '/ai-intake' },
     { title: 'Project Tracking', desc: 'Update progress, issues, materials, and photos.', permission: 'update_tracking', href: '/orders' },
     { title: 'Invoices', desc: 'Restricted unless manager enables invoice access.', permission: 'manage_invoices', href: '/invoices' },
   ];
 
   return (
-    <main className="saas-page">
-      <section className="saas-hero">
+    <main className="dashboard-shell user-dashboard-shell">
+      <section className="dashboard-hero card user-dashboard-hero">
+        <div className="dashboard-hero-content">
+          <div className="eyebrow">Company Workspace</div>
+          <h1>Your enabled tools in {user.tenantName || 'the company'}.</h1>
+          <p>This dashboard shows only the work areas your manager enabled for your account, keeping company settings, billing controls, backups, and platform administration protected.</p>
+          <div className="dashboard-hero-actions">
+            {hasPermission(user, 'use_ai_intake') ? <Link className="btn primary" href="/ai-intake">Open AI Intake</Link> : null}
+            {hasPermission(user, 'view_projects') || hasPermission(user, 'update_tracking') ? <Link className="btn" href="/orders">Open Projects</Link> : null}
+          </div>
+        </div>
+        <div className="dashboard-stats user-dashboard-profile">
+          <div>
+            <strong>{user.email}</strong>
+            <span>{user.role || 'Company user'}</span>
+          </div>
+          <div>
+            <strong>{user.permissions?.length || 0}</strong>
+            <span>Enabled permissions</span>
+          </div>
+          <div>
+            <strong>No</strong>
+            <span>Platform access</span>
+          </div>
+        </div>
+      </section>
+
+      <section className="dashboard-section-header">
         <div>
-          <span>Level 3 - Company User</span>
-          <h1>Work inside the company with only the tools your manager enables.</h1>
-          <p>This account is limited to selected AI and project features, so sensitive billing, backup, and company settings stay protected.</p>
-        </div>
-        <div className="saas-login-card">
-          <strong>{user.email}</strong>
-          <span>{user.role}</span>
-          <small>{user.tenantName}</small>
+          <h2>Available Work Areas</h2>
+          <div className="muted">Manager-controlled tools for daily operations</div>
         </div>
       </section>
 
-      <section className="saas-metric-grid">
-        <div><strong>{user.permissions?.length || 0}</strong><span>Enabled permissions</span></div>
-        <div><strong>AI</strong><span>Selected tools only</span></div>
-        <div><strong>No</strong><span>Platform access</span></div>
-        <div><strong>No</strong><span>Restore backups</span></div>
-      </section>
-
-      <section className="saas-grid">
+      <section className="dashboard-workflow-grid user-dashboard-tool-grid">
         {tools.map((tool) => {
           const enabled = hasPermission(user, tool.permission);
           return (
-            <article key={tool.permission} className={`saas-card ${enabled ? '' : 'disabled'}`}>
-              <span>{enabled ? 'Enabled' : 'Disabled'}</span>
-              <h2>{tool.title}</h2>
-              <p>{tool.desc}</p>
+            <article key={tool.permission} className={`dashboard-workflow-card card user-dashboard-tool-card ${enabled ? '' : 'disabled'}`}>
+              <span>{enabled ? 'ON' : 'OFF'}</span>
+              <strong>{tool.title}</strong>
+              <small>{tool.desc}</small>
               {enabled ? <Link className="btn" href={tool.href}>Open</Link> : <button className="btn" disabled>Ask manager</button>}
             </article>
           );
         })}
+      </section>
+
+      <section className="dashboard-section-header">
+        <div>
+          <h2>Account Boundaries</h2>
+          <div className="muted">What this normal user account cannot change</div>
+        </div>
+      </section>
+
+      <section className="dashboard-module-grid user-dashboard-boundary-grid">
+        {[
+          ['Company settings', 'Only managers can edit company profile, users, and invoice settings.'],
+          ['Backups and restore', 'Backup creation and restore stay outside normal user access.'],
+          ['Platform billing', 'OMRAN SaaS billing is only visible to the platform admin.'],
+        ].map(([title, desc]) => (
+          <div key={title} className="dashboard-module-card card">
+            <span>LOCK</span>
+            <div>
+              <strong>{title}</strong>
+              <small>{desc}</small>
+            </div>
+            <b>Protected</b>
+          </div>
+        ))}
       </section>
     </main>
   );

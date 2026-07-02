@@ -5,6 +5,7 @@ import type { ReactNode } from 'react';
 import Link from 'next/link';
 
 import { API_BASE, apiAuthBlob, apiForm, apiGet, apiJson } from '../../../lib/api';
+import { hasPermission, readStoredAccessUser } from '../../../lib/access';
 import { useI18n } from '../../../lib/i18n';
 import { appConfirm } from '../../../lib/dialog';
 import { ListPager } from '../../ui/ListPager';
@@ -365,6 +366,7 @@ export default function ProjectTrackingSection({ orderId }: { orderId: string })
   const visibleTasks = useMemo(() => (tracking?.tasks || []).slice((taskPage - 1) * TRACKING_LIST_PAGE_SIZE, taskPage * TRACKING_LIST_PAGE_SIZE), [tracking?.tasks, taskPage]);
   const visibleIssues = useMemo(() => (tracking?.issues || []).slice((issuePage - 1) * TRACKING_LIST_PAGE_SIZE, issuePage * TRACKING_LIST_PAGE_SIZE), [tracking?.issues, issuePage]);
   const visibleMaterials = useMemo(() => (tracking?.materials || []).slice((materialPage - 1) * TRACKING_LIST_PAGE_SIZE, materialPage * TRACKING_LIST_PAGE_SIZE), [tracking?.materials, materialPage]);
+  const canUseAiMonitoring = useMemo(() => hasPermission(readStoredAccessUser(), 'use_ai_monitoring'), []);
 
   useEffect(() => {
     if (!tracking) return;
@@ -606,10 +608,12 @@ export default function ProjectTrackingSection({ orderId }: { orderId: string })
             <span>{actionCopy.order}</span>
             <strong>{messages.common.back}</strong>
           </Link>
-          <Link className="project-page-action monitoring" href={`/orders/${orderId}/monitoring`}>
-            <span>{actionCopy.ai}</span>
-            <strong>{labels.openMonitoring || x.aiAnalysis.title}</strong>
-          </Link>
+          {canUseAiMonitoring && (
+            <Link className="project-page-action monitoring" href={`/orders/${orderId}/monitoring`}>
+              <span>{actionCopy.ai}</span>
+              <strong>{labels.openMonitoring || x.aiAnalysis.title}</strong>
+            </Link>
+          )}
           <button className="project-page-action" onClick={loadTracking}>
             <span>{actionCopy.sync}</span>
             <strong>{x.refresh}</strong>

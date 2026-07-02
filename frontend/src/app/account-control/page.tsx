@@ -20,6 +20,7 @@ type AiFeature = {
 type ControlUser = {
   id: string;
   email: string;
+  displayName?: string | null;
   phone?: string | null;
   accountLevel: string;
   role: string;
@@ -27,6 +28,9 @@ type ControlUser = {
   permissions: string[];
   aiFeatures: AiFeature[];
   isActive: boolean;
+  failedLoginAttempts?: number;
+  remainingLoginAttempts?: number;
+  lockedUntil?: string | null;
   lastLoginAt?: string | null;
   createdAt?: string | null;
 };
@@ -171,6 +175,7 @@ export default function AccountControlPage() {
   const [error, setError] = useState('');
   const [savingKey, setSavingKey] = useState('');
   const [savedKey, setSavedKey] = useState('');
+  const [resettingAttemptsUserId, setResettingAttemptsUserId] = useState('');
   const [creatingUser, setCreatingUser] = useState(false);
   const [changingPassword, setChangingPassword] = useState(false);
   const [invoiceSettingsLoading, setInvoiceSettingsLoading] = useState(false);
@@ -187,6 +192,7 @@ export default function AccountControlPage() {
     confirmPassword: '',
   });
   const [newUser, setNewUser] = useState({
+    displayName: '',
     email: '',
     password: '',
     phone: '',
@@ -267,6 +273,7 @@ export default function AccountControlPage() {
     setError('');
     try {
       const created = await apiAuthJson<ControlUser>('/auth/account-control/users', 'POST', {
+        displayName: newUser.displayName,
         email: newUser.email,
         password: newUser.password,
         phone: newUser.phone || undefined,
@@ -280,11 +287,31 @@ export default function AccountControlPage() {
           userUsed: current.userUsed + 1,
         };
       });
-      setNewUser({ email: '', password: '', phone: '', accountLevel: 'company_user' });
+      setNewUser({ displayName: '', email: '', password: '', phone: '', accountLevel: 'company_user' });
     } catch (err) {
       setError(err instanceof Error ? err.message : labels.failed);
     } finally {
       setCreatingUser(false);
+    }
+  }
+
+  async function resetLoginAttempts(user: ControlUser) {
+    setResettingAttemptsUserId(user.id);
+    setError('');
+    try {
+      const updated = await apiAuthJson<ControlUser>(`/auth/account-control/users/${user.id}/reset-login-attempts`, 'POST');
+      setData((current) => {
+        if (!current) return current;
+        return {
+          ...current,
+          companyUsers: current.companyUsers.map((item) => (item.id === updated.id ? updated : item)),
+        };
+      });
+      appAlert('Login attempts reset.', 'success');
+    } catch (err) {
+      setError(err instanceof Error ? err.message : labels.failed);
+    } finally {
+      setResettingAttemptsUserId('');
     }
   }
 
@@ -362,7 +389,7 @@ export default function AccountControlPage() {
           <p>{labels.subtitle}</p>
         </div>
         <div className="account-control-identity">
-          <strong>{currentUser.email}</strong>
+          <strong>{currentUser.displayName || currentUser.email}</strong>
           <span>{currentUser.role}</span>
           <small>{currentUser.tenantName || data.companyProfile?.companyName || '-'}</small>
         </div>
@@ -390,12 +417,13 @@ export default function AccountControlPage() {
           <div className="account-control-section-title">
             <div>
               <span>{labels.account}</span>
-              <h2>{currentUser.email}</h2>
+              <h2>{currentUser.displayName || currentUser.email}</h2>
             </div>
             <strong>{currentUser.accountLevel}</strong>
           </div>
           <div className="account-control-info-list">
             <div><span>{labels.role}</span><strong>{currentUser.role}</strong></div>
+            {currentUser.displayName ? <div><span>Name</span><strong>{currentUser.displayName}</strong></div> : null}
             <div><span>{labels.status}</span><strong>{currentUser.isActive ? labels.active : labels.inactive}</strong></div>
             <div><span>{labels.lastLogin}</span><strong>{formatDate(currentUser.lastLoginAt)}</strong></div>
             {currentUser.phone ? <div><span>{labels.contact}</span><strong>{currentUser.phone}</strong></div> : null}
@@ -528,6 +556,10 @@ export default function AccountControlPage() {
           </div>
           <form className="account-control-create-user" onSubmit={createCompanyUser}>
             <label>
+              <span>User name</span>
+              <input value={newUser.displayName} onChange={(event) => setNewUser((current) => ({ ...current, displayName: event.target.value }))} required />
+            </label>
+            <label>
               <span>Email</span>
               <input type="email" value={newUser.email} onChange={(event) => setNewUser((current) => ({ ...current, email: event.target.value }))} required />
             </label>
@@ -556,10 +588,25 @@ export default function AccountControlPage() {
                 <article key={user.id} className="account-control-user-card">
                   <div className="account-control-user-head">
                     <div>
-                      <strong>{user.email}</strong>
+                      <strong>{user.displayName || user.email}</strong>
+                      {user.displayName ? <span>{user.email}</span> : null}
+                      <span>
+                        Login attempts: {user.failedLoginAttempts ?? 0}/{(user.failedLoginAttempts ?? 0) + (user.remainingLoginAttempts ?? 5)}
+                        {user.lockedUntil ? ` · Locked. Manager reset required (${formatDate(user.lockedUntil)})` : ''}
+                      </span>
                       <span>{user.role} · {user.isActive ? labels.active : labels.inactive}</span>
                     </div>
-                    <small>{formatDate(user.lastLoginAt)}</small>
+                    <div className="account-control-user-actions">
+                      <small>{formatDate(user.lastLoginAt)}</small>
+                      <button
+                        type="button"
+                        className="btn"
+                        onClick={() => resetLoginAttempts(user)}
+                        disabled={resettingAttemptsUserId === user.id || ((user.failedLoginAttempts ?? 0) === 0 && !user.lockedUntil)}
+                      >
+                        {resettingAttemptsUserId === user.id ? labels.saving : 'Reset attempts'}
+                      </button>
+                    </div>
                   </div>
                   <div className="account-control-toggle-grid">
                     {user.accountLevel === 'company_viewer' ? (

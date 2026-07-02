@@ -1,8 +1,7 @@
 'use client';
 
 import { zodResolver } from '@hookform/resolvers/zod';
-import Link from 'next/link';
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { useForm, type Resolver } from 'react-hook-form';
 import { z } from 'zod';
@@ -46,25 +45,28 @@ export function AuthForm({ mode }: AuthFormProps) {
   const [apiError, setApiError] = useState<string>('');
   const router = useRouter();
 
-  const loginSchema = z.object({
-    email: z.string().min(1, msgs.authPage.validation.emailRequired).email(msgs.authPage.validation.emailInvalid),
-    password: z.string().min(8, msgs.authPage.validation.passwordRequired).regex(passwordPattern, msgs.authPage.validation.passwordStrength),
-  });
+  const schema = useMemo(() => {
+    const loginSchema = z.object({
+      email: z.string().min(1, msgs.authPage.validation.emailRequired).email(msgs.authPage.validation.emailInvalid),
+      password: z.string().min(1, msgs.authPage.validation.passwordRequired),
+    });
 
-  const signUpSchema = loginSchema.extend({
-    phone: z.string().min(1, msgs.authPage.validation.phoneRequired).regex(phonePattern, msgs.authPage.validation.phoneInvalid),
-    confirmPassword: z.string().min(1, msgs.authPage.validation.confirmRequired),
-  }).superRefine((data, ctx) => {
-    if (data.password !== data.confirmPassword) {
-      ctx.addIssue({
-        code: z.ZodIssueCode.custom,
-        path: ['confirmPassword'],
-        message: msgs.authPage.validation.passwordsMatch,
-      });
-    }
-  });
+    if (mode === 'login') return loginSchema;
 
-  const schema = mode === 'signup' ? signUpSchema : loginSchema;
+    return loginSchema.extend({
+      password: z.string().min(8, msgs.authPage.validation.passwordRequired).regex(passwordPattern, msgs.authPage.validation.passwordStrength),
+      phone: z.string().min(1, msgs.authPage.validation.phoneRequired).regex(phonePattern, msgs.authPage.validation.phoneInvalid),
+      confirmPassword: z.string().min(1, msgs.authPage.validation.confirmRequired),
+    }).superRefine((data, ctx) => {
+      if (data.password !== data.confirmPassword) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ['confirmPassword'],
+          message: msgs.authPage.validation.passwordsMatch,
+        });
+      }
+    });
+  }, [mode, msgs.authPage.validation]);
 
   const {
     register,
@@ -78,16 +80,11 @@ export function AuthForm({ mode }: AuthFormProps) {
       confirmPassword: '',
       phone: '',
     },
-    mode: 'onChange',
+    mode: 'onBlur',
+    reValidateMode: 'onSubmit',
   });
 
   const phoneField = register('phone');
-  const demoAccounts = [
-    { label: 'OMRAN dashboard', email: 'platform@omran.local', password: 'OmranAdmin1!' },
-    { label: 'Company manager', email: 'manager@demo.omran.local', password: 'CompanyManager1!' },
-    { label: 'Company user', email: 'user@demo.omran.local', password: 'CompanyUser1!' },
-  ];
-
   const onSubmit = async (data: AuthFormValues) => {
     setApiError('');
     setStatus('');
@@ -119,22 +116,6 @@ export function AuthForm({ mode }: AuthFormProps) {
       <div className="auth-hero">
         <h2>{mode === 'login' ? msgs.authPage.loginTitle : msgs.authPage.signupTitle}</h2>
       </div>
-
-      {mode === 'login' ? (
-        <div className="auth-demo-access" aria-label="SaaS demo accounts">
-          <Link href="/viewer-dashboard" className="auth-viewer-link">
-            <strong>Guest viewer mode</strong>
-            <span>Explore a limited read-only preview without registration</span>
-          </Link>
-          {demoAccounts.map((account) => (
-            <div key={account.email}>
-              <strong>{account.label}</strong>
-              <span>{account.email}</span>
-              <code>{account.password}</code>
-            </div>
-          ))}
-        </div>
-      ) : null}
 
       <form className="auth-form" onSubmit={handleSubmit(onSubmit)} noValidate>
           <div className="auth-field">
