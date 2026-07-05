@@ -10796,3 +10796,484 @@ html[data-theme="construction"] .ai-quick-prompt span {
     min-width: 0;
   }
 }
+
+.access-guard-placeholder {
+  min-height: 52vh;
+  display: grid;
+  place-items: center;
+  color: var(--muted);
+  font-weight: 800;
+}
+
+.access-denied-page {
+  min-height: calc(100vh - 120px);
+  display: grid;
+  place-items: center;
+  padding: clamp(22px, 5vw, 64px);
+}
+
+.access-denied-card {
+  width: min(780px, 100%);
+  position: relative;
+  display: grid;
+  gap: 18px;
+  overflow: hidden;
+  padding: clamp(22px, 4vw, 34px) !important;
+  border-color: color-mix(in srgb, var(--border) 72%, #ef4444 28%) !important;
+  background:
+    radial-gradient(circle at 18% 0%, color-mix(in srgb, #ef4444 14%, transparent), transparent 34%),
+    linear-gradient(135deg, color-mix(in srgb, var(--card) 88%, var(--bg) 12%), color-mix(in srgb, var(--card) 78%, var(--link) 6%)) !important;
+}
+
+.access-denied-card::before {
+  content: "";
+  position: absolute;
+  inset: 0 0 auto;
+  height: 4px;
+  background: linear-gradient(90deg, #ef4444, #f59e0b, var(--link));
+}
+
+.access-denied-mark {
+  width: 58px;
+  height: 58px;
+  display: grid;
+  place-items: center;
+  border-radius: 18px;
+  border: 1px solid color-mix(in srgb, #ef4444 42%, var(--border));
+  background:
+    linear-gradient(135deg, color-mix(in srgb, #ef4444 20%, transparent), color-mix(in srgb, #f59e0b 12%, transparent)),
+    color-mix(in srgb, var(--card) 82%, var(--bg) 18%);
+  color: #ef4444;
+  font-size: 1.6rem;
+  font-weight: 1000;
+  box-shadow: 0 18px 40px color-mix(in srgb, #ef4444 16%, transparent);
+}
+
+.access-denied-details {
+  display: grid;
+  gap: 10px;
+}
+
+.access-denied-details > div {
+  display: grid;
+  gap: 5px;
+  min-width: 0;
+  padding: 12px 14px;
+  border-radius: 14px;
+  border: 1px solid color-mix(in srgb, var(--border) 80%, var(--link) 20%);
+  background: color-mix(in srgb, var(--card) 84%, var(--bg) 16%);
+}
+
+.access-denied-details span {
+  color: var(--muted);
+  font-size: 0.75rem;
+  font-weight: 900;
+  text-transform: uppercase;
+}
+
+.access-denied-details strong {
+  overflow-wrap: anywhere;
+  color: var(--text);
+}
+
+.access-denied-actions {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.invoice-visual-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1.2fr) minmax(0, 1fr) minmax(280px, 0.9fr);
+  gap: 16px;
+  margin-bottom: 16px;
+}
+
+.invoice-visual-panel {
+  display: grid;
+  gap: 14px;
+  align-content: start;
+  overflow: hidden;
+  background:
+    radial-gradient(circle at 100% 0%, color-mix(in srgb, var(--link) 12%, transparent), transparent 34%),
+    color-mix(in srgb, var(--card) 92%, var(--bg) 8%) !important;
+}
+
+.invoice-visual-panel h2 {
+  margin: 4px 0 0;
+  font-size: clamp(1.08rem, 1.9vw, 1.35rem);
+}
+
+.invoice-visual-panel p {
+  margin: 8px 0 0;
+  color: var(--muted);
+  line-height: 1.55;
+}
+
+.invoice-visual-kicker {
+  color: var(--link);
+  font-size: 0.72rem;
+  font-weight: 1000;
+  text-transform: uppercase;
+  letter-spacing: 0;
+}
+
+.invoice-visual-head,
+.invoice-donut-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.invoice-visual-head > strong {
+  min-width: 54px;
+  height: 54px;
+  display: grid;
+  place-items: center;
+  border-radius: 16px;
+  border: 1px solid color-mix(in srgb, var(--border) 76%, var(--link) 24%);
+  background: color-mix(in srgb, var(--card) 80%, var(--link) 8%);
+  font-size: 1.25rem;
+}
+
+.invoice-donut {
+  --paid: 0%;
+  width: 136px;
+  aspect-ratio: 1;
+  flex: 0 0 136px;
+  display: grid;
+  place-items: center;
+  align-content: center;
+  border-radius: 999px;
+  background:
+    radial-gradient(circle, color-mix(in srgb, var(--card) 96%, var(--bg) 4%) 0 57%, transparent 58%),
+    conic-gradient(#22c55e 0 var(--paid), #f59e0b var(--paid) 100%);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--border) 75%, transparent), 0 18px 40px color-mix(in srgb, #000 16%, transparent);
+}
+
+.invoice-donut strong {
+  font-size: 1.8rem;
+  line-height: 1;
+}
+
+.invoice-donut span,
+.invoice-payment-legend small {
+  color: var(--muted);
+  font-weight: 800;
+}
+
+.invoice-payment-legend {
+  display: grid;
+  gap: 10px;
+  min-width: 0;
+}
+
+.invoice-payment-legend > div {
+  display: grid;
+  grid-template-columns: 12px minmax(0, 1fr);
+  column-gap: 8px;
+  align-items: center;
+}
+
+.invoice-payment-legend b {
+  overflow-wrap: anywhere;
+}
+
+.invoice-payment-legend small {
+  grid-column: 2;
+  font-size: 0.76rem;
+}
+
+.invoice-payment-legend .dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 999px;
+}
+
+.invoice-payment-legend .paid {
+  background: #22c55e;
+}
+
+.invoice-payment-legend .due {
+  background: #f59e0b;
+}
+
+.invoice-payment-legend .neutral {
+  background: var(--link);
+}
+
+.invoice-status-bars {
+  display: grid;
+  gap: 12px;
+}
+
+.invoice-status-bar {
+  display: grid;
+  gap: 7px;
+}
+
+.invoice-status-bar > div {
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+  color: var(--muted);
+  font-size: 0.86rem;
+  font-weight: 850;
+}
+
+.invoice-status-bar > div b {
+  color: var(--text);
+}
+
+.invoice-status-bar em {
+  height: 9px;
+  display: block;
+  overflow: hidden;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--border) 54%, transparent);
+}
+
+.invoice-status-bar i {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: var(--link);
+}
+
+.invoice-status-bar.draft i {
+  background: #64748b;
+}
+
+.invoice-status-bar.sent i {
+  background: #38bdf8;
+}
+
+.invoice-status-bar.partial i {
+  background: #f59e0b;
+}
+
+.invoice-status-bar.paid i {
+  background: #22c55e;
+}
+
+.invoice-status-bar.overdue i {
+  background: #ef4444;
+}
+
+.invoice-priority-list {
+  display: grid;
+  gap: 10px;
+}
+
+.invoice-priority-list > div {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 12px 14px;
+  border-radius: 14px;
+  border: 1px solid color-mix(in srgb, var(--border) 78%, var(--link) 22%);
+  background: color-mix(in srgb, var(--card) 86%, var(--bg) 14%);
+}
+
+.invoice-priority-list strong {
+  font-size: 1.25rem;
+}
+
+.invoice-priority-list span {
+  color: var(--muted);
+  font-weight: 850;
+  text-align: end;
+}
+
+.invoice-priority-list .danger {
+  border-color: color-mix(in srgb, #ef4444 40%, var(--border));
+}
+
+.invoice-priority-list .danger strong {
+  color: #ef4444;
+}
+
+.invoice-priority-list .warning {
+  border-color: color-mix(in srgb, #f59e0b 44%, var(--border));
+}
+
+.invoice-priority-list .warning strong {
+  color: #f59e0b;
+}
+
+.invoice-priority-list .success {
+  border-color: color-mix(in srgb, #22c55e 38%, var(--border));
+}
+
+.invoice-priority-list .success strong {
+  color: #22c55e;
+}
+
+.risk-brief-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 3000;
+  display: grid;
+  place-items: center;
+  padding: 20px;
+  background: color-mix(in srgb, #020617 58%, transparent);
+  backdrop-filter: blur(14px);
+}
+
+.risk-brief-card {
+  width: min(900px, 100%);
+  max-height: calc(100vh - 40px);
+  overflow: auto;
+  display: grid;
+  gap: 16px;
+  border-color: color-mix(in srgb, var(--border) 64%, var(--link) 36%) !important;
+  background:
+    radial-gradient(circle at 15% 0%, color-mix(in srgb, #ef4444 10%, transparent), transparent 30%),
+    radial-gradient(circle at 100% 12%, color-mix(in srgb, var(--link) 14%, transparent), transparent 34%),
+    color-mix(in srgb, var(--card) 94%, var(--bg) 6%) !important;
+}
+
+.risk-brief-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 16px;
+}
+
+.risk-brief-head h2 {
+  margin: 4px 0 6px;
+}
+
+.risk-brief-head p {
+  margin: 0;
+  color: var(--muted);
+}
+
+.risk-brief-list {
+  display: grid;
+  gap: 10px;
+}
+
+.risk-brief-row {
+  display: grid;
+  grid-template-columns: 12px minmax(0, 1.4fr) minmax(180px, 1fr) minmax(150px, 0.8fr);
+  align-items: center;
+  gap: 12px;
+  padding: 13px 14px;
+  border-radius: 16px;
+  border: 1px solid color-mix(in srgb, var(--border) 78%, var(--link) 22%);
+  background: color-mix(in srgb, var(--card) 86%, var(--bg) 14%);
+  color: var(--text);
+  text-decoration: none;
+  transition: transform 0.16s ease, border-color 0.16s ease, background 0.16s ease;
+}
+
+.risk-brief-row:hover {
+  transform: translateY(-1px);
+  text-decoration: none;
+  border-color: color-mix(in srgb, var(--link) 50%, var(--border));
+}
+
+.risk-brief-row > div {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+}
+
+.risk-brief-row strong,
+.risk-brief-row b,
+.risk-brief-row small {
+  overflow-wrap: anywhere;
+}
+
+.risk-brief-row small {
+  color: var(--muted);
+  font-weight: 800;
+}
+
+.risk-brief-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 999px;
+  background: #22c55e;
+  box-shadow: 0 0 0 4px color-mix(in srgb, #22c55e 16%, transparent);
+}
+
+.risk-brief-row.high {
+  border-color: color-mix(in srgb, #ef4444 46%, var(--border));
+}
+
+.risk-brief-row.high .risk-brief-dot {
+  background: #ef4444;
+  box-shadow: 0 0 0 4px color-mix(in srgb, #ef4444 16%, transparent);
+}
+
+.risk-brief-row.high b {
+  color: #ef4444;
+}
+
+.risk-brief-row.medium {
+  border-color: color-mix(in srgb, #f59e0b 46%, var(--border));
+}
+
+.risk-brief-row.medium .risk-brief-dot {
+  background: #f59e0b;
+  box-shadow: 0 0 0 4px color-mix(in srgb, #f59e0b 16%, transparent);
+}
+
+.risk-brief-row.medium b {
+  color: #f59e0b;
+}
+
+.risk-brief-row.low b {
+  color: #22c55e;
+}
+
+@media (max-width: 1060px) {
+  .invoice-visual-grid {
+    grid-template-columns: 1fr 1fr;
+  }
+
+  .invoice-priority-panel {
+    grid-column: 1 / -1;
+  }
+}
+
+@media (max-width: 760px) {
+  .invoice-visual-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .invoice-donut-row,
+  .invoice-visual-head,
+  .risk-brief-head {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .risk-brief-row {
+    grid-template-columns: 12px 1fr;
+  }
+
+  .risk-brief-row > div:nth-of-type(2),
+  .risk-brief-row > div:nth-of-type(3) {
+    grid-column: 2;
+  }
+}
+
+@media (max-width: 480px) {
+  .access-denied-actions .btn,
+  .risk-brief-head .btn {
+    width: 100%;
+  }
+
+  .invoice-donut-row {
+    align-items: center;
+  }
+
+  .invoice-payment-legend {
+    width: 100%;
+  }
+}

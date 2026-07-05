@@ -1,9 +1,50 @@
 'use client';
 
 import Link from 'next/link';
+import { useEffect, useState } from 'react';
 
+import { apiGet } from '../lib/api';
+import { hasPermission, readStoredAccessUser } from '../lib/access';
 import { useI18n } from '../lib/i18n';
 import { InvoiceSequenceSetting } from './ui/InvoiceSequenceSetting';
+
+type DashboardOrder = {
+  id: string;
+  title: string;
+  status: string;
+  customer?: { companyName?: string | null } | null;
+};
+
+type TrackingPayload = {
+  dashboard: {
+    overallStatus: string;
+    overallProgressPercent: number;
+    warnings?: Array<{ type?: string; severity?: string; message?: string }>;
+  };
+};
+
+type AlertPayload = {
+  items?: Array<{ id: string; status: string }>;
+};
+
+type RiskBriefItem = {
+  orderId: string;
+  href: string;
+  title: string;
+  customer: string;
+  level: 'high' | 'medium' | 'low';
+  progress: number;
+  warningCount: number;
+  openAlertCount: number;
+  summary: string;
+};
+
+type PaginatedResponse<T> = {
+  items: T[];
+  total: number;
+  page: number;
+  pageSize: number;
+};
 
 function dashboardLabels(locale: string) {
   if (locale === 'ar') {
@@ -106,8 +147,25 @@ function cardIcon(href: string) {
   return 'ERP';
 }
 
+function riskLevel(status: string, warnings: Array<{ severity?: string }> = [], openAlertCount = 0): RiskBriefItem['level'] {
+  const normalized = String(status || '').toLowerCase();
+  const hasHighWarning = warnings.some((warning) => String(warning.severity || '').toLowerCase() === 'high');
+  if (normalized.includes('blocked') || hasHighWarning || openAlertCount > 0) return 'high';
+  if (warnings.length > 0 || normalized.includes('paused') || normalized.includes('at_risk')) return 'medium';
+  return 'low';
+}
+
+function riskSummary(item: RiskBriefItem) {
+  if (item.level === 'high') return item.openAlertCount > 0 ? `${item.openAlertCount} open alert(s) need review.` : 'High-risk warning found.';
+  if (item.level === 'medium') return `${item.warningCount} warning(s), follow up soon.`;
+  return 'No urgent risk detected.';
+}
+
 export default function Page() {
   const { locale, messages } = useI18n();
+  const [riskBriefOpen, setRiskBriefOpen] = useState(false);
+  const [riskBriefLoading, setRiskBriefLoading] = useState(false);
+  const [riskBriefItems, setRiskBriefItems] = useState<RiskBriefItem[]>([]);
   const labels = dashboardLabels(locale);
   const authButtonLabel = locale === 'ar' ? 'تسجيل الدخول' : locale === 'de' ? 'Anmelden' : 'Login';
   const workflowCards = [
@@ -117,8 +175,106 @@ export default function Page() {
     { title: labels.monitoringTitle, desc: labels.monitoringDesc, badge: '04', href: '/monitoring' },
   ];
 
+  useEffect(() => {
+    const user = readStoredAccessUser();
+    if (!user || user.accountLevel !== 'company_manager' || !hasPermission(user, 'view_projects')) return;
+    const canOpenMonitoring = hasPermission(user, 'use_ai_monitoring');
+    let cancelled = false;
+    setRiskBriefLoading(true);
+    apiGet<PaginatedResponse<DashboardOrder>>('/orders?paginated=true&page=1&pageSize=50&status=open')
+      .then(async (data) => {
+        const rows = await Promise.all((data.items || []).map(async (order) => {
+          try {
+            const [tracking, alerts] = await Promise.all([
+              apiGet<TrackingPayload>(`/orders/${order.id}/tracking`),
+              apiGet<AlertPayload>(`/orders/${order.id}/tracking/alerts?status=open&syncCurrent=false`),
+            ]);
+            const warnings = tracking.dashboard.warnings || [];
+            const openAlertCount = alerts.items?.length || 0;
+            const level = riskLevel(tracking.dashboard.overallStatus || order.status, warnings, openAlertCount);
+            const item: RiskBriefItem = {
+              orderId: order.id,
+              href: canOpenMonitoring ? `/orders/${order.id}/monitoring` : `/orders/${order.id}`,
+              title: order.title,
+              customer: order.customer?.companyName || 'No customer',
+              level,
+              progress: Number(tracking.dashboard.overallProgressPercent || 0),
+              warningCount: warnings.length,
+              openAlertCount,
+              summary: '',
+            };
+            item.summary = riskSummary(item);
+            return item;
+          } catch {
+            return {
+              orderId: order.id,
+              href: canOpenMonitoring ? `/orders/${order.id}/monitoring` : `/orders/${order.id}`,
+              title: order.title,
+              customer: order.customer?.companyName || 'No customer',
+              level: 'medium' as const,
+              progress: 0,
+              warningCount: 0,
+              openAlertCount: 0,
+              summary: 'Tracking data needs review.',
+            };
+          }
+        }));
+        if (cancelled) return;
+        const sorted = rows.sort((a, b) => {
+          const weight = { high: 3, medium: 2, low: 1 };
+          return weight[b.level] - weight[a.level] || b.openAlertCount - a.openAlertCount || b.warningCount - a.warningCount;
+        });
+        setRiskBriefItems(sorted.slice(0, 5));
+        setRiskBriefOpen(sorted.length > 0);
+      })
+      .catch(() => {
+        if (!cancelled) setRiskBriefItems([]);
+      })
+      .finally(() => {
+        if (!cancelled) setRiskBriefLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
   return (
     <div className="dashboard-shell">
+      {riskBriefOpen ? (
+        <div className="risk-brief-backdrop" role="dialog" aria-modal="true" aria-labelledby="risk-brief-title">
+          <section className="risk-brief-card card">
+            <div className="risk-brief-head">
+              <div>
+                <span className="entity-kicker">Manager brief</span>
+                <h2 id="risk-brief-title">Project risk summary</h2>
+                <p>Short project signals for quick prioritization. High-risk rows are shown first.</p>
+              </div>
+              <button className="btn" type="button" onClick={() => setRiskBriefOpen(false)}>Close</button>
+            </div>
+            {riskBriefLoading ? <div className="muted">Loading project signals...</div> : null}
+            <div className="risk-brief-list">
+              {riskBriefItems.map((item) => (
+                <Link key={item.orderId} href={item.href} className={`risk-brief-row ${item.level}`} onClick={() => setRiskBriefOpen(false)}>
+                  <span className="risk-brief-dot" aria-hidden="true" />
+                  <div>
+                    <strong>{item.title}</strong>
+                    <small>{item.customer}</small>
+                  </div>
+                  <div>
+                    <b>{item.level.toUpperCase()}</b>
+                    <small>{item.summary}</small>
+                  </div>
+                  <div>
+                    <b>{item.progress}%</b>
+                    <small>{item.warningCount} warnings · {item.openAlertCount} alerts</small>
+                  </div>
+                </Link>
+              ))}
+            </div>
+          </section>
+        </div>
+      ) : null}
+
       <section className="dashboard-hero card">
         <div className="dashboard-hero-content">
           <div className="eyebrow">{labels.eyebrow}</div>

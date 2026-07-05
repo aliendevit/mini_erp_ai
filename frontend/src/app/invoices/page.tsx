@@ -1,7 +1,7 @@
 'use client';
 
 import Link from 'next/link';
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useState, type CSSProperties } from 'react';
 
 import { useI18n } from '../../lib/i18n';
 import { appConfirm } from '../../lib/dialog';
@@ -116,6 +116,29 @@ export default function InvoicesPage() {
     return m.statuses.invoice[statusValue as keyof typeof m.statuses.invoice] ?? statusValue;
   }
 
+  const chartMetrics = metrics || {
+    total: totalItems,
+    draft: 0,
+    sent: 0,
+    partialPaid: 0,
+    paid: 0,
+    overdue: 0,
+    outstandingBalance: 0,
+    paidAmount: 0,
+    currency: 'EUR',
+  };
+  const paymentTotal = Math.max(1, Number(chartMetrics.paidAmount || 0) + Number(chartMetrics.outstandingBalance || 0));
+  const paidPercent = Math.round((Number(chartMetrics.paidAmount || 0) / paymentTotal) * 100);
+  const outstandingPercent = Math.max(0, 100 - paidPercent);
+  const statusSlices = [
+    { key: 'draft', label: m.statuses.invoice.draft, value: chartMetrics.draft || 0, className: 'draft' },
+    { key: 'sent', label: m.statuses.invoice.sent, value: chartMetrics.sent || 0, className: 'sent' },
+    { key: 'partialPaid', label: 'Partial paid', value: chartMetrics.partialPaid || 0, className: 'partial' },
+    { key: 'paid', label: m.statuses.invoice.paid, value: chartMetrics.paid || 0, className: 'paid' },
+    { key: 'overdue', label: 'Overdue', value: chartMetrics.overdue || 0, className: 'overdue' },
+  ];
+  const maxStatusValue = Math.max(1, ...statusSlices.map((slice) => slice.value));
+
   return (
     <div className="entity-page invoices-page">
       <section className="entity-hero card">
@@ -129,6 +152,71 @@ export default function InvoicesPage() {
             <div className="entity-stat"><strong>{metrics?.draft ?? 0}</strong><span>{m.statuses.invoice.draft}</span></div>
             <div className="entity-stat"><strong>{metrics?.overdue ?? 0}</strong><span>Overdue</span></div>
             <div className="entity-stat"><strong>{Number(metrics?.outstandingBalance ?? 0).toFixed(2)}</strong><span>Outstanding</span></div>
+        </div>
+      </section>
+
+      <section className="invoice-visual-grid" aria-label="Invoice visual overview">
+        <div className="card invoice-visual-panel invoice-payment-visual">
+          <div>
+            <span className="invoice-visual-kicker">Cash position</span>
+            <h2>Paid vs outstanding</h2>
+            <p>Quickly see how much invoice value is already collected and how much still needs attention.</p>
+          </div>
+          <div className="invoice-donut-row">
+            <div
+              className="invoice-donut"
+              style={{ '--paid': `${paidPercent}%` } as CSSProperties}
+              aria-label={`Paid ${paidPercent} percent`}
+            >
+              <strong>{paidPercent}%</strong>
+              <span>paid</span>
+            </div>
+            <div className="invoice-payment-legend">
+              <div><span className="dot paid" /> <b>{Number(chartMetrics.paidAmount || 0).toFixed(2)} {chartMetrics.currency}</b><small>Paid</small></div>
+              <div><span className="dot due" /> <b>{Number(chartMetrics.outstandingBalance || 0).toFixed(2)} {chartMetrics.currency}</b><small>Outstanding</small></div>
+              <div><span className="dot neutral" /> <b>{outstandingPercent}%</b><small>Remaining share</small></div>
+            </div>
+          </div>
+        </div>
+
+        <div className="card invoice-visual-panel">
+          <div className="invoice-visual-head">
+            <div>
+              <span className="invoice-visual-kicker">Status mix</span>
+              <h2>Invoice pipeline</h2>
+            </div>
+            <strong>{chartMetrics.total || 0}</strong>
+          </div>
+          <div className="invoice-status-bars">
+            {statusSlices.map((slice) => (
+              <div key={slice.key} className={`invoice-status-bar ${slice.className}`}>
+                <div>
+                  <span>{slice.label}</span>
+                  <b>{slice.value}</b>
+                </div>
+                <em><i style={{ width: `${Math.max(5, (slice.value / maxStatusValue) * 100)}%` }} /></em>
+              </div>
+            ))}
+          </div>
+        </div>
+
+        <div className="card invoice-visual-panel invoice-priority-panel">
+          <span className="invoice-visual-kicker">Manager focus</span>
+          <h2>What needs attention</h2>
+          <div className="invoice-priority-list">
+            <div className={chartMetrics.overdue ? 'danger' : 'success'}>
+              <strong>{chartMetrics.overdue || 0}</strong>
+              <span>Overdue invoices</span>
+            </div>
+            <div className={(chartMetrics.outstandingBalance || 0) > 0 ? 'warning' : 'success'}>
+              <strong>{Number(chartMetrics.outstandingBalance || 0).toFixed(2)}</strong>
+              <span>Open balance</span>
+            </div>
+            <div>
+              <strong>{chartMetrics.draft || 0}</strong>
+              <span>Draft invoices to finish</span>
+            </div>
+          </div>
         </div>
       </section>
 
