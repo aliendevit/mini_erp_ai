@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import hashlib
+import hmac
 import json
+import os
 from collections.abc import Generator
 from datetime import datetime, timezone
 from decimal import Decimal
@@ -191,6 +193,30 @@ def _ensure_invoice_columns() -> None:
             conn.execute(text(statement))
 
 
+def _ensure_payment_tenant_column() -> None:
+    inspector = inspect(engine)
+    if "PaymentRecord" not in inspector.get_table_names():
+        return
+    column_names = {column["name"] for column in inspector.get_columns("PaymentRecord")}
+    with engine.begin() as conn:
+        if "tenantId" not in column_names:
+            conn.execute(text('ALTER TABLE "PaymentRecord" ADD COLUMN "tenantId" VARCHAR'))
+        conn.execute(
+            text(
+                '''
+                UPDATE "PaymentRecord"
+                SET "tenantId" = COALESCE(
+                    (SELECT "tenantId" FROM "Invoice" WHERE "Invoice".id = "PaymentRecord"."invoiceId"),
+                    (SELECT "tenantId" FROM "Order" WHERE "Order".id = "PaymentRecord"."orderId"),
+                    (SELECT "tenantId" FROM "Proposal" WHERE "Proposal".id = "PaymentRecord"."proposalId"),
+                    (SELECT "tenantId" FROM "Customer" WHERE "Customer".id = "PaymentRecord"."customerId")
+                )
+                WHERE "tenantId" IS NULL
+                '''
+            )
+        )
+
+
 def _ensure_user_access_columns() -> None:
     inspector = inspect(engine)
     if "UserAccount" not in inspector.get_table_names():
@@ -305,6 +331,8 @@ def _seed_saas_demo_accounts() -> None:
     try:
         for account in demo_accounts:
             user = db.scalar(select(UserAccount).where(UserAccount.email == account["email"]))
+            if user:
+                continue
             if not user:
                 user = UserAccount(
                     email=account["email"],
@@ -327,10 +355,35 @@ def _seed_saas_demo_accounts() -> None:
         db.close()
 
 
+def _disable_default_demo_accounts() -> None:
+    """Disable only accounts that still use a source-controlled demo password."""
+    from .models import UserAccount
+
+    demo_credentials = {
+        "platform@omran.local": ("OmranAdmin1!", "omran-platform-demo"),
+        "manager@demo.omran.local": ("CompanyManager1!", "omran-manager-demo"),
+        "user@demo.omran.local": ("CompanyUser1!", "omran-user-demo"),
+        "viewer@demo.omran.local": ("CompanyViewer1!", "omran-viewer-demo"),
+    }
+    db = SessionLocal()
+    try:
+        users = db.scalars(select(UserAccount).where(UserAccount.email.in_(demo_credentials))).all()
+        for user in users:
+            password, salt = demo_credentials[user.email]
+            expected_hash = _demo_password_hash(password, salt)
+            if hmac.compare_digest(user.password_hash, expected_hash):
+                user.is_active = False
+                user.session_token_hash = None
+                user.session_created_at = None
+        db.commit()
+    finally:
+        db.close()
+
+
 def _ensure_business_tenant_columns() -> None:
     inspector = inspect(engine)
     table_names = set(inspector.get_table_names())
-    target_tables = ["Customer", "Order", "Invoice", "Proposal", "RagSource", "Employee"]
+    target_tables = ["Customer", "Order", "Invoice", "Proposal", "RagSource", "Employee", "Workshop"]
     statements: list[str] = []
     for table_name in target_tables:
         if table_name not in table_names:
@@ -345,6 +398,20 @@ def _ensure_business_tenant_columns() -> None:
     with engine.begin() as conn:
         for statement in statements:
             conn.execute(text(statement))
+        if "Workshop" in table_names:
+            conn.execute(text(
+                '''
+                UPDATE "Workshop"
+                SET "tenantId" = (
+                    SELECT orders."tenantId"
+                    FROM "WorkshopSiteAssignment" assignments
+                    JOIN "Order" orders ON orders.id = assignments."orderId"
+                    WHERE assignments."workshopId" = "Workshop".id
+                    LIMIT 1
+                )
+                WHERE "tenantId" IS NULL
+                '''
+            ))
 
 
 def _ensure_audit_tenant_column() -> None:
@@ -557,6 +624,8 @@ def _seed_saas_platform_data() -> None:
     try:
         for item in tenants:
             tenant = db.scalar(select(SaasTenant).where(SaasTenant.company_name == item["companyName"]))
+            if tenant:
+                continue
             if not tenant:
                 tenant = SaasTenant(company_name=item["companyName"])
                 db.add(tenant)
@@ -592,18 +661,20 @@ def _seed_saas_platform_data() -> None:
                 payment.method = "bank_transfer"
                 payment.reference = item["paymentReference"]
 
-        old_seed_names = ["North Build GmbH", "Al Noor Properties"]
-        old_tenants = db.scalars(select(SaasTenant).where(SaasTenant.company_name.in_(old_seed_names))).all()
-        for tenant in old_tenants:
-            invoice_ids = list(db.scalars(select(SaasInvoice.id).where(SaasInvoice.tenant_id == tenant.id)).all())
-            if invoice_ids:
-                db.execute(delete(SaasPayment).where(SaasPayment.invoice_id.in_(invoice_ids)))
-            db.execute(delete(SaasPayment).where(SaasPayment.tenant_id == tenant.id))
-            db.execute(delete(SaasInvoice).where(SaasInvoice.tenant_id == tenant.id))
-            db.delete(tenant)
         db.commit()
     finally:
         db.close()
+
+
+def _ensure_company_payment_columns() -> None:
+    inspector = inspect(engine)
+    if "CompanyProfile" not in inspector.get_table_names():
+        return
+    columns = {column["name"] for column in inspector.get_columns("CompanyProfile")}
+    with engine.begin() as conn:
+        for name in ("taxNumber", "bankName", "iban", "bic"):
+            if name not in columns:
+                conn.execute(text(f'ALTER TABLE "CompanyProfile" ADD COLUMN "{name}" VARCHAR'))
 
 
 def init_db() -> None:
@@ -612,7 +683,9 @@ def init_db() -> None:
     _ensure_pgvector_extension()
     Base.metadata.create_all(bind=engine)
     _ensure_user_access_columns()
+    _ensure_company_payment_columns()
     _ensure_business_tenant_columns()
+    _ensure_payment_tenant_column()
     _ensure_audit_tenant_column()
     _ensure_rag_pgvector_columns_and_indexes()
     _ensure_employee_staffing_columns()
@@ -621,9 +694,12 @@ def init_db() -> None:
     _ensure_workshop_assignment_columns()
     _ensure_project_task_columns()
     _ensure_invoice_columns()
-    _seed_saas_platform_data()
-    _seed_saas_demo_accounts()
-    _backfill_demo_tenant_data()
+    if os.getenv("ENABLE_DEMO_SEED", "false").strip().lower() in {"1", "true", "yes"}:
+        _seed_saas_platform_data()
+        _seed_saas_demo_accounts()
+        _backfill_demo_tenant_data()
+    else:
+        _disable_default_demo_accounts()
 
 
 def get_db() -> Generator[Session, None, None]:

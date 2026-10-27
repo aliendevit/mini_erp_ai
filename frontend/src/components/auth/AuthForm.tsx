@@ -9,7 +9,7 @@ import { useI18n } from '../../lib/i18n';
 import { apiJson } from '../../lib/api';
 import { dashboardPathForUser } from '../../lib/access';
 
-const passwordPattern = /(?=.*\d)(?=.*[!@#$%^&*()_+\-=[\]{};':"\\|,.<>/?]).+/;
+const passwordPattern = /(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[!@#$%^&*()_+\-=[\]{};':"\\|,.<>/?]).+/;
 const phonePattern = /^\+?[1-9]\d{7,14}$/;
 
 type AuthFormProps = {
@@ -24,7 +24,7 @@ type AuthFormValues = {
 };
 
 type AuthResponse = {
-  token: string;
+  token?: string;
   user: {
     id: string;
     email: string;
@@ -43,6 +43,7 @@ export function AuthForm({ mode }: AuthFormProps) {
   const msgs = messages as any;
   const [status, setStatus] = useState<string>('');
   const [apiError, setApiError] = useState<string>('');
+  const [showPassword, setShowPassword] = useState(false);
   const router = useRouter();
 
   const schema = useMemo(() => {
@@ -54,7 +55,7 @@ export function AuthForm({ mode }: AuthFormProps) {
     if (mode === 'login') return loginSchema;
 
     return loginSchema.extend({
-      password: z.string().min(8, msgs.authPage.validation.passwordRequired).regex(passwordPattern, msgs.authPage.validation.passwordStrength),
+      password: z.string().min(12, msgs.authPage.validation.passwordStrength).max(128, msgs.authPage.validation.passwordStrength).regex(passwordPattern, msgs.authPage.validation.passwordStrength),
       phone: z.string().min(1, msgs.authPage.validation.phoneRequired).regex(phonePattern, msgs.authPage.validation.phoneInvalid),
       confirmPassword: z.string().min(1, msgs.authPage.validation.confirmRequired),
     }).superRefine((data, ctx) => {
@@ -100,7 +101,7 @@ export function AuthForm({ mode }: AuthFormProps) {
             password: data.password,
           });
 
-      localStorage.setItem('omran_auth_token', response.token);
+      localStorage.removeItem('omran_auth_token');
       localStorage.setItem('omran_auth_user', JSON.stringify(response.user));
       window.dispatchEvent(new Event('omran-auth-changed'));
       const message = mode === 'signup' ? msgs.authPage.validation.successSignup : msgs.authPage.validation.successLogin;
@@ -112,23 +113,28 @@ export function AuthForm({ mode }: AuthFormProps) {
   };
 
   return (
-    <div>
+    <div className="auth-form-content">
       <div className="auth-hero">
+        <span className="auth-hero-kicker">Secure workspace</span>
         <h2>{mode === 'login' ? msgs.authPage.loginTitle : msgs.authPage.signupTitle}</h2>
+        <p>{mode === 'login' ? 'Enter your credentials to continue to the operational dashboard.' : 'Create a protected workspace for your company.'}</p>
       </div>
 
       <form className="auth-form" onSubmit={handleSubmit(onSubmit)} noValidate>
           <div className="auth-field">
             <label>
               <span>{msgs.authPage.email}</span>
-              <input
-                type="email"
-                autoComplete="email"
-                placeholder={msgs.authPage.emailPlaceholder}
-                {...register('email')}
-                aria-invalid={!!errors.email}
-                className="auth-input"
-              />
+              <div className="auth-input-shell">
+                <span className="auth-input-symbol" aria-hidden="true">@</span>
+                <input
+                  type="email"
+                  autoComplete="email"
+                  placeholder={msgs.authPage.emailPlaceholder}
+                  {...register('email')}
+                  aria-invalid={!!errors.email}
+                  className="auth-input"
+                />
+              </div>
               {errors.email && <p className="auth-error">{String(errors.email?.message)}</p>}
             </label>
           </div>
@@ -157,14 +163,26 @@ export function AuthForm({ mode }: AuthFormProps) {
           <div className="auth-field">
             <label>
               <span>{msgs.authPage.password}</span>
-              <input
-                type="password"
-                autoComplete={mode === 'login' ? 'current-password' : 'new-password'}
-                placeholder={msgs.authPage.passwordPlaceholder}
-                {...register('password')}
-                aria-invalid={!!errors.password}
-                className="auth-input"
-              />
+              <div className="auth-input-shell">
+                <span className="auth-input-symbol auth-lock-symbol" aria-hidden="true">&#9679;</span>
+                <input
+                  type={showPassword ? 'text' : 'password'}
+                  autoComplete={mode === 'login' ? 'current-password' : 'new-password'}
+                  placeholder={msgs.authPage.passwordPlaceholder}
+                  {...register('password')}
+                  aria-invalid={!!errors.password}
+                  className="auth-input"
+                />
+                <button
+                  type="button"
+                  className="auth-password-toggle"
+                  onClick={() => setShowPassword((visible) => !visible)}
+                  aria-label={showPassword ? 'Hide password' : 'Show password'}
+                  aria-pressed={showPassword}
+                >
+                  {showPassword ? 'Hide' : 'Show'}
+                </button>
+              </div>
               {errors.password && <p className="auth-error">{String(errors.password?.message)}</p>}
             </label>
           </div>
@@ -187,10 +205,17 @@ export function AuthForm({ mode }: AuthFormProps) {
           )}
 
           <div className="auth-actions">
-            <button type="submit" disabled={isSubmitting} className="btn primary">
-              {mode === 'login' ? msgs.authPage.submitLogin : msgs.authPage.submitSignup}
+            <button type="submit" disabled={isSubmitting} className="btn primary auth-submit-button">
+              <span className="auth-submit-copy">
+                <strong>{mode === 'login' ? msgs.authPage.submitLogin : msgs.authPage.submitSignup}</strong>
+                <small>{isSubmitting ? 'Verifying secure access...' : 'Continue to your workspace'}</small>
+              </span>
+              <span className="auth-submit-arrow" aria-hidden="true">&#8594;</span>
             </button>
-            <p className="auth-helper">{msgs.authPage.helperText}</p>
+            <div className="auth-security-note">
+              <span aria-hidden="true">&#10003;</span>
+              <p>{msgs.authPage.helperText}</p>
+            </div>
           </div>
       </form>
 

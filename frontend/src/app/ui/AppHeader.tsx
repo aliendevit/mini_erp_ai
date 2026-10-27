@@ -8,6 +8,7 @@ import { API_BASE, apiAuthGet } from '../../lib/api';
 import { dashboardPathForUser } from '../../lib/access';
 import { useI18n } from '../../lib/i18n';
 import { AppSettingsMenu } from './AppSettingsMenu';
+import { useToast } from './ToastProvider';
 
 type StoredAuthUser = {
   id?: string;
@@ -32,6 +33,7 @@ type CompanyProfile = {
 
 export function AppHeader() {
   const { locale, messages } = useI18n();
+  const { showToast } = useToast();
   const pathname = usePathname();
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
   const [accountOpen, setAccountOpen] = useState(false);
@@ -74,8 +76,7 @@ export function AppHeader() {
     function readAuthUser() {
       try {
         const rawUser = localStorage.getItem('omran_auth_user');
-        const token = localStorage.getItem('omran_auth_token');
-        setAuthUser(rawUser && token ? JSON.parse(rawUser) : null);
+        setAuthUser(rawUser ? JSON.parse(rawUser) : null);
       } catch {
         setAuthUser(null);
       }
@@ -126,16 +127,14 @@ export function AppHeader() {
   }
 
   async function logout() {
-    const token = localStorage.getItem('omran_auth_token');
     try {
-      if (token) {
-        await fetch(`${API_BASE}/auth/logout`, {
-          method: 'POST',
-          headers: { Authorization: `Bearer ${token}` },
-        });
+      const response = await fetch(`${API_BASE}/auth/logout`, { method: 'POST', credentials: 'include' });
+      if (!response.ok) {
+        throw new Error('Logout request was rejected.');
       }
     } catch {
-      // Local logout should still work if the backend is unavailable.
+      showToast(locale === 'ar' ? 'تعذر تسجيل الخروج. حاول مرة أخرى.' : locale === 'de' ? 'Abmeldung fehlgeschlagen. Bitte erneut versuchen.' : 'Logout failed. Please try again.', 'error');
+      return;
     }
     localStorage.removeItem('omran_auth_token');
     localStorage.removeItem('omran_auth_user');

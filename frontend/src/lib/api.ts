@@ -15,9 +15,7 @@ async function safeMessage(res: Response): Promise<string> {
 }
 
 export function authHeaders(): Record<string, string> {
-  if (typeof window === 'undefined') return {};
-  const token = localStorage.getItem('omran_auth_token');
-  return token ? { Authorization: `Bearer ${token}` } : {};
+  return {};
 }
 
 function isPublicAuthPath(path: string) {
@@ -26,7 +24,6 @@ function isPublicAuthPath(path: string) {
 
 function handleAuthFailure(message = 'Please sign in again.') {
   if (typeof window === 'undefined') return;
-  localStorage.removeItem('omran_auth_token');
   localStorage.removeItem('omran_auth_user');
   window.dispatchEvent(new Event('omran-auth-changed'));
   window.dispatchEvent(new CustomEvent('omran:alert', { detail: { message, kind: 'error' } }));
@@ -36,12 +33,7 @@ function handleAuthFailure(message = 'Please sign in again.') {
 }
 
 function headersForPath(path: string, extra: Record<string, string> = {}) {
-  const headers = { ...extra, ...authHeaders() };
-  if (!isPublicAuthPath(path) && typeof window !== 'undefined' && !headers.Authorization) {
-    handleAuthFailure();
-    throw new Error('Please sign in again.');
-  }
-  return headers;
+  return { ...extra, ...authHeaders() };
 }
 
 async function handleResponseError(res: Response, path: string): Promise<never> {
@@ -77,7 +69,7 @@ export async function downloadAuthBlob(path: string, fileName?: string): Promise
 }
 
 export async function apiGet<T>(path: string): Promise<T> {
-  const res = await fetch(`${API_BASE}${path}`, { cache: 'no-store', headers: headersForPath(path) });
+  const res = await fetch(`${API_BASE}${path}`, { cache: 'no-store', credentials: 'include', headers: headersForPath(path) });
   if (!res.ok) {
     await handleResponseError(res, path);
   }
@@ -87,6 +79,7 @@ export async function apiGet<T>(path: string): Promise<T> {
 export async function apiAuthGet<T>(path: string): Promise<T> {
   const res = await fetch(`${API_BASE}${path}`, {
     cache: 'no-store',
+    credentials: 'include',
     headers: headersForPath(path),
   });
   if (!res.ok) {
@@ -106,6 +99,7 @@ export async function apiJson<T>(
 ): Promise<T> {
   const res = await fetch(`${API_BASE}${path}`, {
     method,
+    credentials: 'include',
     headers: headersForPath(path, { 'Content-Type': 'application/json' }),
     body: body ? JSON.stringify(body) : undefined,
   });
@@ -126,6 +120,7 @@ export async function apiAuthJson<T>(
 ): Promise<T> {
   const res = await fetch(`${API_BASE}${path}`, {
     method,
+    credentials: 'include',
     headers: headersForPath(path, { 'Content-Type': 'application/json' }),
     body: body ? JSON.stringify(body) : undefined,
   });
@@ -146,6 +141,7 @@ export async function apiAuthForm<T>(
 ): Promise<T> {
   const res = await fetch(`${API_BASE}${path}`, {
     method,
+    credentials: 'include',
     headers: headersForPath(path),
     body,
   });
@@ -162,6 +158,7 @@ export async function apiAuthForm<T>(
 export async function apiAuthBlob(path: string): Promise<Blob> {
   const res = await fetch(`${API_BASE}${path}`, {
     cache: 'no-store',
+    credentials: 'include',
     headers: headersForPath(path),
   });
   if (!res.ok) {
@@ -178,6 +175,7 @@ export async function apiForm<T>(
 ): Promise<T> {
   const res = await fetch(`${API_BASE}${path}`, {
     method,
+    credentials: 'include',
     headers: headersForPath(path),
     body,
   });

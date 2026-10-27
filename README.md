@@ -1,6 +1,8 @@
 # Construction ERP - MozaicAI Internship 2026
 
-This is the starter template for the Construction ERP project.
+Construction ERP for team development and testing. The default Docker Compose file runs the current Python backend, PostgreSQL, and frontend.
+
+For a fresh checkout, follow the [team Docker setup guide](docs/DOCKER-TEAM-SETUP.md). Docker installs the Python and Node dependencies during the build; host Python and Node installations are optional for local development.
 
 ## Team Name
 
@@ -128,6 +130,14 @@ Copy-Item .env.example .env
 uvicorn app.main:app --reload --port 3001
 ```
 
+Before the first login, open another terminal in `backend-python`, activate the same environment, and provision the first platform administrator:
+
+```powershell
+python -m app.bootstrap --email admin@example.com
+```
+
+The command prompts for a password of 12-128 characters with uppercase, lowercase, a number and a special character. It refuses to create another administrator once one exists. No default administrator password is installed. Sign in with this account, create a company in the platform dashboard, then sign in with that company's manager account and complete Company setup, including its invoice/payment details.
+
 Default backend URL:
 
 - `http://localhost:3001`
@@ -153,13 +163,35 @@ Default frontend URL:
 
 ---
 
-## Local Development With Docker
+## Run the Full Project With Docker
 
-Use the Python backend compose file. This starts PostgreSQL, the FastAPI backend, and the Next.js frontend:
+The root Compose file builds and starts PostgreSQL with pgvector, the FastAPI backend, and the production Next.js frontend.
+
+For a new checkout, create the local Docker environment file, set a strong letters-and-numbers `POSTGRES_PASSWORD`, and add any AI provider keys you use. Compose refuses to start without a database password. Keep an existing deployment's `.env` and database credentials unchanged:
 
 ```powershell
-$env:POSTGRES_PASSWORD="choose-a-real-password"
-docker compose -f docker-compose.python.yml up --build
+Copy-Item docker-compose.env.template .env
+```
+
+Build and start the complete application:
+
+```powershell
+docker compose up --build -d
+```
+
+On a new deployment, create the first administrator interactively after the backend is healthy:
+
+```powershell
+docker compose exec backend python -m app.bootstrap --email admin@example.com
+```
+
+Public registration remains disabled by default. To populate a disposable local demo, explicitly set `ENABLE_DEMO_SEED=true` in `.env`; demo data is only inserted when missing and does not overwrite existing company/account settings. Do not enable demo accounts on a public deployment.
+
+Check container health and view backend/frontend logs:
+
+```powershell
+docker compose ps
+docker compose logs -f backend frontend
 ```
 
 Default URLs:
@@ -174,13 +206,17 @@ Expected health response includes the active database type:
 { "ok": true, "database": "postgresql" }
 ```
 
-Reset Docker data:
+Stop the application while preserving PostgreSQL data, uploads, backups, and logs:
 
 ```powershell
-docker compose -f docker-compose.python.yml down -v
+docker compose down
 ```
 
-Do not use the default `docker-compose.yml` for the current AI prototype unless you intentionally want the legacy backend configuration.
+Do not add `-v` when stopping a deployment whose data you need. That option permanently removes its Docker volumes. Fresh clones use their own empty database; cloning this repository does not copy existing company records or accounts.
+
+`docker-compose.python.yml` remains available as a compatibility alias and uses the same service configuration.
+
+For a remote server, set `FRONTEND_ORIGIN` and `NEXT_PUBLIC_API_BASE` to browser-accessible HTTPS addresses before building. Also set `SESSION_COOKIE_SECURE=true` when HTTPS is enabled.
 
 ---
 
@@ -192,7 +228,7 @@ Backend (`backend-python/.env`):
 DATABASE_URL=postgresql://omran:change-me-local@localhost:5432/omran
 CORS_ORIGIN=http://localhost:3000
 GEMINI_API_KEY=
-GEMINI_MODEL=gemini-1.5-flash
+GEMINI_MODEL=gemini-3.5-flash
 OPENROUTER_API_KEY=
 OPENROUTER_MODEL=openrouter/free
 ASSEMBLYAI_API_KEY=
@@ -295,6 +331,18 @@ cd frontend
 npm run build
 ```
 
+Browser workflow check (from `frontend`):
+
+```powershell
+npx playwright install chromium
+$env:E2E_BACKEND_PYTHON = (Resolve-Path ..\backend-python\.venv\Scripts\python.exe).Path
+npm run e2e
+```
+
+The browser test uses a dedicated `backend-python/e2e.db`, fake AI, and public registration enabled only for its test backend. Its API calls and browser share the same HttpOnly session cookie. On Linux/macOS, set `E2E_BACKEND_PYTHON` to the virtual environment's `bin/python` path instead.
+
+Invoice exports use the issuing company's profile and optional tax/bank fields from Company setup; exporting is blocked with a clear message until the required company profile is complete. Docker installs DejaVu fonts for Arabic proposal PDFs. For other operating systems, install DejaVu or set `PROPOSAL_FONT_DIR` to a directory containing `DejaVuSans.ttf` and `DejaVuSans-Bold.ttf`.
+
 Recently verified areas include:
 
 - AI Intake chat prompt rules
@@ -308,7 +356,7 @@ Recently verified areas include:
 
 ## Current Constraints
 
-- Prototype is single-tenant.
+- Company data is scoped by tenant. Create a separate account for each teammate and review role permissions for your deployment.
 - Login, backend endpoint protection, and audit logs are implemented. Role-based permissions still need production hardening.
 - AI is assistive, not authoritative.
 - Progress tracking with photos, OCR, OCR + RAG, and Progress Monitoring AI are planned ideas, not fully implemented.

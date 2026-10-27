@@ -81,7 +81,7 @@ class AIAssistantTests(unittest.TestCase):
         )
         proposal_id = created["id"]
 
-        with patch("app.routers.ai.ensure_gemini_ready"), patch(
+        with patch("app.routers.ai.ensure_text_ai_ready"), patch(
             "app.routers.ai.stream_text", return_value=iter(["Danke ", "fuer die Details."])
         ):
             response = intake_message_stream(

@@ -4,7 +4,7 @@ This checklist covers the first practical deployment-readiness work for backups,
 
 ## 1. Backups
 
-### PostgreSQL backup
+### Local demo backup
 
 Run from `backend-python`:
 
@@ -14,13 +14,11 @@ Run from `backend-python`:
 
 This creates a timestamped folder in `backend-python/backups/` containing:
 
-- `database.dump`
+- `app.db`
 - `uploads.zip`
 - `manifest.json`
 
-The script reads `DATABASE_URL`. When `DATABASE_URL` points to PostgreSQL, it uses `pg_dump --format=custom --no-owner`.
-
-### PostgreSQL restore
+### Restore local demo backup
 
 Stop the backend first, then run:
 
@@ -28,15 +26,11 @@ Stop the backend first, then run:
 .\.venv\Scripts\python.exe scripts\restore_data.py .\backups\omran-backup-YYYYMMDD-HHMMSS --yes
 ```
 
-Restore uses `pg_restore --clean --if-exists --no-owner` and overwrites uploaded files. Test restore on a copied/staging database before using it on real production data.
-
-### SQLite local demo backup
-
-SQLite is still supported for local demos and automated tests. When `DATABASE_URL=sqlite:///./app.db`, backups contain `app.db` instead of `database.dump`.
+Restore overwrites the local database and uploaded files.
 
 ### Production backup requirement
 
-For a real deployment, use PostgreSQL managed backups in addition to the app backup feature. Uploaded project photos and generated documents must also be backed up through server storage snapshots or object-storage versioning.
+For a real deployment, use PostgreSQL managed backups instead of only copying SQLite. Uploaded project photos and generated documents must also be backed up through server storage snapshots or object-storage versioning.
 
 ## 2. Error Logging
 
@@ -73,7 +67,7 @@ GET /api/health
 Expected:
 
 ```json
-{ "ok": true, "database": "postgresql" }
+{ "ok": true }
 ```
 
 ## 4. Arabic / RTL QA
@@ -144,4 +138,4 @@ Also manually test:
 - AI Monitoring
 - invoice PDF/Word export
 - backup creation
-- restore on a copied/staging database
+- restore on a copied/local test database

@@ -8,7 +8,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from ..database import get_db
-from ..models import RagChunk, RagIngestionJob, RagSource
+from ..models import Customer, Order, Proposal, RagChunk, RagIngestionJob, RagSource, Site
 from ..routers.auth import get_current_user, require_permission, tenant_id_for_user
 from ..schemas import RagQueryPayload
 from ..services.rag import delete_rag_source, ingest_uploaded_text_file, query_rag_chunks, reingest_rag_source
@@ -54,6 +54,28 @@ def _ensure_source_tenant(source: RagSource, user) -> None:
     tenant_id = _tenant_id(user)
     if tenant_id and source.tenant_id != tenant_id:
         ensure(False, "RAG source not found.", 404)
+
+
+def _ensure_reference_tenant(
+    db: Session,
+    user,
+    *,
+    proposal_id: str | None = None,
+    order_id: str | None = None,
+    customer_id: str | None = None,
+    site_id: str | None = None,
+) -> None:
+    tenant_id = _tenant_id(user)
+    references = [(Proposal, proposal_id), (Order, order_id), (Customer, customer_id)]
+    for model, record_id in references:
+        if not record_id:
+            continue
+        record = db.get(model, record_id)
+        ensure(record is not None and getattr(record, "tenant_id", None) == tenant_id, "RAG scope not found.", 404)
+    if site_id:
+        site = db.get(Site, site_id)
+        order = db.get(Order, site.order_id) if site else None
+        ensure(order is not None and order.tenant_id == tenant_id, "RAG scope not found.", 404)
 
 
 def rag_chunk_payload(chunk: RagChunk) -> dict[str, Any]:
@@ -110,6 +132,7 @@ def list_rag_sources(
     current_user=Depends(get_current_user),
 ) -> dict:
     ensure(bool(proposalId or orderId), "proposalId oder orderId ist erforderlich.")
+    _ensure_reference_tenant(db, current_user, proposal_id=proposalId, order_id=orderId)
     stmt = select(RagSource).order_by(RagSource.created_at.desc())
     tenant_id = _tenant_id(current_user)
     if tenant_id:
@@ -182,6 +205,14 @@ async def upload_rag_source(
     db: Session = Depends(get_db),
     current_user=Depends(get_current_user),
 ) -> dict:
+    _ensure_reference_tenant(
+        db,
+        current_user,
+        proposal_id=proposalId,
+        order_id=orderId,
+        customer_id=customerId,
+        site_id=siteId,
+    )
     source = await ingest_uploaded_text_file(
         db,
         file,
@@ -199,6 +230,7 @@ async def upload_rag_source(
 
 @router.post("/query")
 def query_rag(payload: RagQueryPayload, db: Session = Depends(get_db), current_user=Depends(get_current_user)) -> dict:
+    _ensure_reference_tenant(db, current_user, proposal_id=payload.proposalId, order_id=payload.orderId)
     items = query_rag_chunks(
         db,
         question=payload.question,

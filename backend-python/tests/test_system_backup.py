@@ -14,6 +14,7 @@ from fastapi import HTTPException
 from starlette.datastructures import UploadFile
 
 from app.routers import system
+from app.routers.auth import _hash_password
 
 
 class SystemBackupTests(unittest.TestCase):
@@ -65,7 +66,13 @@ class SystemBackupTests(unittest.TestCase):
         (self.uploads_dir / "photo.txt").write_text("changed upload", encoding="utf-8")
 
         upload = UploadFile(file=io.BytesIO(archive_bytes), filename=backup["fileName"])
-        result = asyncio.run(system.restore_backup(backupFile=upload, confirmation="RESTORE", current_user_id="user-id"))
+        current_user = SimpleNamespace(id="user-id", password_hash=_hash_password("AdminPass1!"))
+        result = asyncio.run(system.restore_backup(
+            backupFile=upload,
+            confirmation="RESTORE",
+            currentPassword="AdminPass1!",
+            current_user=current_user,
+        ))
 
         self.assertTrue(result["ok"])
         self.assertEqual(self.db_path.read_bytes(), b"original database")
@@ -75,9 +82,26 @@ class SystemBackupTests(unittest.TestCase):
     def test_restore_backup_requires_confirmation(self) -> None:
         upload = UploadFile(file=io.BytesIO(b"not used"), filename="omran-backup-test.zip")
         with self.assertRaises(HTTPException) as caught:
-            asyncio.run(system.restore_backup(backupFile=upload, confirmation="NO", current_user_id="user-id"))
+            asyncio.run(system.restore_backup(
+                backupFile=upload,
+                confirmation="NO",
+                currentPassword="AdminPass1!",
+                current_user=SimpleNamespace(id="user-id", password_hash=_hash_password("AdminPass1!")),
+            ))
 
         self.assertEqual(caught.exception.status_code, 400)
+
+    def test_restore_rejects_oversized_upload(self) -> None:
+        upload = UploadFile(file=io.BytesIO(b"x" * 32), filename="omran-backup-test.zip")
+        current_user = SimpleNamespace(id="user-id", password_hash=_hash_password("AdminPass1!"))
+        with patch.object(system, "MAX_BACKUP_UPLOAD_BYTES", 16), self.assertRaises(HTTPException) as caught:
+            asyncio.run(system.restore_backup(
+                backupFile=upload,
+                confirmation="RESTORE",
+                currentPassword="AdminPass1!",
+                current_user=current_user,
+            ))
+        self.assertEqual(caught.exception.status_code, 413)
 
 
 if __name__ == "__main__":

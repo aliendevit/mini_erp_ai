@@ -1,0 +1,14 @@
+node_modules
+.next
+test-results
+playwright-report
+blob-report
+.env*
+*.db
+*.db-*
+*.sqlite*
+*.dump
+*.pem
+*.key
+npm-debug.log*
+Dockerfile*

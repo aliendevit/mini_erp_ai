@@ -20,9 +20,11 @@ from app.routers import rag
 from app.routers.auth import get_current_user
 from postgres_test_utils import create_session
 
+TENANT_ID = "tenant-rag"
+
 
 def _user() -> object:
-    return type("User", (), {"id": "user-1", "email": "manager@example.com"})()
+    return type("User", (), {"id": "user-1", "email": "manager@example.com", "account_level": "company_manager", "tenant_id": TENANT_ID})()
 
 
 def _client(db: Session, authenticated: bool = True) -> TestClient:
@@ -56,20 +58,20 @@ class RagApiE2ETests(unittest.TestCase):
     def _add_proposals(self) -> None:
         self.db.add_all(
             [
-                Proposal(id="proposal-1", order_title="Proposal 1"),
-                Proposal(id="proposal-2", order_title="Proposal 2"),
+                Proposal(id="proposal-1", tenant_id=TENANT_ID, order_title="Proposal 1"),
+                Proposal(id="proposal-2", tenant_id=TENANT_ID, order_title="Proposal 2"),
             ]
         )
         self.db.flush()
 
     def _add_orders(self) -> None:
-        customer = Customer(id="customer-1", company_name="RAG Customer")
+        customer = Customer(id="customer-1", tenant_id=TENANT_ID, company_name="RAG Customer")
         self.db.add(customer)
         self.db.flush()
         self.db.add_all(
             [
-                Order(id="order-1", customer_id=customer.id, title="Order 1"),
-                Order(id="order-2", customer_id=customer.id, title="Order 2"),
+                Order(id="order-1", tenant_id=TENANT_ID, customer_id=customer.id, title="Order 1"),
+                Order(id="order-2", tenant_id=TENANT_ID, customer_id=customer.id, title="Order 2"),
             ]
         )
         self.db.flush()
@@ -96,12 +98,13 @@ class RagApiE2ETests(unittest.TestCase):
     def test_rag_sources_endpoint_filters_by_proposal_scope(self) -> None:
         self._add_proposals()
         matching = RagSource(
+            tenant_id=TENANT_ID,
             proposal_id="proposal-1",
             source_type="uploaded_file",
             title="Proposal upload",
             metadata_json='{"kind":"proposal"}',
         )
-        other = RagSource(proposal_id="proposal-2", source_type="chat_fact", title="Other proposal")
+        other = RagSource(tenant_id=TENANT_ID, proposal_id="proposal-2", source_type="chat_fact", title="Other proposal")
         self.db.add_all([matching, other])
         self.db.commit()
 
@@ -116,8 +119,8 @@ class RagApiE2ETests(unittest.TestCase):
 
     def test_rag_sources_endpoint_filters_by_order_scope(self) -> None:
         self._add_orders()
-        matching = RagSource(order_id="order-1", source_type="uploaded_file", title="Order upload")
-        other = RagSource(order_id="order-2", source_type="chat_fact", title="Other order")
+        matching = RagSource(tenant_id=TENANT_ID, order_id="order-1", source_type="uploaded_file", title="Order upload")
+        other = RagSource(tenant_id=TENANT_ID, order_id="order-2", source_type="chat_fact", title="Other order")
         self.db.add_all([matching, other])
         self.db.commit()
 
@@ -128,14 +131,13 @@ class RagApiE2ETests(unittest.TestCase):
         self.assertEqual([item["id"] for item in payload["items"]], [matching.id])
         self.assertEqual(payload["items"][0]["orderId"], "order-1")
 
-    def test_rag_query_endpoint_returns_safe_empty_result_until_retrieval_exists(self) -> None:
+    def test_rag_query_endpoint_rejects_unknown_scope(self) -> None:
         response = _client(self.db).post(
             "/api/rag/query",
             json={"proposalId": "proposal-1", "question": "Which rooms are mentioned?", "limit": 5},
         )
 
-        self.assertEqual(response.status_code, 200)
-        self.assertEqual(response.json(), {"items": []})
+        self.assertEqual(response.status_code, 404)
 
     def test_rag_upload_source_endpoint_ingests_file_and_exposes_chunks(self) -> None:
         self._add_proposals()

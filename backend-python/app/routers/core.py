@@ -23,9 +23,10 @@ from ..models import (
     EmployeeSkill,
     Invoice,
     InvoiceLine,
-    InvoiceSequence,
+    TenantInvoiceSequence,
     Order,
     PaymentRecord,
+    Proposal,
     ProjectIssue,
     ProjectMaterialLog,
     ProjectMonitoringAlert,
@@ -64,6 +65,7 @@ from ..services.audit import actor_id, record_audit
 from ..services.tracking_ai import analyze_tracking
 from ..services.timesheets import compute_timesheet_data
 from ..services.timesheet_documents import build_timesheet_docx, build_timesheet_pdf
+from ..services.upload_safety import read_upload_limited
 from ..utils import (
     as_date_only,
     as_datetime,
@@ -74,6 +76,7 @@ from ..utils import (
     employee_payload,
     end_of_utc_day,
     ensure,
+    format_invoice_number,
     german_error,
     get_invoice_sequence_state,
     invoice_payload,
@@ -288,6 +291,32 @@ def _apply_payment_payload(item: PaymentRecord, payload: PaymentRecordPayload) -
     return item
 
 
+def _payment_tenant_for_payload(db: Session, payload: PaymentRecordPayload, user) -> str:
+    references = [
+        (Proposal, payload.proposalId),
+        (Customer, payload.customerId),
+        (Order, payload.orderId),
+        (Invoice, payload.invoiceId),
+    ]
+    provided = [(model, record_id) for model, record_id in references if record_id]
+    if not provided:
+        raise HTTPException(status_code=422, detail="A payment must reference a proposal, customer, order, or invoice.")
+
+    expected_tenant = _tenant_id(user)
+    resolved_tenant: str | None = expected_tenant
+    for model, record_id in provided:
+        record = db.get(model, record_id)
+        if not record:
+            raise not_found()
+        record_tenant = getattr(record, "tenant_id", None)
+        if not record_tenant or (resolved_tenant and record_tenant != resolved_tenant):
+            raise not_found()
+        resolved_tenant = str(record_tenant)
+    if not resolved_tenant:
+        raise HTTPException(status_code=403, detail="Payment tenant could not be determined.")
+    return resolved_tenant
+
+
 def _create_draft_invoice(db: Session, customer_id: str) -> Invoice:
     customer = db.get(Customer, customer_id)
     invoice = Invoice(
@@ -334,16 +363,27 @@ def _task_weight_percent(value: float | int | None) -> Decimal | None:
     return parsed
 
 
-def _progress_photo_type_and_suffix(file: UploadFile) -> tuple[str, str]:
-    content_type = (file.content_type or "").split(";")[0].strip().lower()
+def _progress_photo_type_and_suffix(file: UploadFile, data: bytes) -> tuple[str, str]:
+    if data.startswith(b"\xff\xd8\xff"):
+        detected_type = "image/jpeg"
+    elif data.startswith(b"\x89PNG\r\n\x1a\n"):
+        detected_type = "image/png"
+    elif len(data) >= 12 and data[:4] == b"RIFF" and data[8:12] == b"WEBP":
+        detected_type = "image/webp"
+    else:
+        ensure(False, "Nur echte JPG-, PNG- oder WEBP-Fotos sind erlaubt.")
+        return "image/jpeg", ".jpg"
+
+    declared_type = (file.content_type or "").split(";", 1)[0].strip().lower()
+    if declared_type.startswith("image/"):
+        ensure(declared_type == detected_type, "Dateityp und Foto-Inhalt stimmen nicht ueberein.")
+
     suffix = Path(file.filename or "").suffix.lower()
-    suffix_map = {".jpg": ("image/jpeg", ".jpg"), ".jpeg": ("image/jpeg", ".jpg"), ".png": ("image/png", ".png"), ".webp": ("image/webp", ".webp")}
-    if content_type in ALLOWED_PROGRESS_PHOTO_TYPES:
-        return content_type, ALLOWED_PROGRESS_PHOTO_TYPES[content_type]
-    if suffix in suffix_map:
-        return suffix_map[suffix]
-    ensure(False, "Nur JPG, PNG oder WEBP Fotos sind erlaubt.")
-    return "image/jpeg", ".jpg"
+    suffix_types = {".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".png": "image/png", ".webp": "image/webp"}
+    if suffix in suffix_types:
+        ensure(suffix_types[suffix] == detected_type, "Dateiendung und Foto-Inhalt stimmen nicht ueberein.")
+
+    return detected_type, ALLOWED_PROGRESS_PHOTO_TYPES[detected_type]
 
 
 def _ensure_site_belongs_to_order(db: Session, order_id: str, site_id: str | None) -> None:
@@ -1236,8 +1276,12 @@ def list_workshops(
     availableOnly: bool = Query(default=False),
     _: object = Depends(require_permission("manage_company")),
     db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
 ) -> list[dict]:
     stmt = select(Workshop).order_by(Workshop.name.asc())
+    tenant_id = _tenant_id(current_user)
+    if tenant_id:
+        stmt = stmt.where(Workshop.tenant_id == tenant_id)
     if activeOnly:
         stmt = stmt.where(Workshop.is_active.is_(True))
     if availableOnly:
@@ -1246,19 +1290,26 @@ def list_workshops(
 
 
 @router.get("/workshops/{workshop_id}")
-def get_workshop(workshop_id: str, _: object = Depends(require_permission("manage_company")), db: Session = Depends(get_db)) -> dict:
+def get_workshop(
+    workshop_id: str,
+    _: object = Depends(require_permission("manage_company")),
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+) -> dict:
     item = db.get(Workshop, workshop_id)
     if not item:
         raise not_found()
+    _ensure_same_tenant(item, current_user)
     return workshop_payload(item)
 
 
 @router.post("/workshops", status_code=201)
-def create_workshop(payload: WorkshopPayload, _: object = Depends(require_permission("manage_company")), db: Session = Depends(get_db)) -> dict:
+def create_workshop(payload: WorkshopPayload, _: object = Depends(require_permission("manage_company")), db: Session = Depends(get_db), current_user=Depends(get_current_user)) -> dict:
     ensure(bool(payload.name and payload.name.strip()), "Workshop-Name fehlt.")
-    existing = db.scalar(select(Workshop).where(func.lower(Workshop.name) == payload.name.strip().lower()).limit(1))
+    tenant_id = _tenant_id(current_user)
+    existing = db.scalar(select(Workshop).where(Workshop.tenant_id == tenant_id, func.lower(Workshop.name) == payload.name.strip().lower()).limit(1))
     ensure(existing is None, "Workshop existiert bereits.", 409)
-    item = Workshop(name=payload.name.strip())
+    item = Workshop(name=payload.name.strip(), tenant_id=tenant_id)
     _apply_global_workshop_payload(item, payload)
     db.add(item)
     db.commit()
@@ -1272,13 +1323,16 @@ def update_workshop(
     payload: WorkshopPayload,
     _: object = Depends(require_permission("manage_company")),
     db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
 ) -> dict:
     item = db.get(Workshop, workshop_id)
     if not item:
         raise not_found()
+    _ensure_same_tenant(item, current_user)
     ensure(bool(payload.name and payload.name.strip()), "Workshop-Name fehlt.")
     duplicate = db.scalar(
         select(Workshop)
+        .where(Workshop.tenant_id == _tenant_id(current_user))
         .where(func.lower(Workshop.name) == payload.name.strip().lower())
         .where(Workshop.id != workshop_id)
         .limit(1)
@@ -1291,10 +1345,11 @@ def update_workshop(
 
 
 @router.delete("/workshops/{workshop_id}")
-def delete_workshop(workshop_id: str, _: object = Depends(require_permission("manage_company")), db: Session = Depends(get_db)) -> dict:
+def delete_workshop(workshop_id: str, _: object = Depends(require_permission("manage_company")), db: Session = Depends(get_db), current_user=Depends(get_current_user)) -> dict:
     item = db.get(Workshop, workshop_id)
     if not item:
         raise not_found()
+    _ensure_same_tenant(item, current_user)
     linked = db.scalar(select(func.count()).select_from(WorkshopSiteAssignment).where(WorkshopSiteAssignment.workshop_id == workshop_id)) or 0
     ensure(linked == 0, "Workshop ist noch Baustellen zugeordnet. Bitte zuerst Zuordnungen entfernen.", 409)
     db.delete(item)
@@ -1330,6 +1385,7 @@ def create_order_workshop_assignment(
     site = db.get(Site, payload.siteId)
     ensure(site is not None and site.order_id == order_id, "Die Baustelle gehoert nicht zum Auftrag.", 400)
     workshop = _ensure_assignable_workshop(db.get(Workshop, payload.workshopId))
+    _ensure_same_tenant(workshop, current_user)
     item = WorkshopSiteAssignment(order_id=order_id, site_id=payload.siteId, workshop_id=workshop.id)
     _apply_workshop_assignment_payload(item, payload, order_id)
     _ensure_no_site_workshop_overlap(
@@ -1365,7 +1421,8 @@ def update_workshop_assignment(
     _ensure_site_access(db, payload.siteId, current_user)
     order_id = _assignment_order_for_site(db, payload.siteId)
     ensure(item.order_id == order_id, "Die Zuordnung gehoert nicht zu dieser Baustelle.", 400)
-    _ensure_assignable_workshop(db.get(Workshop, payload.workshopId))
+    workshop = _ensure_assignable_workshop(db.get(Workshop, payload.workshopId))
+    _ensure_same_tenant(workshop, current_user)
     _apply_workshop_assignment_payload(item, payload, order_id)
     _ensure_no_site_workshop_overlap(
         db,
@@ -1569,6 +1626,7 @@ def get_order(
     db: Session = Depends(get_db),
     current_user=Depends(get_current_user),
     _: object = Depends(require_permission("view_projects")),
+    __: object = Depends(require_permission("use_ai_monitoring")),
 ) -> dict:
     stmt = (
         select(Order)
@@ -2031,9 +2089,9 @@ async def create_progress_update(
         target_dir = UPLOAD_ROOT / order_id / update.id
         target_dir.mkdir(parents=True, exist_ok=True)
         for file in upload_files:
-            content_type, suffix = _progress_photo_type_and_suffix(file)
-            data = await file.read()
-            ensure(0 < len(data) <= MAX_PROGRESS_PHOTO_BYTES, "Foto ist leer oder groesser als 8 MB.")
+            data = await read_upload_limited(file, MAX_PROGRESS_PHOTO_BYTES)
+            ensure(bool(data), "Foto ist leer oder groesser als 8 MB.")
+            content_type, suffix = _progress_photo_type_and_suffix(file, data)
             stored_filename = f"{uuid4()}{suffix}"
             storage_path = target_dir / stored_filename
             storage_path.write_bytes(data)
@@ -2872,10 +2930,13 @@ def get_invoice_sequence(
     year: int | None = Query(default=None),
     _: object = Depends(require_permission("manage_invoices")),
     db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
 ) -> dict:
     value = parse_year(year)
-    state = get_invoice_sequence_state(db, value)
-    state["effectiveInvoiceNumber"] = f"RE {str(value % 100).zfill(2)}-{str(int(state['effectiveNextSeq'])).zfill(4)}"
+    tenant_id = _tenant_id(current_user)
+    ensure(bool(tenant_id), "Company tenant is required.", 403)
+    state = get_invoice_sequence_state(db, str(tenant_id), value)
+    state["effectiveInvoiceNumber"] = format_invoice_number(value, int(state["effectiveNextSeq"]), str(tenant_id))
     return state
 
 
@@ -2884,23 +2945,27 @@ def update_invoice_sequence(
     payload: InvoiceSequenceUpdatePayload,
     _: object = Depends(require_permission("manage_invoices")),
     db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
 ) -> dict:
     year = parse_year(payload.year)
     raw = parse_seq(payload.nextSeq)
-    state_before = get_invoice_sequence_state(db, year)
+    tenant_id = _tenant_id(current_user)
+    ensure(bool(tenant_id), "Company tenant is required.", 403)
+    tenant_id = str(tenant_id)
+    state_before = get_invoice_sequence_state(db, tenant_id, year)
     min_allowed = int(state_before["dbNextSeq"])
     desired = min_allowed if raw is None or raw < min_allowed else min(raw, 9999)
 
-    row = db.get(InvoiceSequence, year)
+    row = db.get(TenantInvoiceSequence, {"tenant_id": tenant_id, "year": year})
     if row:
         row.next_seq = desired
     else:
-        row = InvoiceSequence(year=year, next_seq=desired)
+        row = TenantInvoiceSequence(tenant_id=tenant_id, year=year, next_seq=desired)
         db.add(row)
     db.commit()
 
-    state_after = get_invoice_sequence_state(db, year)
-    state_after["effectiveInvoiceNumber"] = f"RE {str(year % 100).zfill(2)}-{str(int(state_after['effectiveNextSeq'])).zfill(4)}"
+    state_after = get_invoice_sequence_state(db, tenant_id, year)
+    state_after["effectiveInvoiceNumber"] = format_invoice_number(year, int(state_after["effectiveNextSeq"]), tenant_id)
     return state_after
 
 
@@ -2911,7 +2976,9 @@ def get_timesheet(
     year: int,
     _: object = Depends(require_permission("manage_users")),
     db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
 ) -> dict:
+    _ensure_employee_access(db, employeeId, current_user)
     return compute_timesheet_data(db, employeeId, year, month)
 
 
@@ -2922,7 +2989,9 @@ def timesheet_pdf(
     year: int,
     _: object = Depends(require_permission("manage_users")),
     db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
 ) -> Response:
+    _ensure_employee_access(db, employeeId, current_user)
     data = compute_timesheet_data(db, employeeId, year, month)
     payload = build_timesheet_pdf(data)
     filename = f"stundenzettel-{data['employee']['lastName']}-{year}-{str(month).zfill(2)}.pdf"
@@ -2940,7 +3009,9 @@ def timesheet_word(
     year: int,
     _: object = Depends(require_permission("manage_users")),
     db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
 ) -> Response:
+    _ensure_employee_access(db, employeeId, current_user)
     data = compute_timesheet_data(db, employeeId, year, month)
     payload = build_timesheet_docx(data)
     filename = f"stundenzettel-{data['employee']['lastName']}-{year}-{str(month).zfill(2)}.docx"
@@ -2959,8 +3030,12 @@ def list_payments(
     proposal_id: str | None = Query(default=None, alias="proposalId"),
     _: object = Depends(require_permission("manage_invoices")),
     db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
 ) -> list[dict]:
     stmt = select(PaymentRecord).order_by(PaymentRecord.created_at.desc())
+    tenant_id = _tenant_id(current_user)
+    if tenant_id:
+        stmt = stmt.where(PaymentRecord.tenant_id == tenant_id)
     if customer_id:
         stmt = stmt.where(PaymentRecord.customer_id == customer_id)
     if order_id:
@@ -2977,8 +3052,9 @@ def create_payment(
     payload: PaymentRecordPayload,
     _: object = Depends(require_permission("manage_invoices")),
     db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
 ) -> dict:
-    item = PaymentRecord()
+    item = PaymentRecord(tenant_id=_payment_tenant_for_payload(db, payload, current_user))
     _apply_payment_payload(item, payload)
     db.add(item)
     db.commit()
@@ -2992,10 +3068,15 @@ def update_payment(
     payload: PaymentRecordPayload,
     _: object = Depends(require_permission("manage_invoices")),
     db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
 ) -> dict:
     item = db.get(PaymentRecord, payment_id)
     if not item:
         raise not_found()
+    _ensure_same_tenant(item, current_user)
+    _ensure_same_tenant(item, current_user)
+    _ensure_same_tenant(item, current_user)
+    item.tenant_id = _payment_tenant_for_payload(db, payload, current_user)
     _apply_payment_payload(item, payload)
     db.commit()
     db.refresh(item)
@@ -3003,10 +3084,16 @@ def update_payment(
 
 
 @router.delete("/payments/{payment_id}")
-def delete_payment(payment_id: str, _: object = Depends(require_permission("manage_invoices")), db: Session = Depends(get_db)) -> dict:
+def delete_payment(
+    payment_id: str,
+    _: object = Depends(require_permission("manage_invoices")),
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+) -> dict:
     item = db.get(PaymentRecord, payment_id)
     if not item:
         raise not_found()
+    _ensure_same_tenant(item, current_user)
     db.delete(item)
     db.commit()
     return {"ok": True}

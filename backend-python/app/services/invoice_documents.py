@@ -1,40 +1,67 @@
 ﻿from __future__ import annotations
 
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
+from html import escape
 from io import BytesIO
 from pathlib import Path
+from functools import partial
+
+from fastapi import HTTPException
+from sqlalchemy import select
+from sqlalchemy.orm import Session
+
+from ..models import CompanyProfile, UserAccount
 
 
-
-
-SELLER = {
-    "name": "Z & M Deco Bremen",
-    "street": "Georg-Gleistein-Str. 7",
-    "zipCity": "28757 Bremen",
-    "phone": "016/21775100",
-    "email": "Zyadkarkour@gmail.com",
-}
-
-FOOTER_LINES = [
-    "Geschaeftsfuehrer: Zyad Karkour * Georg-Gleistein-Strasse 7 * 28757 Bremen * Tel: 01621775100",
-    "Bankverbindung: Die Sparkasse Bremen BIC: SBREDE22XXX IBAN: DE06 2905 0101 0083 6017 08",
-    "",
-    "Freistellungsbescheinigung zu Steuerabzug bei Bauleistungen Paragraph 48 b Absatz 1 Satz 1 EStG liegt vor",
-    "Finanzamt Bremen - Mitte, Steuernummer: 60/288/24293 - Ust-ID-Nr.: DE3592929773",
-]
+def invoice_issuer(db: Session, invoice) -> dict:
+    profile = db.scalar(
+        select(CompanyProfile)
+        .join(UserAccount, UserAccount.id == CompanyProfile.owner_user_id)
+        .where(UserAccount.tenant_id == invoice.tenant_id, UserAccount.account_level == "company_manager")
+        .order_by(CompanyProfile.created_at.asc(), CompanyProfile.id.asc())
+        .limit(1)
+    ) if invoice.tenant_id else None
+    if not profile or not all((getattr(profile, key) or "").strip() for key in ("company_name", "street", "city", "phone", "email")):
+        raise HTTPException(409, "Complete your company's profile in Company setup before exporting invoices.")
+    seller = {
+        "name": profile.legal_name or profile.company_name,
+        "street": profile.street,
+        "zipCity": " ".join(part for part in (profile.zip_code, profile.city) if part),
+        "phone": profile.phone,
+        "email": profile.email,
+    }
+    footer = [
+        " * ".join((seller["name"], seller["street"], seller["zipCity"])),
+        " * ".join((seller["phone"], seller["email"])),
+    ]
+    tax = " * ".join(value for value in (
+        f"USt-ID: {profile.vat_id}" if profile.vat_id else "",
+        f"Steuernummer: {profile.tax_number}" if profile.tax_number else "",
+    ) if value)
+    if tax:
+        footer.append(tax)
+    if profile.bank_name:
+        footer.append(profile.bank_name)
+    bank = " * ".join(value for value in (
+        f"IBAN: {profile.iban}" if profile.iban else "",
+        f"BIC: {profile.bic}" if profile.bic else "",
+    ) if value)
+    if bank:
+        footer.append(bank)
+    return {"seller": seller, "footer": footer}
 
 
 def _logo_path() -> Path | None:
-    candidate = Path(__file__).resolve().parents[3] / "backend" / "assets" / "zmd-deco-logo.png"
-    return candidate if candidate.exists() else None
+    # Tenant logos can be added when company-owned logo uploads are available.
+    return None
 
 
 def _safe_text(value: str | None) -> str:
-    return (value or "").strip()
+    return escape(str(value or "").strip(), quote=True)
 
 
 def _pick_issue_date(invoice) -> datetime:
-    return invoice.issue_date or datetime.utcnow()
+    return invoice.issue_date or datetime.now(timezone.utc)
 
 
 def _format_date_ddmmyy(value: datetime) -> str:
@@ -112,24 +139,19 @@ def _project_box_rows(invoice) -> tuple[str, str, str, str]:
     return site_label, period, bullet, fixed_price
 
 
-def _add_footer(canvas, _doc) -> None:
+def _add_footer(canvas, _doc, footer) -> None:
     from reportlab.lib.pagesizes import A4
     from reportlab.lib.units import mm
 
     width, height = A4
-    y = 25 * mm
     canvas.saveState()
-    canvas.setLineWidth(1)
-    canvas.line(15 * mm, y, width - 15 * mm, y)
-    canvas.setFont("Helvetica", 8)
-    yy = y - 10
-    for line in FOOTER_LINES:
-        canvas.drawString(15 * mm, yy, line)
-        yy -= 11
+    _, footer_height = footer.wrapOn(canvas, width - 30 * mm, height)
+    canvas.line(15 * mm, 12 * mm + footer_height, width - 15 * mm, 12 * mm + footer_height)
+    footer.drawOn(canvas, 15 * mm, 10 * mm)
     canvas.restoreState()
 
 
-def build_invoice_pdf(invoice, kind: str = "detailed") -> bytes:
+def build_invoice_pdf(invoice, kind: str = "detailed", *, issuer: dict) -> bytes:
     from reportlab.lib import colors
     from reportlab.lib.pagesizes import A4
     from reportlab.lib.styles import ParagraphStyle, getSampleStyleSheet
@@ -142,6 +164,10 @@ def build_invoice_pdf(invoice, kind: str = "detailed") -> bytes:
     normal = ParagraphStyle("InvoiceNormal", parent=styles["Normal"], fontName="Helvetica", fontSize=10, leading=12)
     bold = ParagraphStyle("InvoiceBold", parent=normal, fontName="Helvetica-Bold")
     small = ParagraphStyle("InvoiceSmall", parent=styles["Normal"], fontName="Helvetica", fontSize=8, leading=10)
+    footer = Table([[Paragraph(_safe_text(line), small)] for line in issuer["footer"]], colWidths=[175 * mm])
+    footer.setStyle(TableStyle([("LEFTPADDING", (0, 0), (-1, -1), 0), ("RIGHTPADDING", (0, 0), (-1, -1), 0)]))
+    _, footer_height = footer.wrap(175 * mm, 200 * mm)
+    doc.bottomMargin = max(doc.bottomMargin, footer_height + 18 * mm)
 
     story = []
 
@@ -151,7 +177,7 @@ def build_invoice_pdf(invoice, kind: str = "detailed") -> bytes:
     if logo:
         header_right.append(Image(str(logo), width=32 * mm, height=32 * mm))
     for key in ("name", "street", "zipCity", "phone", "email"):
-        header_right.append(Paragraph(SELLER[key], normal))
+        header_right.append(Paragraph(_safe_text(issuer["seller"][key]), normal))
     header = Table([[header_left, header_right]], colWidths=[100 * mm, 75 * mm])
     header.setStyle(
         TableStyle(
@@ -171,7 +197,7 @@ def build_invoice_pdf(invoice, kind: str = "detailed") -> bytes:
     customer = invoice.customer
     story.append(Paragraph(_safe_text(customer.company_name) or "-", normal))
     if _safe_text(customer.street):
-        story.append(Paragraph(customer.street, normal))
+        story.append(Paragraph(_safe_text(customer.street), normal))
     zip_city = " ".join([part for part in [_safe_text(customer.zip_code), _safe_text(customer.city)] if part])
     if zip_city:
         story.append(Paragraph(zip_city, normal))
@@ -245,7 +271,12 @@ def build_invoice_pdf(invoice, kind: str = "detailed") -> bytes:
                 [
                     Paragraph(_format_date_yyyymmdd(line.service_date) if line.service_date else "-", small),
                     Paragraph(_safe_text(line.description) or _safe_text(getattr(work_entry, "description", None)) or "-", small),
-                    Paragraph(f"{work_entry.employee.first_name} {work_entry.employee.last_name}" if work_entry and work_entry.employee else "-", small),
+                    Paragraph(
+                        _safe_text(f"{work_entry.employee.first_name} {work_entry.employee.last_name}")
+                        if work_entry and work_entry.employee
+                        else "-",
+                        small,
+                    ),
                     Paragraph(_safe_text(getattr(getattr(work_entry, "order", None), "title", None)) or "-", small),
                     Paragraph(_safe_text(getattr(getattr(work_entry, "site", None), "site_name", None)) or "-", small),
                     Paragraph(f"{hours:.2f}", ParagraphStyle("Hr", parent=small, alignment=2)),
@@ -290,7 +321,8 @@ def build_invoice_pdf(invoice, kind: str = "detailed") -> bytes:
         story.append(Paragraph(text, normal))
         story.append(Spacer(1, 4))
 
-    doc.build(story, onFirstPage=_add_footer, onLaterPages=_add_footer)
+    draw_footer = partial(_add_footer, footer=footer)
+    doc.build(story, onFirstPage=draw_footer, onLaterPages=draw_footer)
     return buffer.getvalue()
 
 
@@ -319,7 +351,7 @@ def _remove_table_borders(table) -> None:
     tbl_pr.append(borders)
 
 
-def build_invoice_docx(invoice, kind: str = "detailed") -> bytes:
+def build_invoice_docx(invoice, kind: str = "detailed", *, issuer: dict) -> bytes:
     from docx import Document
     from docx.enum.table import WD_ALIGN_VERTICAL, WD_TABLE_ALIGNMENT
     from docx.enum.text import WD_ALIGN_PARAGRAPH
@@ -333,7 +365,7 @@ def build_invoice_docx(invoice, kind: str = "detailed") -> bytes:
     section.bottom_margin = Inches(0.75)
 
     footer = section.footer
-    for idx, line in enumerate(FOOTER_LINES):
+    for idx, line in enumerate(issuer["footer"]):
         p = footer.add_paragraph(line)
         p.alignment = WD_ALIGN_PARAGRAPH.LEFT
         if p.runs:
@@ -359,7 +391,7 @@ def build_invoice_docx(invoice, kind: str = "detailed") -> bytes:
     if logo:
         right_p.add_run().add_picture(str(logo), width=Inches(1.2))
     for key in ("name", "street", "zipCity", "phone", "email"):
-        p = header.cell(0, 1).add_paragraph(SELLER[key])
+        p = header.cell(0, 1).add_paragraph(issuer["seller"][key])
         p.alignment = WD_ALIGN_PARAGRAPH.RIGHT
         p.runs[0].font.size = Pt(10)
 

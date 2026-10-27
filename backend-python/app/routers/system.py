@@ -10,14 +10,28 @@ from pathlib import Path
 from urllib.parse import unquote, urlparse
 from uuid import uuid4
 
-from fastapi import APIRouter, Depends, File, Form, Header, HTTPException, UploadFile, status
+from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile, status
+from fastapi.concurrency import run_in_threadpool
 from fastapi.responses import FileResponse
-from sqlalchemy import and_, desc, func, or_, select
+from sqlalchemy import and_, desc, func, or_, select, update
+from sqlalchemy.orm import Session
 
-from ..database import SessionLocal, engine, init_db
+from ..database import SessionLocal, engine, get_db, init_db
 from ..models import AuditLog, SaasTenant, UserAccount
-from ..routers.auth import _bearer_token, _hash_token, require_any_permission, require_permission
+from ..routers.auth import (
+    require_any_permission,
+    require_company_manager,
+    require_platform_admin,
+    tenant_id_for_user,
+    verify_current_password_with_lockout,
+)
 from ..services.audit import record_audit
+from ..services.company_backup import (
+    create_company_backup,
+    list_company_backups,
+    restore_company_backup,
+    safe_company_backup_path,
+)
 from ..settings import get_settings
 
 router = APIRouter(prefix="/system", tags=["system"])
@@ -27,6 +41,15 @@ BACKUP_ROOT = ROOT / "backups"
 UPLOADS_ROOT = ROOT / "uploads"
 BACKUP_PREFIX = "omran-backup-"
 BACKUP_SUFFIX = ".zip"
+MAX_BACKUP_UPLOAD_BYTES = 512 * 1024 * 1024
+MAX_BACKUP_ARCHIVE_ENTRIES = 10_000
+MAX_BACKUP_EXPANDED_BYTES = 2 * 1024 * 1024 * 1024
+MAX_BACKUP_COMPRESSION_RATIO = 200
+MAX_SYSTEM_BACKUP_FILES = max(1, int(os.getenv("MAX_SYSTEM_BACKUP_FILES", "10")))
+MAX_SYSTEM_BACKUP_TOTAL_BYTES = max(
+    1,
+    int(os.getenv("MAX_SYSTEM_BACKUP_TOTAL_BYTES", str(10 * 1024 * 1024 * 1024))),
+)
 AUDIT_ACTIONS = {
     "platform.company.created",
     "platform.manager_password.reset",
@@ -61,6 +84,8 @@ AUDIT_ACTIONS = {
     "tracking.material.updated",
     "tracking.material.deleted",
     "backup.restored",
+    "company.backup.created",
+    "company.backup.restored",
     "monitoring.alert.updated",
     "monitoring_alert.updated",
 }
@@ -111,7 +136,7 @@ def _run_postgres_tool(args: list[str], password: str) -> None:
     if password:
         env["PGPASSWORD"] = password
     try:
-        subprocess.run(args, check=True, capture_output=True, text=True, env=env)
+        subprocess.run(args, check=True, capture_output=True, text=True, env=env, timeout=600)
     except FileNotFoundError as exc:
         raise HTTPException(
             status.HTTP_500_INTERNAL_SERVER_ERROR,
@@ -120,6 +145,8 @@ def _run_postgres_tool(args: list[str], password: str) -> None:
     except subprocess.CalledProcessError as exc:
         detail = (exc.stderr or exc.stdout or str(exc)).strip()
         raise HTTPException(status.HTTP_500_INTERNAL_SERVER_ERROR, f"PostgreSQL backup command failed: {detail}") from exc
+    except subprocess.TimeoutExpired as exc:
+        raise HTTPException(status.HTTP_504_GATEWAY_TIMEOUT, "PostgreSQL backup command timed out.") from exc
 
 
 def _dump_postgres_database(target: Path) -> None:
@@ -161,7 +188,8 @@ def _reset_postgres_public_schema(parts: dict[str, str]) -> None:
                 'DROP SCHEMA IF EXISTS public CASCADE; '
                 'CREATE SCHEMA public; '
                 f'GRANT ALL ON SCHEMA public TO "{parts["user"]}"; '
-                "GRANT ALL ON SCHEMA public TO public;"
+                "REVOKE CREATE ON SCHEMA public FROM PUBLIC; "
+                "GRANT USAGE ON SCHEMA public TO PUBLIC;"
             ),
         ],
         parts["password"],
@@ -275,30 +303,67 @@ def _create_backup_archive(label: str = "backup") -> dict:
     finally:
         shutil.rmtree(work_dir, ignore_errors=True)
 
+    if archive_path.stat().st_size > MAX_SYSTEM_BACKUP_TOTAL_BYTES:
+        archive_path.unlink(missing_ok=True)
+        raise HTTPException(
+            status.HTTP_507_INSUFFICIENT_STORAGE,
+            "Backup is larger than the configured system backup storage limit.",
+        )
+
+    archives = sorted(
+        BACKUP_ROOT.glob(f"{BACKUP_PREFIX}*{BACKUP_SUFFIX}"),
+        key=lambda item: item.stat().st_mtime,
+        reverse=True,
+    )
+    retained_bytes = 0
+    for index, candidate in enumerate(archives):
+        candidate_size = candidate.stat().st_size
+        if index < MAX_SYSTEM_BACKUP_FILES and retained_bytes + candidate_size <= MAX_SYSTEM_BACKUP_TOTAL_BYTES:
+            retained_bytes += candidate_size
+            continue
+        candidate.unlink(missing_ok=True)
     return _backup_info(archive_path)
 
 
+def _run_company_restore(**kwargs) -> dict:
+    worker_db = SessionLocal()
+    try:
+        return restore_company_backup(worker_db, **kwargs)
+    finally:
+        worker_db.close()
+
+
+def _invalidate_restored_sessions() -> None:
+    db = SessionLocal()
+    try:
+        db.execute(update(UserAccount).values(session_token_hash=None, session_created_at=None))
+        db.commit()
+    finally:
+        db.close()
+
+
+def _validate_zip_archive(archive: zipfile.ZipFile) -> None:
+    members = archive.infolist()
+    if len(members) > MAX_BACKUP_ARCHIVE_ENTRIES:
+        raise HTTPException(status.HTTP_413_REQUEST_ENTITY_TOO_LARGE, "Backup archive contains too many files.")
+    expanded_size = sum(member.file_size for member in members)
+    if expanded_size > MAX_BACKUP_EXPANDED_BYTES:
+        raise HTTPException(status.HTTP_413_REQUEST_ENTITY_TOO_LARGE, "Backup archive expands beyond the allowed size.")
+    for member in members:
+        if member.file_size and member.compress_size == 0:
+            raise HTTPException(status.HTTP_400_BAD_REQUEST, "Backup archive has an invalid compression ratio.")
+        if member.compress_size and member.file_size / member.compress_size > MAX_BACKUP_COMPRESSION_RATIO:
+            raise HTTPException(status.HTTP_413_REQUEST_ENTITY_TOO_LARGE, "Backup archive compression ratio is unsafe.")
+
+
 def _safe_extract(archive: zipfile.ZipFile, target_dir: Path) -> None:
+    _validate_zip_archive(archive)
     target_root = target_dir.resolve()
     for member in archive.infolist():
         member_path = (target_root / member.filename).resolve()
         if target_root != member_path and target_root not in member_path.parents:
             raise HTTPException(status.HTTP_400_BAD_REQUEST, "Backup archive contains unsafe paths.")
     archive.extractall(target_root)
-
-
-def _require_authenticated_user_id(authorization: str | None = Header(default=None)) -> str:
-    token_hash = _hash_token(_bearer_token(authorization))
-    db = SessionLocal()
-    try:
-        user = db.scalar(
-            select(UserAccount.id).where(UserAccount.session_token_hash == token_hash, UserAccount.is_active == True)
-        )
-        if not user:
-            raise HTTPException(status.HTTP_401_UNAUTHORIZED, "Invalid or expired session.")
-        return str(user)
-    finally:
-        db.close()
 
 
 def _parse_positive_int(value: int, fallback: int, *, minimum: int = 1, maximum: int = 100) -> int:
@@ -364,7 +429,7 @@ def list_audit_scopes(
 
 
 @router.get("/backups")
-def list_backups(_: UserAccount = Depends(require_permission("restore_backups"))) -> dict:
+def list_backups(_: UserAccount = Depends(require_platform_admin)) -> dict:
     BACKUP_ROOT.mkdir(parents=True, exist_ok=True)
     backups = sorted(BACKUP_ROOT.glob(f"{BACKUP_PREFIX}*{BACKUP_SUFFIX}"), key=lambda item: item.stat().st_mtime, reverse=True)
     return {"items": [_backup_info(item) for item in backups[:20]]}
@@ -468,7 +533,9 @@ def list_audit_logs(
                     ["invoice.updated", "invoice.deleted", "invoice.payment.added", "invoice.payment.deleted"]
                 )
             ),
-            "backupRestores": scoped_count(AuditLog.action == "backup.restored"),
+            "backupRestores": scoped_count(
+                AuditLog.action.in_(["backup.restored", "company.backup.restored"])
+            ),
             "monitoringResolutions": scoped_count(AuditLog.action.in_(["monitoring.alert.updated", "monitoring_alert.updated"])),
             "aiConfirmations": scoped_count(AuditLog.action.in_(["ai.proposal.confirmed", "ai_intake.confirmed"])),
         }
@@ -486,25 +553,133 @@ def list_audit_logs(
 
 
 @router.post("/backups", status_code=status.HTTP_201_CREATED)
-def create_backup(_: UserAccount = Depends(require_permission("restore_backups"))) -> dict:
+def create_backup(_: UserAccount = Depends(require_platform_admin)) -> dict:
     return _create_backup_archive()
 
 
 @router.get("/backups/{file_name}")
-def download_backup(file_name: str, _: UserAccount = Depends(require_permission("restore_backups"))) -> FileResponse:
+def download_backup(file_name: str, _: UserAccount = Depends(require_platform_admin)) -> FileResponse:
     path = _safe_backup_path(file_name)
     return FileResponse(path, media_type="application/zip", filename=path.name)
+
+
+@router.get("/company-backups")
+def list_tenant_backups(current_user: UserAccount = Depends(require_company_manager)) -> dict:
+    tenant_id = tenant_id_for_user(current_user)
+    assert tenant_id is not None
+    return {"items": list_company_backups(BACKUP_ROOT, tenant_id)}
+
+
+@router.post("/company-backups", status_code=status.HTTP_201_CREATED)
+def create_tenant_backup(
+    current_user: UserAccount = Depends(require_company_manager),
+    db: Session = Depends(get_db),
+) -> dict:
+    tenant_id = tenant_id_for_user(current_user)
+    assert tenant_id is not None
+    tenant = db.get(SaasTenant, tenant_id)
+    company_name = tenant.company_name if tenant else (current_user.tenant_name or "Company")
+    backup = create_company_backup(
+        db,
+        tenant_id=tenant_id,
+        manager_user_id=current_user.id,
+        company_name=company_name,
+        backup_root=BACKUP_ROOT,
+        uploads_root=UPLOADS_ROOT,
+    )
+    record_audit(
+        db,
+        action="company.backup.created",
+        entity_type="CompanyBackup",
+        entity_id=backup["fileName"],
+        actor_user_id=current_user.id,
+        tenant_id=tenant_id,
+        summary="Company backup created",
+        details={
+            "fileName": backup["fileName"],
+            "recordCount": backup.get("recordCount", 0),
+            "uploadFileCount": backup.get("uploadFileCount", 0),
+            "scope": "company",
+        },
+    )
+    db.commit()
+    return backup
+
+
+@router.get("/company-backups/{file_name}")
+def download_tenant_backup(
+    file_name: str,
+    current_user: UserAccount = Depends(require_company_manager),
+) -> FileResponse:
+    tenant_id = tenant_id_for_user(current_user)
+    assert tenant_id is not None
+    path = safe_company_backup_path(BACKUP_ROOT, tenant_id, file_name)
+    return FileResponse(path, media_type="application/zip", filename=path.name)
+
+
+@router.post("/company-restore")
+async def restore_tenant_backup(
+    backupFile: UploadFile = File(...),
+    confirmation: str = Form(...),
+    currentPassword: str = Form(...),
+    current_user: UserAccount = Depends(require_company_manager),
+    db: Session = Depends(get_db),
+) -> dict:
+    if confirmation != "RESTORE":
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Restore confirmation is required.")
+    verify_current_password_with_lockout(db, current_user, currentPassword)
+    if not backupFile.filename or not backupFile.filename.lower().endswith(BACKUP_SUFFIX):
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Upload a valid .zip company backup file.")
+
+    tenant_id = tenant_id_for_user(current_user)
+    assert tenant_id is not None
+    tenant = db.get(SaasTenant, tenant_id)
+    company_name = tenant.company_name if tenant else (current_user.tenant_name or "Company")
+    BACKUP_ROOT.mkdir(parents=True, exist_ok=True)
+    incoming_path = BACKUP_ROOT / f"incoming-company-restore-{uuid4().hex}{BACKUP_SUFFIX}"
+    extract_dir = BACKUP_ROOT / f".company-restore-{uuid4().hex}"
+    extract_dir.mkdir(parents=True, exist_ok=False)
+
+    try:
+        total_bytes = 0
+        with incoming_path.open("wb") as target:
+            while chunk := backupFile.file.read(1024 * 1024):
+                total_bytes += len(chunk)
+                if total_bytes > MAX_BACKUP_UPLOAD_BYTES:
+                    raise HTTPException(status.HTTP_413_REQUEST_ENTITY_TOO_LARGE, "Backup upload is too large.")
+                target.write(chunk)
+        try:
+            with zipfile.ZipFile(incoming_path, "r") as archive:
+                _safe_extract(archive, extract_dir)
+        except zipfile.BadZipFile as exc:
+            raise HTTPException(status.HTTP_400_BAD_REQUEST, "Upload a valid .zip company backup file.") from exc
+
+        return await run_in_threadpool(
+            _run_company_restore,
+            extract_dir=extract_dir,
+            original_file_name=Path(backupFile.filename).name,
+            tenant_id=tenant_id,
+            manager_user_id=current_user.id,
+            company_name=company_name,
+            backup_root=BACKUP_ROOT,
+            uploads_root=UPLOADS_ROOT,
+        )
+    finally:
+        shutil.rmtree(extract_dir, ignore_errors=True)
+        incoming_path.unlink(missing_ok=True)
 
 
 @router.post("/restore")
 async def restore_backup(
     backupFile: UploadFile = File(...),
     confirmation: str = Form(...),
-    current_user: UserAccount = Depends(require_permission("restore_backups")),
-    current_user_id: str | None = None,
+    currentPassword: str = Form(...),
+    current_user: UserAccount = Depends(require_platform_admin),
+    db: Session = Depends(get_db),
 ) -> dict:
     if confirmation != "RESTORE":
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "Restore confirmation is required.")
+    verify_current_password_with_lockout(db, current_user, currentPassword)
     if not backupFile.filename or not backupFile.filename.endswith(BACKUP_SUFFIX):
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "Upload a valid .zip backup file.")
 
@@ -514,8 +689,13 @@ async def restore_backup(
     extract_dir.mkdir(parents=True, exist_ok=False)
 
     try:
+        total_bytes = 0
         with incoming_path.open("wb") as target:
-            shutil.copyfileobj(backupFile.file, target)
+            while chunk := backupFile.file.read(1024 * 1024):
+                total_bytes += len(chunk)
+                if total_bytes > MAX_BACKUP_UPLOAD_BYTES:
+                    raise HTTPException(status.HTTP_413_REQUEST_ENTITY_TOO_LARGE, "Backup upload is too large.")
+                target.write(chunk)
 
         with zipfile.ZipFile(incoming_path, "r") as archive:
             if "manifest.json" not in archive.namelist():
@@ -544,6 +724,7 @@ async def restore_backup(
         else:
             _restore_postgres_database(source_db)
         init_db()
+        _invalidate_restored_sessions()
 
         if uploads_archive.exists():
             if UPLOADS_ROOT.exists():
@@ -559,7 +740,7 @@ async def restore_backup(
                 action="backup.restored",
                 entity_type="SystemBackup",
                 entity_id=backupFile.filename,
-                actor_user_id=current_user_id or current_user.id,
+                actor_user_id=current_user.id,
                 summary="Backup restored from uploaded archive",
                 details={"fileName": backupFile.filename, "safetyBackup": safety_backup.get("fileName")},
             )

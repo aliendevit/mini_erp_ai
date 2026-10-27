@@ -13,23 +13,34 @@ frontend/test-results/
 frontend/playwright-report/
 frontend/blob-report/
 
-# Local env and databases
-.restore-temp/
-backend-python/.env
-frontend/.env.local
+# Local configuration, credentials, and data
 .env
-.env.local
-backend-python/app.db
-backend-python/uploads/
-backend-python/backups/
+.env.*
+*.pem
+*.key
+*.p12
+*.pfx
+.pgpass
+*-login.json
+*-login.txt
+.restore-temp/
+uploads/
+backups/
 *.db
+*.db-*
+*.sqlite
+*.sqlite3
+*.sqlite-*
+*.sqlite3-*
+*.dump
+*.bak
+erp-migration*.zip
+source-uploads.zip
 env/
 
 # Logs
 *.log
 
-# Env templates with local placeholders
-.env.example
-*.env.example
-.env.local.example
-*.env.local.example
+# Sanitized templates are tracked; real environment files above remain private.
+!.env.example
+!.env.local.example

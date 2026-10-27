@@ -185,6 +185,7 @@ def transcribe_audio(audio_bytes: bytes, mime_type: str, locale_hint: str | None
         "transcript": transcript,
         "detectedLanguage": latest.get("language_code"),
         "provider": TRANSCRIPTION_PROVIDER,
+        "audioDurationMs": round(float(latest.get("audio_duration") or 0) * 1000) or None,
         "debug": latest,
         "debugText": debug_text,
     }

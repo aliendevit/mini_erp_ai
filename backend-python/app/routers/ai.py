@@ -1,21 +1,23 @@
 from __future__ import annotations
 
+import asyncio
 import io
 import logging
+import os
 import unicodedata
 import wave
 from datetime import datetime, timezone
 from collections.abc import Iterable
 from typing import Literal
 
-from fastapi import APIRouter, Depends, File, Form, Query, UploadFile
+from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, UploadFile
 from fastapi.responses import StreamingResponse
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session, selectinload
 
 from ..database import get_db
-from ..models import Proposal, ProposalMessage, Workshop
-from ..routers.auth import get_current_user, require_permission, tenant_id_for_user
+from ..models import Employee, Order, Proposal, ProposalMessage, Site, Workshop
+from ..routers.auth import get_current_user, has_permission, require_permission, tenant_id_for_user
 from ..schemas import (
     AIIntakeConfirmPayload,
     AIIntakeCreatePayload,
@@ -26,7 +28,7 @@ from ..schemas import (
 from ..services.audit import actor_id, record_audit
 from ..services.ai_summary import build_work_summary
 from ..services.assemblyai_client import transcribe_audio
-from ..services.gemini_client import ensure_gemini_ready, stream_text
+from ..services.gemini_client import ensure_text_ai_ready, stream_text
 from ..services.proposal_documents import build_proposal_pdf
 from ..services.proposals import (
     append_message,
@@ -68,6 +70,8 @@ SUPPORTED_AUDIO_CONTENT_TYPES = SUPPORTED_WAV_CONTENT_TYPES | {
 }
 MAX_AUDIO_BYTES = 10 * 1024 * 1024
 MAX_AUDIO_DURATION_MS = 90_000
+TRANSCRIPTION_CONCURRENCY = asyncio.Semaphore(max(1, int(os.getenv("TRANSCRIPTION_CONCURRENCY", "2"))))
+TRANSCRIPTION_TIMEOUT_SECONDS = max(30, int(os.getenv("TRANSCRIPTION_TIMEOUT_SECONDS", "150")))
 
 
 def _page_params(page: int, page_size: int) -> tuple[int, int]:
@@ -167,9 +171,10 @@ def _workshop_specialties(workshop: Workshop) -> list[str]:
     return [str(value).strip() for value in json_loads(workshop.specialties_json, []) if str(value).strip()]
 
 
-def _available_workshops_for_prompt(db: Session) -> list[dict]:
+def _available_workshops_for_prompt(db: Session, tenant_id: str) -> list[dict]:
     workshops = db.scalars(
         select(Workshop)
+        .where(Workshop.tenant_id == tenant_id)
         .where(Workshop.is_active.is_(True))
         .where(Workshop.availability_status == "available")
         .order_by(Workshop.name.asc())
@@ -191,7 +196,14 @@ def _available_workshops_for_prompt(db: Session) -> list[dict]:
 
 
 @router.post("/ai/work-summary")
-def work_summary(payload: AIWorkSummaryPayload, db: Session = Depends(get_db)) -> dict:
+def work_summary(payload: AIWorkSummaryPayload, db: Session = Depends(get_db), current_user=Depends(get_current_user)) -> dict:
+    tenant_id = _tenant_id(current_user)
+    employee = db.get(Employee, payload.employeeId)
+    order = db.get(Order, payload.orderId)
+    site = db.get(Site, payload.siteId)
+    ensure(employee is not None and employee.tenant_id == tenant_id, "Employee not found.", 404)
+    ensure(order is not None and order.tenant_id == tenant_id, "Order not found.", 404)
+    ensure(site is not None and site.order_id == order.id, "Site not found.", 404)
     return build_work_summary(
         db,
         employee_id=payload.employeeId,
@@ -276,7 +288,8 @@ def update_intake(
 ) -> dict:
     proposal = _get_proposal(db, proposal_id, current_user)
     apply_proposal_update(proposal, payload)
-    capture_proposal_snapshot_for_rag(db, proposal, created_by_user_id=actor_id(current_user))
+    if has_permission(current_user, "use_rag"):
+        capture_proposal_snapshot_for_rag(db, proposal, created_by_user_id=actor_id(current_user))
     db.commit()
     db.refresh(proposal)
     return proposal_payload(proposal, include_messages=True)
@@ -357,22 +370,27 @@ def intake_message_stream(
     proposal = _get_proposal(db, proposal_id, current_user)
     try:
         refresh_proposal_memory_locally(db, proposal, proposal.messages)
-        capture_chat_message_for_rag(db, proposal, user_message, created_by_user_id=actor_id(current_user))
+        if has_permission(current_user, "use_rag"):
+            capture_chat_message_for_rag(db, proposal, user_message, created_by_user_id=actor_id(current_user))
         db.commit()
     except Exception as exc:
         db.rollback()
         logger.warning("AI intake memory/RAG refresh failed: proposal_id=%s error=%s", proposal_id, exc)
     proposal = _get_proposal(db, proposal_id, current_user)
-    ensure_gemini_ready()
+    ensure_text_ai_ready()
 
     def generate() -> Iterable[str]:
         assistant_parts: list[str] = []
         try:
-            rag_context = rag_context_for_prompt(db, proposal, question=payload.content)
+            rag_context = (
+                rag_context_for_prompt(db, proposal, question=payload.content)
+                if has_permission(current_user, "use_rag")
+                else []
+            )
             prompt = build_intake_chat_prompt(
                 proposal,
                 proposal.messages,
-                _available_workshops_for_prompt(db),
+                _available_workshops_for_prompt(db, str(proposal.tenant_id)),
                 rag_context_chunks=rag_context,
             )
             for chunk in stream_text(prompt):
@@ -487,7 +505,22 @@ async def transcribe_intake_audio(
             duration_ms,
         )
 
-        result = transcribe_audio(raw_audio, mime_type=content_type or "application/octet-stream", locale_hint=locale_hint)
+        async with TRANSCRIPTION_CONCURRENCY:
+            try:
+                result = await asyncio.wait_for(
+                    asyncio.to_thread(
+                        transcribe_audio,
+                        raw_audio,
+                        mime_type=content_type or "application/octet-stream",
+                        locale_hint=locale_hint,
+                    ),
+                    timeout=TRANSCRIPTION_TIMEOUT_SECONDS,
+                )
+            except TimeoutError as exc:
+                raise HTTPException(status_code=504, detail="Audio transcription timed out.") from exc
+        provider_duration_ms = result.get("audioDurationMs")
+        if provider_duration_ms:
+            ensure(int(provider_duration_ms) <= MAX_AUDIO_DURATION_MS, "Die Aufnahme darf hoechstens 90 Sekunden lang sein.", 400)
         transcript = str(result.get("transcript") or "").strip()
         debug_text = str(result.get("debugText") or "")
         provider = result.get("provider") or "assemblyai"
@@ -541,7 +574,8 @@ def generate_proposal(
         proposal = _get_proposal(db, proposal_id, current_user)
         logger.warning("AI intake local memory refresh before proposal failed: proposal_id=%s error=%s", proposal_id, exc)
     extract_proposal_from_messages(proposal, proposal.messages)
-    capture_proposal_snapshot_for_rag(db, proposal, created_by_user_id=actor_id(current_user))
+    if has_permission(current_user, "use_rag"):
+        capture_proposal_snapshot_for_rag(db, proposal, created_by_user_id=actor_id(current_user))
     db.commit()
     db.refresh(proposal)
     return proposal_payload(proposal, include_messages=True)
@@ -557,7 +591,9 @@ def _workshop_recommendations_for_proposal(db: Session, proposal: Proposal) -> d
     payload = proposal_payload(proposal)
     sites = payload.get("proposedSites") or []
     draft_workshops = payload.get("externalWorkshops") or []
-    global_workshops = db.scalars(select(Workshop).order_by(Workshop.name.asc())).all()
+    global_workshops = db.scalars(
+        select(Workshop).where(Workshop.tenant_id == proposal.tenant_id).order_by(Workshop.name.asc())
+    ).all()
     unavailable_names = {
         workshop.name.strip().lower()
         for workshop in global_workshops
@@ -769,7 +805,8 @@ def confirm_intake(
         manual_estimated_price=payload.manualEstimatedPrice,
         payment_drafts=[item.model_dump() for item in payload.paymentDrafts] if payload.paymentDrafts is not None else None,
     )
-    capture_proposal_snapshot_for_rag(db, proposal, created_by_user_id=actor_id(current_user))
+    if has_permission(current_user, "use_rag"):
+        capture_proposal_snapshot_for_rag(db, proposal, created_by_user_id=actor_id(current_user))
     record_audit(
         db,
         action="ai.proposal.confirmed",

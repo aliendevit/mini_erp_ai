@@ -156,6 +156,10 @@ class CompanyProfile(Base):
     city: Mapped[str | None] = mapped_column(String)
     country: Mapped[str] = mapped_column(String, nullable=False, default="DE", server_default="DE")
     vat_id: Mapped[str | None] = mapped_column("vatId", String)
+    tax_number: Mapped[str | None] = mapped_column("taxNumber", String)
+    bank_name: Mapped[str | None] = mapped_column("bankName", String)
+    iban: Mapped[str | None] = mapped_column(String)
+    bic: Mapped[str | None] = mapped_column(String)
     phone: Mapped[str | None] = mapped_column(String)
     email: Mapped[str | None] = mapped_column(String)
     website: Mapped[str | None] = mapped_column(String)
@@ -240,9 +244,10 @@ class CustomerWorkshop(Base):
 
 class Workshop(Base):
     __tablename__ = "Workshop"
-    __table_args__ = (Index("Workshop_name_idx", "name"),)
+    __table_args__ = (Index("Workshop_name_idx", "name"), Index("Workshop_tenantId_idx", "tenantId"))
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid4()))
+    tenant_id: Mapped[str | None] = mapped_column("tenantId", String(36), ForeignKey("SaasTenant.id"))
     name: Mapped[str] = mapped_column(String, nullable=False)
     contact_name: Mapped[str | None] = mapped_column("contactName", String)
     phone: Mapped[str | None] = mapped_column(String)
@@ -697,6 +702,7 @@ class Invoice(Base):
 class PaymentRecord(Base):
     __tablename__ = "PaymentRecord"
     __table_args__ = (
+        Index("PaymentRecord_tenantId_idx", "tenantId"),
         Index("PaymentRecord_proposalId_idx", "proposalId"),
         Index("PaymentRecord_customerId_idx", "customerId"),
         Index("PaymentRecord_orderId_idx", "orderId"),
@@ -704,6 +710,7 @@ class PaymentRecord(Base):
     )
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid4()))
+    tenant_id: Mapped[str | None] = mapped_column("tenantId", String(36), ForeignKey("SaasTenant.id"))
     proposal_id: Mapped[str | None] = mapped_column("proposalId", String(36), ForeignKey("Proposal.id"))
     customer_id: Mapped[str | None] = mapped_column("customerId", String(36), ForeignKey("Customer.id"))
     order_id: Mapped[str | None] = mapped_column("orderId", String(36), ForeignKey("Order.id"))
@@ -750,6 +757,18 @@ class InvoiceLine(Base):
 class InvoiceSequence(Base):
     __tablename__ = "InvoiceSequence"
 
+    year: Mapped[int] = mapped_column(Integer, primary_key=True)
+    next_seq: Mapped[int] = mapped_column("nextSeq", Integer, nullable=False)
+    created_at: Mapped[datetime] = mapped_column("createdAt", DateTime(timezone=True), server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(
+        "updatedAt", DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
+    )
+
+
+class TenantInvoiceSequence(Base):
+    __tablename__ = "TenantInvoiceSequence"
+
+    tenant_id: Mapped[str] = mapped_column("tenantId", String(36), ForeignKey("SaasTenant.id"), primary_key=True)
     year: Mapped[int] = mapped_column(Integer, primary_key=True)
     next_seq: Mapped[int] = mapped_column("nextSeq", Integer, nullable=False)
     created_at: Mapped[datetime] = mapped_column("createdAt", DateTime(timezone=True), server_default=func.now())
