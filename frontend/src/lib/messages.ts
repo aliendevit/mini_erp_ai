@@ -400,6 +400,15 @@ export type Messages = {
     signupTab: string;
     loginTitle: string;
     signupTitle: string;
+    heroKicker: string;
+    loginSubtitle: string;
+    signupSubtitle: string;
+    showPassword: string;
+    hidePassword: string;
+    show: string;
+    hide: string;
+    verifyingAccess: string;
+    continueCopy: string;
     userButtonLabel: string;
     email: string;
     emailPlaceholder: string;
@@ -867,6 +876,15 @@ export const messages: Record<Locale, Messages> = {
       signupTab: 'Registrieren',
       loginTitle: 'Willkommen zurück',
       signupTitle: 'Neues Konto erstellen',
+      heroKicker: 'Sicherer Arbeitsbereich',
+      loginSubtitle: 'Melden Sie sich an, um auf das Betriebs-Dashboard zuzugreifen.',
+      signupSubtitle: 'Erstellen Sie einen geschützten Arbeitsbereich für Ihr Unternehmen.',
+      showPassword: 'Passwort anzeigen',
+      hidePassword: 'Passwort verbergen',
+      show: 'Zeigen',
+      hide: 'Verbergen',
+      verifyingAccess: 'Sicherer Zugang wird geprüft...',
+      continueCopy: 'Weiter zu Ihrem Arbeitsbereich',
       userButtonLabel: 'Benutzerkonto',
       email: 'E-Mail',
       emailPlaceholder: 'name@beispiel.de',
@@ -1327,6 +1345,15 @@ export const messages: Record<Locale, Messages> = {
       signupTab: 'Sign up',
       loginTitle: 'Welcome back',
       signupTitle: 'Create your account',
+      heroKicker: 'Secure workspace',
+      loginSubtitle: 'Enter your credentials to continue to the operational dashboard.',
+      signupSubtitle: 'Create a protected workspace for your company.',
+      showPassword: 'Show password',
+      hidePassword: 'Hide password',
+      show: 'Show',
+      hide: 'Hide',
+      verifyingAccess: 'Verifying secure access...',
+      continueCopy: 'Continue to your workspace',
       userButtonLabel: 'User',
       email: 'Email',
       emailPlaceholder: 'name@example.com',
@@ -1993,6 +2020,15 @@ export const messages: Record<Locale, Messages> = {
       signupTab: 'إنشاء حساب',
       loginTitle: 'مرحبًا بعودتك',
       signupTitle: 'إنشاء حساب جديد',
+      heroKicker: 'مساحة عمل آمنة',
+      loginSubtitle: 'أدخل بياناتك للمتابعة إلى لوحة إدارة العمليات.',
+      signupSubtitle: 'أنشئ مساحة عمل محمية لشركتك.',
+      showPassword: 'إظهار كلمة المرور',
+      hidePassword: 'إخفاء كلمة المرور',
+      show: 'إظهار',
+      hide: 'إخفاء',
+      verifyingAccess: 'جارٍ التحقق من الوصول الآمن...',
+      continueCopy: 'المتابعة إلى مساحة العمل',
       userButtonLabel: 'الحساب',
       email: 'البريد الإلكتروني',
       emailPlaceholder: 'name@example.com',

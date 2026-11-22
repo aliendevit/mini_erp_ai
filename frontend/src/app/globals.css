@@ -1677,6 +1677,11 @@ html[dir='rtl'] .ai-intake-sidebar {
   color: #86efac;
 }
 
+/* Light theme: the pale green above fails WCAG on white (1.4:1). */
+html[data-theme="light"] .ai-intake-step.done > span {
+  color: #166534;
+}
+
 .ai-intake-step.idle {
   opacity: 0.72;
 }

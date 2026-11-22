@@ -115,9 +115,9 @@ export function AuthForm({ mode }: AuthFormProps) {
   return (
     <div className="auth-form-content">
       <div className="auth-hero">
-        <span className="auth-hero-kicker">Secure workspace</span>
+        <span className="auth-hero-kicker">{msgs.authPage.heroKicker}</span>
         <h2>{mode === 'login' ? msgs.authPage.loginTitle : msgs.authPage.signupTitle}</h2>
-        <p>{mode === 'login' ? 'Enter your credentials to continue to the operational dashboard.' : 'Create a protected workspace for your company.'}</p>
+        <p>{mode === 'login' ? msgs.authPage.loginSubtitle : msgs.authPage.signupSubtitle}</p>
       </div>
 
       <form className="auth-form" onSubmit={handleSubmit(onSubmit)} noValidate>
@@ -177,10 +177,10 @@ export function AuthForm({ mode }: AuthFormProps) {
                   type="button"
                   className="auth-password-toggle"
                   onClick={() => setShowPassword((visible) => !visible)}
-                  aria-label={showPassword ? 'Hide password' : 'Show password'}
+                  aria-label={showPassword ? msgs.authPage.hidePassword : msgs.authPage.showPassword}
                   aria-pressed={showPassword}
                 >
-                  {showPassword ? 'Hide' : 'Show'}
+                  {showPassword ? msgs.authPage.hide : msgs.authPage.show}
                 </button>
               </div>
               {errors.password && <p className="auth-error">{String(errors.password?.message)}</p>}
@@ -208,7 +208,7 @@ export function AuthForm({ mode }: AuthFormProps) {
             <button type="submit" disabled={isSubmitting} className="btn primary auth-submit-button">
               <span className="auth-submit-copy">
                 <strong>{mode === 'login' ? msgs.authPage.submitLogin : msgs.authPage.submitSignup}</strong>
-                <small>{isSubmitting ? 'Verifying secure access...' : 'Continue to your workspace'}</small>
+                <small>{isSubmitting ? msgs.authPage.verifyingAccess : msgs.authPage.continueCopy}</small>
               </span>
               <span className="auth-submit-arrow" aria-hidden="true">&#8594;</span>
             </button>
