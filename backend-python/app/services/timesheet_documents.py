@@ -1,6 +1,7 @@
 ﻿from __future__ import annotations
 
 from io import BytesIO
+from html import escape
 from pathlib import Path
 
 
@@ -9,6 +10,10 @@ from pathlib import Path
 def _logo_path() -> Path | None:
     candidate = Path(__file__).resolve().parents[3] / "backend" / "assets" / "zmd-deco-logo.png"
     return candidate if candidate.exists() else None
+
+
+def _safe_text(value: object) -> str:
+    return escape(str(value or "").strip(), quote=True)
 
 
 def build_timesheet_pdf(data: dict) -> bytes:
@@ -57,8 +62,8 @@ def build_timesheet_pdf(data: dict) -> bytes:
     header_line = Table(
         [
             [
-                Paragraph(f"Stunden Zettel: {data['monthName']} {data['year']}", title),
-                Paragraph(f"Name: {data['employee']['lastName']}", title),
+                Paragraph(f"Stunden Zettel: {_safe_text(data['monthName'])} {_safe_text(data['year'])}", title),
+                Paragraph(f"Name: {_safe_text(data['employee']['lastName'])}", title),
             ]
         ],
         colWidths=[90 * mm, 85 * mm],
@@ -78,7 +83,7 @@ def build_timesheet_pdf(data: dict) -> bytes:
 
     table_rows = [
         [
-            Paragraph(data["monthName"], normal),
+            Paragraph(_safe_text(data["monthName"]), normal),
             Paragraph("Arbeitszeit<br/>(Abzueglich Pause)", normal),
             Paragraph("Beginn", normal),
             Paragraph("Ende", normal),
@@ -87,10 +92,10 @@ def build_timesheet_pdf(data: dict) -> bytes:
     for row in data["rows"]:
         table_rows.append(
             [
-                Paragraph(row["dateLabel"], normal),
-                Paragraph(row["workLabel"], normal),
-                Paragraph(row["begin"], normal),
-                Paragraph(row["end"], normal),
+                Paragraph(_safe_text(row["dateLabel"]), normal),
+                Paragraph(_safe_text(row["workLabel"]), normal),
+                Paragraph(_safe_text(row["begin"]), normal),
+                Paragraph(_safe_text(row["end"]), normal),
             ]
         )
 
@@ -200,4 +205,3 @@ def build_timesheet_docx(data: dict) -> bytes:
     out = BytesIO()
     doc.save(out)
     return out.getvalue()
-

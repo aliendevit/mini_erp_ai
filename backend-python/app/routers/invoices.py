@@ -9,11 +9,11 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, joinedload, selectinload
 
 from ..database import get_db
-from ..models import Invoice, InvoiceLine, Order, PaymentRecord, WorkEntry
+from ..models import Invoice, InvoiceLine, Order, PaymentRecord, Proposal, WorkEntry
 from ..routers.auth import get_current_user, require_permission, tenant_id_for_user
 from ..schemas import InvoiceMergePayload, InvoiceUpdatePayload, PaymentRecordPayload, WorkshopInvoiceCreatePayload
 from ..services.audit import actor_id, record_audit
-from ..services.invoice_documents import build_invoice_docx, build_invoice_pdf
+from ..services.invoice_documents import build_invoice_docx, build_invoice_pdf, invoice_issuer
 from ..services.invoice_totals import recalc_invoice_totals
 from ..utils import (
     as_datetime,
@@ -229,6 +229,7 @@ def _first_invoice_order_id(invoice: Invoice) -> str | None:
 
 
 def _apply_invoice_payment_payload(item: PaymentRecord, invoice: Invoice, payload: PaymentRecordPayload) -> PaymentRecord:
+    item.tenant_id = invoice.tenant_id
     item.proposal_id = payload.proposalId
     item.customer_id = invoice.customer_id
     item.order_id = payload.orderId or _first_invoice_order_id(invoice)
@@ -247,8 +248,9 @@ def _apply_invoice_payment_payload(item: PaymentRecord, invoice: Invoice, payloa
     return item
 
 
-def _ensure_exportable_invoice(db: Session, invoice_id: str) -> Invoice:
+def _ensure_exportable_invoice(db: Session, invoice_id: str, current_user) -> Invoice:
     invoice = _get_invoice_with_details(db, invoice_id)
+    _ensure_same_tenant(invoice, current_user)
     ensure(invoice.status != "draft", "Export ist erst nach dem Zusammenfuehren / Finalisieren moeglich.", 409)
     if not invoice.invoice_number or not invoice.issue_date:
         ensure_invoice_has_number_and_date(db, invoice.id)
@@ -257,12 +259,24 @@ def _ensure_exportable_invoice(db: Session, invoice_id: str) -> Invoice:
     return invoice
 
 
+def _ensure_invoice_payment_references(db: Session, invoice: Invoice, payload: PaymentRecordPayload) -> None:
+    tenant_id = invoice.tenant_id
+    references = ((Proposal, payload.proposalId), (Order, payload.orderId))
+    for model, record_id in references:
+        if not record_id:
+            continue
+        record = db.get(model, record_id)
+        if not record or getattr(record, "tenant_id", None) != tenant_id:
+            raise not_found()
+
+
 @router.get("/invoices/drafts/groups")
 def invoice_draft_groups(
     groupBy: str = Query(default="employee"),
     from_date: str | None = Query(default=None, alias="from"),
     to_date: str | None = Query(default=None, alias="to"),
     db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
 ) -> dict:
     ensure(groupBy in {"employee", "site", "order"}, "Ungueltiges groupBy.")
     from_dt, to_dt = _service_date_bounds(from_date, to_date)
@@ -283,6 +297,9 @@ def invoice_draft_groups(
         )
         .where(Invoice.status == "draft")
     )
+    tenant_id = _tenant_id(current_user)
+    if tenant_id:
+        stmt = stmt.where(Invoice.tenant_id == tenant_id)
     drafts = db.execute(stmt).unique().scalars().all()
 
     groups: dict[str, dict] = {}
@@ -322,6 +339,7 @@ def invoice_draft_group(
     from_date: str | None = Query(default=None, alias="from"),
     to_date: str | None = Query(default=None, alias="to"),
     db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
 ) -> dict:
     ensure(groupBy in {"employee", "site", "order"}, "Ungueltiges groupBy.")
     from_dt, to_dt = _service_date_bounds(from_date, to_date)
@@ -343,6 +361,9 @@ def invoice_draft_group(
         .where(Invoice.status == "draft")
         .order_by(Invoice.created_at.asc())
     )
+    tenant_id = _tenant_id(current_user)
+    if tenant_id:
+        stmt = stmt.where(Invoice.tenant_id == tenant_id)
     drafts = db.execute(stmt).unique().scalars().all()
 
     out = []
@@ -445,17 +466,22 @@ def merge_invoices(
                     "workEntryId": line.work_entry_id,
                     "serviceDate": line.service_date,
                     "description": line.description,
-                    "hours": float(line.hours_allocated),
-                    "rate": float(line.unit_rate or 0),
+                    "hours": Decimal(str(line.hours_allocated)),
+                    "rate": Decimal(str(line.unit_rate if line.unit_rate is not None else (
+                        entry.order.default_hourly_rate if entry.order.default_hourly_rate is not None
+                        else entry.employee.default_hourly_rate or 0
+                    ))),
                 }
             )
 
     source_lines.sort(key=lambda item: item["serviceDate"])
-    total_hours = round(sum(line["hours"] for line in source_lines), 2)
-    splits = payload.splits if payload.splits else [total_hours]
-    split_total = round(sum(float(value) for value in splits), 2)
-    ensure(abs(split_total - total_hours) <= 0.01, f"Summe der Splits ({split_total:.2f}) muss Total ({total_hours:.2f}) entsprechen.")
-    ensure(all(float(value) > 0 for value in splits), "Splits muessen > 0 sein.")
+    total_hours = sum((line["hours"] for line in source_lines), Decimal("0"))
+    splits = [Decimal(str(value)) for value in payload.splits] if payload.splits else [total_hours]
+    ensure(all(value.is_finite() and value > 0 for value in splits), "Splits muessen endlich und > 0 sein.")
+    ensure(all(value == value.quantize(Decimal("0.01")) for value in splits), "Splits duerfen maximal zwei Nachkommastellen haben.")
+    split_total = sum(splits, Decimal("0"))
+    ensure(split_total == total_hours, f"Summe der Splits ({split_total:.2f}) muss Total ({total_hours:.2f}) entsprechen.")
+    ensure(bool(tenant_id), "Invoice is missing its company tenant.", 409)
 
     created_invoice_ids = []
     try:
@@ -467,7 +493,7 @@ def merge_invoices(
                 status="final",
                 customer_id=customer_id,
                 issue_date=issue_date,
-                invoice_number=get_next_invoice_number_for_year(db, issue_date.year),
+                invoice_number=get_next_invoice_number_for_year(db, tenant_id, issue_date.year),
                 period_start=None,
                 period_end=None,
                 notes=None,
@@ -478,28 +504,29 @@ def merge_invoices(
             created_invoice_ids.append(invoice.id)
 
         out_index = 0
-        remaining_split = float(splits[out_index])
+        remaining_split = splits[out_index]
         for line in source_lines:
-            remaining_line = float(line["hours"])
-            while remaining_line > 0.0001:
+            remaining_line = line["hours"]
+            while remaining_line > 0:
                 take = min(remaining_line, remaining_split)
-                rate = Decimal(str(line["rate"]))
+                ensure(take > 0, "Split allocation could not advance.", 409)
+                rate = line["rate"]
                 db.add(
                     InvoiceLine(
                         invoice_id=new_invoices[out_index].id,
                         work_entry_id=line["workEntryId"],
                         service_date=line["serviceDate"],
                         description=line["description"],
-                        hours_allocated=Decimal(str(round(take, 2))),
+                        hours_allocated=take,
                         unit_rate=rate if rate > 0 else None,
-                        line_amount=(rate * Decimal(str(round(take, 2)))) if rate > 0 else None,
+                        line_amount=(rate * take).quantize(Decimal("0.01")) if rate > 0 else None,
                     )
                 )
                 remaining_line -= take
                 remaining_split -= take
-                if remaining_split <= 0.0001 and out_index < len(new_invoices) - 1:
+                if remaining_split == 0 and out_index < len(new_invoices) - 1:
                     out_index += 1
-                    remaining_split = float(splits[out_index])
+                    remaining_split = splits[out_index]
 
         db.query(InvoiceLine).filter(InvoiceLine.invoice_id.in_(payload.sourceInvoiceIds)).delete(synchronize_session=False)
         db.query(Invoice).filter(Invoice.id.in_(payload.sourceInvoiceIds)).delete(synchronize_session=False)
@@ -644,9 +671,8 @@ def list_invoices(
 
 @router.get("/invoices/{invoice_id}/pdf")
 def invoice_pdf(invoice_id: str, db: Session = Depends(get_db), current_user=Depends(get_current_user)) -> Response:
-    invoice = _ensure_exportable_invoice(db, invoice_id)
-    _ensure_same_tenant(invoice, current_user)
-    payload = build_invoice_pdf(invoice, kind="detailed")
+    invoice = _ensure_exportable_invoice(db, invoice_id, current_user)
+    payload = build_invoice_pdf(invoice, kind="detailed", issuer=invoice_issuer(db, invoice))
     return Response(
         content=payload,
         media_type="application/pdf",
@@ -656,9 +682,8 @@ def invoice_pdf(invoice_id: str, db: Session = Depends(get_db), current_user=Dep
 
 @router.get("/invoices/{invoice_id}/pdf/pauschal")
 def invoice_pdf_pauschal(invoice_id: str, db: Session = Depends(get_db), current_user=Depends(get_current_user)) -> Response:
-    invoice = _ensure_exportable_invoice(db, invoice_id)
-    _ensure_same_tenant(invoice, current_user)
-    payload = build_invoice_pdf(invoice, kind="pauschal")
+    invoice = _ensure_exportable_invoice(db, invoice_id, current_user)
+    payload = build_invoice_pdf(invoice, kind="pauschal", issuer=invoice_issuer(db, invoice))
     return Response(
         content=payload,
         media_type="application/pdf",
@@ -668,9 +693,8 @@ def invoice_pdf_pauschal(invoice_id: str, db: Session = Depends(get_db), current
 
 @router.get("/invoices/{invoice_id}/word")
 def invoice_word(invoice_id: str, db: Session = Depends(get_db), current_user=Depends(get_current_user)) -> Response:
-    invoice = _ensure_exportable_invoice(db, invoice_id)
-    _ensure_same_tenant(invoice, current_user)
-    payload = build_invoice_docx(invoice, kind="detailed")
+    invoice = _ensure_exportable_invoice(db, invoice_id, current_user)
+    payload = build_invoice_docx(invoice, kind="detailed", issuer=invoice_issuer(db, invoice))
     return Response(
         content=payload,
         media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
@@ -680,9 +704,8 @@ def invoice_word(invoice_id: str, db: Session = Depends(get_db), current_user=De
 
 @router.get("/invoices/{invoice_id}/word/pauschal")
 def invoice_word_pauschal(invoice_id: str, db: Session = Depends(get_db), current_user=Depends(get_current_user)) -> Response:
-    invoice = _ensure_exportable_invoice(db, invoice_id)
-    _ensure_same_tenant(invoice, current_user)
-    payload = build_invoice_docx(invoice, kind="pauschal")
+    invoice = _ensure_exportable_invoice(db, invoice_id, current_user)
+    payload = build_invoice_docx(invoice, kind="pauschal", issuer=invoice_issuer(db, invoice))
     return Response(
         content=payload,
         media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
@@ -710,6 +733,7 @@ def create_invoice_payment(
 ) -> dict:
     invoice = _get_invoice_with_details(db, invoice_id)
     _ensure_same_tenant(invoice, current_user)
+    _ensure_invoice_payment_references(db, invoice, payload)
     payment = PaymentRecord()
     _apply_invoice_payment_payload(payment, invoice, payload)
     db.add(payment)

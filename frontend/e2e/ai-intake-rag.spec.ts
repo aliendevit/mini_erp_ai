@@ -1,7 +1,6 @@
 import { expect, test, type APIRequestContext } from '@playwright/test';
 
 type AuthPayload = {
-  token: string;
   user: {
     id: string;
     email: string;
@@ -32,11 +31,7 @@ type RagSourceDetail = RagSource & {
 };
 
 const apiBaseURL = process.env.E2E_API_BASE_URL || 'http://127.0.0.1:3101/api';
-const password = 'Playwright1!';
-
-function authHeaders(token: string) {
-  return { Authorization: `Bearer ${token}` };
-}
+const password = 'PlaywrightTest1!';
 
 async function registerUser(request: APIRequestContext, email: string): Promise<AuthPayload> {
   const response = await request.post(`${apiBaseURL}/auth/register`, {
@@ -46,34 +41,29 @@ async function registerUser(request: APIRequestContext, email: string): Promise<
   return response.json();
 }
 
-async function getSources(request: APIRequestContext, token: string, proposalId: string): Promise<RagSource[]> {
-  const response = await request.get(`${apiBaseURL}/rag/sources?proposalId=${encodeURIComponent(proposalId)}`, {
-    headers: authHeaders(token),
-  });
+async function getSources(request: APIRequestContext, proposalId: string): Promise<RagSource[]> {
+  const response = await request.get(`${apiBaseURL}/rag/sources?proposalId=${encodeURIComponent(proposalId)}`);
   expect(response.ok(), await response.text()).toBeTruthy();
   return (await response.json()).items;
 }
 
 async function getSourceDetail(
   request: APIRequestContext,
-  token: string,
   sourceId: string
 ): Promise<RagSourceDetail> {
-  const response = await request.get(`${apiBaseURL}/rag/sources/${sourceId}`, {
-    headers: authHeaders(token),
-  });
+  const response = await request.get(`${apiBaseURL}/rag/sources/${sourceId}`);
   expect(response.ok(), await response.text()).toBeTruthy();
   return response.json();
 }
 
-test('AI intake UI captures draft, chat, and upload into RAG storage', async ({ page, request }, testInfo) => {
+test('AI intake UI captures draft, chat, and upload into RAG storage', async ({ page, context }, testInfo) => {
+  const request = context.request;
   const scenarioKey = `PW-RAG-${Date.now()}-${testInfo.workerIndex}`;
   const email = `e2e-${scenarioKey.toLowerCase()}@example.com`;
   const auth = await registerUser(request, email);
   let proposalId = '';
 
-  await page.addInitScript(({ token, user }) => {
-    localStorage.setItem('omran_auth_token', token);
+  await page.addInitScript(({ user }) => {
     localStorage.setItem('omran_auth_user', JSON.stringify(user));
     localStorage.setItem('sa_locale', 'en');
     localStorage.setItem('sa_theme', 'light');
@@ -106,7 +96,7 @@ test('AI intake UI captures draft, chat, and upload into RAG storage', async ({ 
 
     await expect
       .poll(async () => {
-        const sources = await getSources(request, auth.token, proposalId);
+        const sources = await getSources(request, proposalId);
         return sources.some((source) => source.sourceType === 'proposal_snapshot');
       })
       .toBe(true);
@@ -139,7 +129,7 @@ test('AI intake UI captures draft, chat, and upload into RAG storage', async ({ 
 
     await expect
       .poll(async () => {
-        const currentSources = await getSources(request, auth.token, proposalId);
+        const currentSources = await getSources(request, proposalId);
         const sourceTypes = new Set(currentSources.map((source) => source.sourceType));
         return ['proposal_snapshot', 'chat_fact', 'uploaded_file'].every((type) => sourceTypes.has(type))
           ? currentSources
@@ -147,20 +137,19 @@ test('AI intake UI captures draft, chat, and upload into RAG storage', async ({ 
       })
       .not.toHaveLength(0);
 
-    const finalSources = await getSources(request, auth.token, proposalId);
+    const finalSources = await getSources(request, proposalId);
     expect(finalSources.map((source) => source.sourceType)).toEqual(
       expect.arrayContaining(['proposal_snapshot', 'chat_fact', 'uploaded_file'])
     );
     expect(finalSources.every((source) => source.createdByUserId === auth.user.id)).toBe(true);
 
     const details = await Promise.all(
-      finalSources.map((source) => getSourceDetail(request, auth.token, source.id))
+      finalSources.map((source) => getSourceDetail(request, source.id))
     );
     expect(details.every((source) => source.jobs.every((job) => job.status === 'complete'))).toBe(true);
     expect(details.flatMap((source) => source.chunks).every((chunk) => chunk.hasEmbedding)).toBe(true);
 
     const queryResponse = await request.post(`${apiBaseURL}/rag/query`, {
-      headers: authHeaders(auth.token),
       data: {
         proposalId,
         question: 'What are the HVAC, sterile access, freight, and fire alarm constraints?',
@@ -176,9 +165,7 @@ test('AI intake UI captures draft, chat, and upload into RAG storage', async ({ 
     expect(queryItems.map((item) => item.text).join('\n')).toContain(scenarioKey);
   } finally {
     if (proposalId) {
-      await request.delete(`${apiBaseURL}/ai/intakes/${proposalId}`, {
-        headers: authHeaders(auth.token),
-      });
+      await request.delete(`${apiBaseURL}/ai/intakes/${proposalId}`);
     }
   }
 });

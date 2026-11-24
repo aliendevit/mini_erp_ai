@@ -36,6 +36,11 @@ export default defineConfig({
         ...process.env,
         CORS_ORIGIN: frontendBaseURL,
         E2E_FAKE_AI: '1',
+        DATABASE_URL: `sqlite:///${path.resolve(backendDir, 'e2e.db').replace(/\\/g, '/')}`,
+        ALLOW_PUBLIC_REGISTRATION: 'true',
+        ENABLE_DEMO_SEED: 'false',
+        SESSION_COOKIE_SECURE: 'false',
+        SESSION_COOKIE_SAMESITE: 'lax',
         LOG_LEVEL: 'WARNING',
       },
     },
@@ -53,7 +58,7 @@ export default defineConfig({
   projects: [
     {
       name: 'chromium',
-      use: { ...devices['Desktop Chrome'] },
+      use: { ...devices['Desktop Chrome'], channel: process.env.E2E_BROWSER_CHANNEL },
     },
   ],
 });

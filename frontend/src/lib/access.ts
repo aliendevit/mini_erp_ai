@@ -28,9 +28,8 @@ export function dashboardPathForUser(user?: StoredAccessUser | null): string {
 
 export function readStoredAccessUser(): StoredAccessUser | null {
   if (typeof window === 'undefined') return null;
-  const token = localStorage.getItem('omran_auth_token');
   const raw = localStorage.getItem('omran_auth_user');
-  if (!token || !raw) return null;
+  if (!raw) return null;
   try {
     return JSON.parse(raw) as StoredAccessUser;
   } catch {
@@ -48,6 +47,7 @@ export function hasAnyPermission(user: StoredAccessUser | null | undefined, perm
 }
 
 const protectedRoutes: Array<{ matcher: (path: string) => boolean; rule: RouteAccessRule }> = [
+  { matcher: (path) => path === '/', rule: { title: 'Company Manager Dashboard', accountLevels: ['company_manager'] } },
   { matcher: (path) => path === '/platform-dashboard' || path.startsWith('/platform-dashboard/'), rule: { title: 'OMRAN Platform Console', permissions: ['manage_platform'], accountLevels: ['platform_admin'] } },
   { matcher: (path) => path === '/customers' || path.startsWith('/customers/'), rule: { title: 'Customers', permissions: ['manage_company'] } },
   { matcher: (path) => path === '/workshops' || path.startsWith('/workshops/'), rule: { title: 'Workshops', permissions: ['manage_company'] } },

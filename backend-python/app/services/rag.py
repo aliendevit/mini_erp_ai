@@ -16,6 +16,7 @@ from sqlalchemy.orm import Session
 from ..models import Proposal, ProposalMessage, RagChunk, RagIngestionJob, RagSource
 from ..utils import ensure, json_dumps, json_loads
 from .gemini_client import generate_text
+from .upload_safety import read_upload_limited
 from .rag_constants import (
     RAG_TRUST_EXTRACTED_UNCONFIRMED,
     RAG_TRUST_MANAGER_SAVED,
@@ -489,7 +490,7 @@ async def ingest_uploaded_text_file(
     created_by_user_id: str | None = None,
 ) -> RagSource:
     ensure(bool(proposal_id or order_id), "proposalId oder orderId ist erforderlich.")
-    raw = await upload.read()
+    raw = await read_upload_limited(upload, MAX_UPLOAD_BYTES)
     file_name = _safe_filename(upload.filename)
     file_hash = hashlib.sha256(raw).hexdigest()
     text_value = _decode_upload_text(raw, upload.content_type, file_name)

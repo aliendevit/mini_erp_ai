@@ -2,12 +2,11 @@ services:
   db:
     image: pgvector/pgvector:pg16
     restart: unless-stopped
+    init: true
     environment:
       POSTGRES_USER: ${POSTGRES_USER:-omran}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-change-me-local}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in your root .env file}
       POSTGRES_DB: ${POSTGRES_DB:-omran}
-    ports:
-      - "${POSTGRES_PORT:-5432}:5432"
     volumes:
       - db_data_v2_python:/var/lib/postgresql/data
     healthcheck:
@@ -15,20 +14,29 @@ services:
       interval: 5s
       timeout: 5s
       retries: 20
+      start_period: 10s
 
   backend:
-    build: ./backend-python
+    build:
+      context: ./backend-python
+      dockerfile: Dockerfile
     restart: unless-stopped
+    init: true
     environment:
-      DATABASE_URL: postgresql://${POSTGRES_USER:-omran}:${POSTGRES_PASSWORD:-change-me-local}@db:5432/${POSTGRES_DB:-omran}
-      CORS_ORIGIN: ${CORS_ORIGIN:-http://localhost:3000}
+      DATABASE_URL: postgresql://${POSTGRES_USER:-omran}:${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in your root .env file}@db:5432/${POSTGRES_DB:-omran}
+      CORS_ORIGIN: ${FRONTEND_ORIGIN:-http://localhost:3000}
+      ALLOW_PUBLIC_REGISTRATION: ${ALLOW_PUBLIC_REGISTRATION:-false}
+      ENABLE_DEMO_SEED: ${ENABLE_DEMO_SEED:-false}
+      SESSION_COOKIE_SECURE: ${SESSION_COOKIE_SECURE:-false}
+      SESSION_COOKIE_SAMESITE: ${SESSION_COOKIE_SAMESITE:-lax}
       LOG_LEVEL: ${LOG_LEVEL:-INFO}
       GEMINI_API_KEY: ${GEMINI_API_KEY:-}
-      GEMINI_MODEL: ${GEMINI_MODEL:-gemini-1.5-flash}
+      GEMINI_MODEL: ${GEMINI_MODEL:-gemini-3.5-flash}
       OPENROUTER_API_KEY: ${OPENROUTER_API_KEY:-}
+      OPENROUTER_API_BASE: ${OPENROUTER_API_BASE:-https://openrouter.ai/api/v1}
       OPENROUTER_MODEL: ${OPENROUTER_MODEL:-openrouter/free}
       OPENROUTER_SITE_URL: ${OPENROUTER_SITE_URL:-http://localhost:3000}
-      OPENROUTER_APP_NAME: ${OPENROUTER_APP_NAME:-Mini ERP AI}
+      OPENROUTER_APP_NAME: ${OPENROUTER_APP_NAME:-OMRAN}
       ASSEMBLYAI_API_KEY: ${ASSEMBLYAI_API_KEY:-}
       ASSEMBLYAI_API_BASE: ${ASSEMBLYAI_API_BASE:-https://api.assemblyai.com}
     depends_on:
@@ -40,16 +48,35 @@ services:
       - backend_uploads:/app/uploads
       - backend_backups:/app/backups
       - backend_logs:/app/logs
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:3001/api/ready', timeout=3)"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 20s
 
   frontend:
-    build: ./frontend
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+      args:
+        NEXT_PUBLIC_API_BASE: ${NEXT_PUBLIC_API_BASE:-http://localhost:3001/api}
     restart: unless-stopped
+    init: true
     environment:
+      NODE_ENV: production
       NEXT_PUBLIC_API_BASE: ${NEXT_PUBLIC_API_BASE:-http://localhost:3001/api}
     depends_on:
-      - backend
+      backend:
+        condition: service_healthy
     ports:
       - "${FRONTEND_PORT:-3000}:3000"
+    healthcheck:
+      test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://127.0.0.1:3000/"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 15s
 
 volumes:
   db_data_v2_python:

@@ -151,6 +151,14 @@ def _fallback_text_if_possible(exc: Exception, prompt: str, response_mime_type: 
     return _openrouter_generate_text(prompt, response_mime_type=response_mime_type)
 
 
+def ensure_text_ai_ready() -> None:
+    """Accept any configured text provider before starting an HTTP stream."""
+    settings = get_settings()
+    if _e2e_fake_ai_enabled() or settings.openrouter_api_key:
+        return
+    ensure_gemini_ready()
+
+
 def ensure_gemini_ready():
     settings = get_settings()
     if _e2e_fake_ai_enabled():

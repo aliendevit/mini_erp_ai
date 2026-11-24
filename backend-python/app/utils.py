@@ -21,7 +21,7 @@ from .models import (
     EmployeeSkill,
     Invoice,
     InvoiceLine,
-    InvoiceSequence,
+    TenantInvoiceSequence,
     Order,
     PaymentRecord,
     ProjectIssue,
@@ -139,18 +139,24 @@ def yy_from_year(year: int) -> str:
     return str(year % 100).zfill(2)
 
 
-def format_invoice_number(year: int, seq: int) -> str:
+def format_invoice_number(year: int, seq: int, tenant_id: str | None = None) -> str:
+    if tenant_id:
+        tenant_code = re.sub(r"[^A-Za-z0-9]", "", tenant_id).upper()[:6] or "TENANT"
+        return f"RE {yy_from_year(year)}-{tenant_code}-{pad4(seq)}"
     return f"RE {yy_from_year(year)}-{pad4(seq)}"
 
 
-def get_invoice_sequence_state(db: Session, year: int) -> dict[str, int | None]:
-    prefix = f"RE {yy_from_year(year)}-"
+def get_invoice_sequence_state(db: Session, tenant_id: str, year: int) -> dict[str, int | None]:
+    prefix = f"RE {yy_from_year(year)}-{re.sub(r'[^A-Za-z0-9]', '', tenant_id).upper()[:6] or 'TENANT'}-"
     last = db.scalar(
-        select(Invoice).where(Invoice.invoice_number.like(f"{prefix}%")).order_by(Invoice.invoice_number.desc()).limit(1)
+        select(Invoice)
+        .where(Invoice.tenant_id == tenant_id, Invoice.invoice_number.like(f"{prefix}%"))
+        .order_by(Invoice.invoice_number.desc())
+        .limit(1)
     )
     last_seq = int(last.invoice_number[-4:]) if last and last.invoice_number else 0
     db_next_seq = last_seq + 1
-    seq_row = db.get(InvoiceSequence, year)
+    seq_row = db.get(TenantInvoiceSequence, {"tenant_id": tenant_id, "year": year})
     configured_next_seq = seq_row.next_seq if seq_row else None
     effective_next_seq = max(db_next_seq, configured_next_seq or 0)
     return {
@@ -161,12 +167,12 @@ def get_invoice_sequence_state(db: Session, year: int) -> dict[str, int | None]:
     }
 
 
-def get_next_invoice_number_for_year(db: Session, year: int) -> str:
-    state = get_invoice_sequence_state(db, year)
+def get_next_invoice_number_for_year(db: Session, tenant_id: str, year: int) -> str:
+    state = get_invoice_sequence_state(db, tenant_id, year)
     next_seq = int(state["effectiveNextSeq"])
     if next_seq > 9999:
         raise german_error(f"Invoice sequence exceeded for year {year}.", 500)
-    return format_invoice_number(year, next_seq)
+    return format_invoice_number(year, next_seq, tenant_id)
 
 
 def ensure_invoice_has_number_and_date(db: Session, invoice_id: str) -> Invoice | None:
@@ -179,7 +185,9 @@ def ensure_invoice_has_number_and_date(db: Session, invoice_id: str) -> Invoice 
     year = issue_date.year
     changed = False
     if not invoice.invoice_number:
-        invoice.invoice_number = get_next_invoice_number_for_year(db, year)
+        if not invoice.tenant_id:
+            raise german_error("Invoice is missing its company tenant.", 409)
+        invoice.invoice_number = get_next_invoice_number_for_year(db, invoice.tenant_id, year)
         changed = True
     if not invoice.issue_date:
         invoice.issue_date = issue_date

@@ -14,7 +14,15 @@ from sqlalchemy.orm import Session
 
 from ..database import get_db
 from ..models import SaasInvoice, SaasPayment, SaasTenant, UserAccount
-from ..routers.auth import MANAGER_DEFAULT_PERMISSIONS, _hash_password, _validate_email, _validate_password, get_current_user
+from ..routers.auth import (
+    MANAGER_DEFAULT_PERMISSIONS,
+    _clear_session,
+    _hash_password,
+    _validate_email,
+    _validate_password,
+    get_current_user,
+    require_platform_admin,
+)
 from ..schemas import (
     PlatformCreateCompanyPayload,
     PlatformCreateCompanyResponse,
@@ -26,7 +34,7 @@ from ..schemas import (
 from ..services.audit import actor_id, record_audit
 from ..utils import ensure
 
-router = APIRouter(prefix="/platform", tags=["platform"])
+router = APIRouter(prefix="/platform", tags=["platform"], dependencies=[Depends(require_platform_admin)])
 
 
 def _money(value: Decimal | float | int | None) -> float:
@@ -326,6 +334,7 @@ def reset_company_manager_password(
 
     manager_password = _validate_password(payload.password if payload and payload.password else _generated_password())
     manager.password_hash = _hash_password(manager_password)
+    _clear_session(manager)
     manager.failed_login_attempts = 0
     manager.locked_until = None
     manager.updated_at = datetime.now(timezone.utc)

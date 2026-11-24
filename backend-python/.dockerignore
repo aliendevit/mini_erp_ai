@@ -1,0 +1,17 @@
+.venv
+__pycache__
+*.py[cod]
+*.db
+*.db-*
+*.sqlite*
+*.dump
+*.bak
+*.pem
+*.key
+.env*
+uploads
+backups
+logs
+tests
+scripts
+Dockerfile*

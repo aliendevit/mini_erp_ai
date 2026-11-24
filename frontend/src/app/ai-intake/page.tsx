@@ -1790,6 +1790,7 @@ export default function AIIntakePage() {
       setTranscribing(true);
       const res = await fetch(`${API_BASE}/ai/intakes/${intakeId}/messages/transcribe`, {
         method: 'POST',
+        credentials: 'include',
         headers: authHeaders(),
         body: formData,
       });
@@ -2059,7 +2060,7 @@ export default function AIIntakePage() {
     try {
       await persistDraftSnapshot();
       const url = `${API_BASE}/ai/intakes/${selectedId}/pdf?locale=${encodeURIComponent(locale)}`;
-      const res = await fetch(url, { headers: authHeaders() });
+      const res = await fetch(url, { credentials: 'include', headers: authHeaders() });
       if (!res.ok) {
         throw new Error(await safeMessage(res));
       }
@@ -2108,6 +2109,7 @@ export default function AIIntakePage() {
     try {
       const res = await fetch(`${API_BASE}/ai/intakes/${intakeId}/messages/stream`, {
         method: 'POST',
+        credentials: 'include',
         headers: { 'Content-Type': 'application/json', ...authHeaders() },
         body: JSON.stringify({ content }),
       });
@@ -2203,7 +2205,7 @@ export default function AIIntakePage() {
       await persistDraftSnapshot();
       const response = await fetch(
         `${API_BASE}/ai/intakes/${selectedId}/recommend-assignments/${siteIndex}/explain/stream?locale=${encodeURIComponent(locale)}`,
-        { method: 'POST', headers: authHeaders() }
+        { method: 'POST', credentials: 'include', headers: authHeaders() }
       );
       if (!response.ok) {
         throw new Error(await safeMessage(response));

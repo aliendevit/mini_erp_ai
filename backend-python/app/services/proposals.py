@@ -1962,16 +1962,17 @@ def proposal_external_workshops(proposal: Proposal) -> list[dict[str, Any]]:
     return list(json_loads(proposal.external_workshops_json, []))
 
 
-def _find_existing_workshop(db: Session, name: str) -> Workshop | None:
+def _find_existing_workshop(db: Session, name: str, tenant_id: str) -> Workshop | None:
     normalized = name.strip().lower()
     if not normalized:
         return None
-    return db.scalar(select(Workshop).where(func.lower(Workshop.name) == normalized).limit(1))
+    return db.scalar(select(Workshop).where(Workshop.tenant_id == tenant_id, func.lower(Workshop.name) == normalized).limit(1))
 
 
 def _get_or_create_workshop(
     db: Session,
     name: str,
+    tenant_id: str,
     specialties: list[str] | None = None,
     contact_name: str | None = None,
     phone: str | None = None,
@@ -1980,10 +1981,11 @@ def _get_or_create_workshop(
 ) -> Workshop:
     clean_name = name.strip()
     ensure(bool(clean_name), "Workshop-Name fehlt.")
-    workshop = _find_existing_workshop(db, clean_name)
+    workshop = _find_existing_workshop(db, clean_name, tenant_id)
     if workshop is None:
         workshop = Workshop(
             name=clean_name,
+            tenant_id=tenant_id,
             contact_name=contact_name,
             phone=phone,
             email=email,
@@ -2015,6 +2017,7 @@ def create_confirmed_workshops(db: Session, proposal: Proposal, customer: Custom
         workshop = _get_or_create_workshop(
             db,
             name,
+            str(proposal.tenant_id),
             specialties=[str(value) for value in workshop_data.get("specialties") or []],
             contact_name=workshop_data.get("contactName"),
             phone=workshop_data.get("phone"),
@@ -2039,6 +2042,7 @@ def create_confirmed_payment_records(
         if amount is None or amount <= 0:
             continue
         payment = PaymentRecord(
+            tenant_id=proposal.tenant_id,
             proposal_id=proposal.id,
             customer_id=customer.id,
             order_id=order.id,
@@ -2080,7 +2084,11 @@ def calculate_price_from_assignments(
         if not selected_employee_ids:
             continue
         employees = [db.get(Employee, employee_id) for employee_id in selected_employee_ids]
-        ensure(all(employee is not None for employee in employees), "Ausgewaehlter Mitarbeiter existiert nicht.", 404)
+        ensure(
+            all(employee is not None and employee.tenant_id == proposal.tenant_id for employee in employees),
+            "Ausgewaehlter Mitarbeiter existiert nicht.",
+            404,
+        )
         rates: list[Decimal] = []
         for employee in employees:
             if employee.default_hourly_rate is None:
@@ -2115,11 +2123,12 @@ def confirm_proposal(
 
     if existing_customer_id:
         customer = db.get(Customer, existing_customer_id)
-        if not customer:
+        if not customer or customer.tenant_id != proposal.tenant_id:
             raise HTTPException(status_code=404, detail="Ausgewaehlter Kunde nicht gefunden.")
     else:
         ensure(bool(proposal.customer_company_name and proposal.customer_company_name.strip()), "Firmenname fuer neuen Kunden fehlt.")
         customer = Customer(
+            tenant_id=proposal.tenant_id,
             company_name=proposal.customer_company_name.strip(),
             street=proposal.customer_street,
             zip_code=proposal.customer_zip_code,
@@ -2134,6 +2143,7 @@ def confirm_proposal(
         db.flush()
 
     order = Order(
+        tenant_id=proposal.tenant_id,
         customer_id=customer.id,
         title=proposal.order_title.strip(),
         description=proposal.order_description or proposal.summary,
@@ -2179,9 +2189,9 @@ def confirm_proposal(
         created_site_ids.append(site.id)
 
         if workshop_name:
-            workshop = _find_existing_workshop(db, workshop_name)
+            workshop = _find_existing_workshop(db, workshop_name, str(proposal.tenant_id))
             if workshop is None:
-                workshop = _get_or_create_workshop(db, workshop_name, specialties=workshop_covered_skills or required_skills)
+                workshop = _get_or_create_workshop(db, workshop_name, str(proposal.tenant_id), specialties=workshop_covered_skills or required_skills)
             created_workshop_ids.add(workshop.id)
             db.add(
                 WorkshopSiteAssignment(

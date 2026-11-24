@@ -486,7 +486,7 @@ export default function AccountControlPage() {
             {changingPassword ? labels.saving : 'Update password'}
           </button>
         </form>
-        <p className="muted">All companies use the same password rule: at least 8 characters, one number, and one special character.</p>
+        <p className="muted">All companies use the same password rule: 12-128 characters with uppercase, lowercase, a number, and a special character.</p>
       </section>
 
       <section className="account-control-panel account-control-wide">

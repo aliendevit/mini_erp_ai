@@ -385,10 +385,11 @@ class RagScaffoldTests(unittest.TestCase):
         self.assertTrue(any("Fence height is 1.5 meters" in item["text"] for item in result["items"]))
         self.assertTrue(all(item["proposalId"] == proposal.id for item in result["items"]))
 
-    def test_rag_query_returns_empty_items_when_no_scoped_chunks_exist(self) -> None:
-        result = query_rag(RagQueryPayload(proposalId="proposal-1", question="What is in the document?"), db=self.db)
+    def test_rag_query_rejects_unknown_scope(self) -> None:
+        with self.assertRaises(HTTPException) as caught:
+            query_rag(RagQueryPayload(proposalId="proposal-1", question="What is in the document?"), db=self.db)
 
-        self.assertEqual(result, {"items": []})
+        self.assertEqual(caught.exception.status_code, 404)
 
     def test_proposal_snapshot_capture_stores_manager_saved_chunks(self) -> None:
         proposal = Proposal(

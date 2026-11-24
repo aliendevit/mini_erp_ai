@@ -8,7 +8,7 @@ import { accessDecisionForPath, readStoredAccessUser } from '../../lib/access';
 const PUBLIC_PREFIXES = ['/auth', '/register', '/registration', '/access-denied'];
 
 function isPublicPath(pathname: string) {
-  return pathname === '/' || pathname === '/viewer-dashboard' || PUBLIC_PREFIXES.some((prefix) => pathname === prefix || pathname.startsWith(`${prefix}/`));
+  return pathname === '/viewer-dashboard' || PUBLIC_PREFIXES.some((prefix) => pathname === prefix || pathname.startsWith(`${prefix}/`));
 }
 
 export function AccessGuard({ children }: { children: ReactNode }) {
@@ -40,6 +40,11 @@ export function AccessGuard({ children }: { children: ReactNode }) {
     if (!ready) return;
     if (decision.allowed || isPublicPath(pathname)) {
       setRedirecting(false);
+      return;
+    }
+    if (!readStoredAccessUser()) {
+      setRedirecting(true);
+      router.replace('/auth');
       return;
     }
     const params = new URLSearchParams({

@@ -18,15 +18,18 @@ What is included:
 
 ```bash
 pip install -r requirements.txt
+python -m app.bootstrap --email admin@example.com
 uvicorn app.main:app --reload --port 3001
 ```
 
-Required environment:
+Environment examples (copy `.env.example` for local development):
 
 - `DATABASE_URL=postgresql://omran:change-me-local@localhost:5432/omran`
 - `CORS_ORIGIN=http://localhost:3000`
-- `GEMINI_API_KEY=...`
-- `GEMINI_MODEL=gemini-1.5-flash`
+- `GEMINI_API_KEY=...` or `OPENROUTER_API_KEY=...` for text AI
+- `GEMINI_MODEL=gemini-3.5-flash`
+
+Public registration and demo accounts are disabled by default. The bootstrap command prompts for your own administrator password and refuses to create a second platform administrator. Use that account to create a company, then complete its manager's Company setup before exporting invoices. For Docker, use `docker compose exec backend python -m app.bootstrap --email admin@example.com` from the repository root.
 
 Docker/deployment should use PostgreSQL. The app automatically rewrites `postgresql://` to SQLAlchemy's `postgresql+pg8000://`.
 

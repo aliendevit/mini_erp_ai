@@ -15,6 +15,10 @@ type CompanyState = {
   vatId: string;
   phone: string;
   email: string;
+  taxNumber: string;
+  bankName: string;
+  iban: string;
+  bic: string;
 };
 
 type CompanyProfile = {
@@ -25,6 +29,10 @@ type CompanyProfile = {
   vatId?: string | null;
   phone?: string | null;
   email?: string | null;
+  taxNumber?: string | null;
+  bankName?: string | null;
+  iban?: string | null;
+  bic?: string | null;
 };
 
 const initialState: CompanyState = {
@@ -35,6 +43,10 @@ const initialState: CompanyState = {
   vatId: '',
   phone: '',
   email: '',
+  taxNumber: '',
+  bankName: '',
+  iban: '',
+  bic: '',
 };
 
 function copy(locale: string) {
@@ -50,6 +62,10 @@ function copy(locale: string) {
       vatId: 'الرقم الضريبي',
       phone: 'الهاتف',
       email: 'البريد الإلكتروني',
+      taxNumber: 'الرقم الضريبي المحلي',
+      bankName: 'اسم البنك',
+      iban: 'رقم الحساب الدولي IBAN',
+      bic: 'رمز البنك BIC',
       save: 'حفظ بيانات الشركة',
       saving: 'جار الحفظ...',
       required: 'أكمل جميع الحقول المطلوبة. الرمز البريدي والرقم الضريبي اختياريان.',
@@ -72,6 +88,10 @@ function copy(locale: string) {
       vatId: 'USt-IdNr.',
       phone: 'Telefon',
       email: 'E-Mail',
+      taxNumber: 'Steuernummer',
+      bankName: 'Bankname',
+      iban: 'IBAN',
+      bic: 'BIC',
       save: 'Firmendaten speichern',
       saving: 'Speichern...',
       required: 'Bitte alle Pflichtfelder ausfuellen. PLZ und USt-IdNr. sind optional.',
@@ -93,6 +113,10 @@ function copy(locale: string) {
     vatId: 'VAT ID',
     phone: 'Phone',
     email: 'Email',
+    taxNumber: 'Tax number',
+    bankName: 'Bank name',
+    iban: 'IBAN',
+    bic: 'BIC',
     save: 'Save company info',
     saving: 'Saving...',
     required: 'Fill all required fields. ZIP code and VAT ID are optional.',
@@ -112,7 +136,6 @@ export default function SetupPage() {
   const [saving, setSaving] = useState(false);
 
   useEffect(() => {
-    if (!localStorage.getItem('omran_auth_token')) return;
     apiAuthGet<CompanyProfile | null>('/auth/company-profile')
       .then((profile) => {
         if (!profile) return;
@@ -124,6 +147,10 @@ export default function SetupPage() {
           vatId: profile.vatId || '',
           phone: profile.phone || '',
           email: profile.email || '',
+          taxNumber: profile.taxNumber || '',
+          bankName: profile.bankName || '',
+          iban: profile.iban || '',
+          bic: profile.bic || '',
         });
       })
       .catch(() => {
@@ -141,7 +168,6 @@ export default function SetupPage() {
 
   async function saveCompany() {
     if (missingRequiredFields()) return showToast(t.required, 'error');
-    if (!localStorage.getItem('omran_auth_token')) return showToast(t.signInRequired, 'error');
     setSaving(true);
     try {
       await apiAuthJson('/auth/company-profile', 'PUT', {
@@ -153,6 +179,10 @@ export default function SetupPage() {
         vatId: form.vatId.trim() || null,
         phone: form.phone.trim(),
         email: form.email.trim(),
+        taxNumber: form.taxNumber.trim() || null,
+        bankName: form.bankName.trim() || null,
+        iban: form.iban.trim() || null,
+        bic: form.bic.trim() || null,
       });
       const rawUser = localStorage.getItem('omran_auth_user');
       if (rawUser) {
@@ -220,6 +250,12 @@ export default function SetupPage() {
               <label>{t.vatId} <small>{t.optionalMark}</small></label>
               <input value={form.vatId} onChange={(event) => update('vatId', event.target.value)} />
             </div>
+            {(['taxNumber', 'bankName', 'iban', 'bic'] as const).map((key) => (
+              <div className="setup-field" key={key}>
+                <label htmlFor={`company-${key}`}>{t[key]} <small>{t.optionalMark}</small></label>
+                <input id={`company-${key}`} value={form[key]} onChange={(event) => update(key, event.target.value)} maxLength={key === 'bankName' ? 160 : key === 'taxNumber' ? 80 : key === 'iban' ? 50 : 20} />
+              </div>
+            ))}
           </div>
 
           <button className="btn primary setup-save-button" type="submit" disabled={saving}>

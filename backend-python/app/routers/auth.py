@@ -3,11 +3,16 @@ from __future__ import annotations
 import hashlib
 import hmac
 import json
+import os
 import re
 import secrets
-from datetime import datetime, timezone
+import time
+from collections import deque
+from datetime import datetime, timedelta, timezone
+from threading import Lock
 
-from fastapi import APIRouter, Depends, Header, HTTPException, status
+from fastapi import APIRouter, Cookie, Depends, Header, HTTPException, Request, Response, status
+from fastapi.params import Depends as DependsParam
 from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
@@ -34,9 +39,18 @@ router = APIRouter(prefix="/auth", tags=["auth"])
 
 EMAIL_RE = re.compile(r"^[^\s@]+@[^\s@]+\.[^\s@]+$")
 PHONE_RE = re.compile(r"^\+?[0-9]{8,15}$")
-PASSWORD_RE = re.compile(r"^(?=.*\d)(?=.*[!@#$%^&*()_+\-=\[\]{};':\"\\|,.<>/?]).{8,}$")
+PASSWORD_RE = re.compile(
+    r"^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[!@#$%^&*()_+\-=\[\]{};':\"\\|,.<>/?]).{12,128}$"
+)
 HASH_ITERATIONS = 210_000
 MAX_FAILED_LOGIN_ATTEMPTS = 5
+LOGIN_LOCK_MINUTES = 15
+SESSION_TTL_HOURS = 8
+SESSION_COOKIE_NAME = "omran_session"
+LOGIN_RATE_WINDOW_SECONDS = 60
+LOGIN_RATE_LIMIT = max(1, int(os.getenv("LOGIN_RATE_LIMIT_PER_MINUTE", "20")))
+_login_rate_buckets: dict[str, deque[float]] = {}
+_login_rate_lock = Lock()
 PLATFORM_DEFAULT_PERMISSIONS = [
     "manage_platform",
     "manage_tenants",
@@ -53,7 +67,6 @@ MANAGER_DEFAULT_PERMISSIONS = [
     "use_rag",
     "use_ai_monitoring",
     "manage_invoices",
-    "restore_backups",
     "view_audit_log",
     "view_projects",
     "update_tracking",
@@ -98,7 +111,7 @@ def _normalize_email(email: str) -> str:
 
 def _validate_email(email: str) -> str:
     normalized = _normalize_email(email)
-    if not EMAIL_RE.match(normalized):
+    if len(normalized) > 254 or not EMAIL_RE.match(normalized):
         raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, "Invalid email address.")
     return normalized
 
@@ -107,7 +120,7 @@ def _validate_password(password: str) -> str:
     if not PASSWORD_RE.match(password or ""):
         raise HTTPException(
             status.HTTP_422_UNPROCESSABLE_ENTITY,
-            "Password must be at least 8 characters and include a number and special character.",
+            "Password must be 12-128 characters and include uppercase, lowercase, number, and special characters.",
         )
     return password
 
@@ -155,8 +168,30 @@ def _verify_password(password: str, stored_hash: str) -> bool:
     return hmac.compare_digest(digest, expected)
 
 
+DUMMY_PASSWORD_HASH = _hash_password("Not-A-Real-Password1!")
+
+
 def _hash_token(token: str) -> str:
     return hashlib.sha256(token.encode("utf-8")).hexdigest()
+
+
+def _enforce_login_rate_limit(request: Request | None) -> None:
+    if request is None or request.client is None:
+        return
+    key = request.client.host or "unknown"
+    now = time.monotonic()
+    with _login_rate_lock:
+        bucket = _login_rate_buckets.setdefault(key, deque())
+        while bucket and now - bucket[0] >= LOGIN_RATE_WINDOW_SECONDS:
+            bucket.popleft()
+        if len(bucket) >= LOGIN_RATE_LIMIT:
+            retry_after = max(1, int(LOGIN_RATE_WINDOW_SECONDS - (now - bucket[0])))
+            raise HTTPException(
+                status.HTTP_429_TOO_MANY_REQUESTS,
+                "Too many login attempts. Try again later.",
+                headers={"Retry-After": str(retry_after)},
+            )
+        bucket.append(now)
 
 
 def permissions_for_user(user: UserAccount) -> list[str]:
@@ -164,6 +199,8 @@ def permissions_for_user(user: UserAccount) -> list[str]:
         explicit = [str(item) for item in json.loads(getattr(user, "permissions_json", None) or "[]") if str(item).strip()]
     except Exception:
         explicit = []
+    if getattr(user, "account_level", None) != "platform_admin":
+        explicit = [permission for permission in explicit if permission != "restore_backups"]
     if explicit:
         return explicit
     account_level = getattr(user, "account_level", "company_manager")
@@ -182,9 +219,17 @@ def has_permission(user: UserAccount, permission: str) -> bool:
 
 
 def tenant_id_for_user(user: UserAccount | None) -> str | None:
-    if not user or getattr(user, "account_level", None) == "platform_admin":
+    if isinstance(user, DependsParam):
+        # Direct unit calls may leave FastAPI's dependency placeholder in place.
         return None
-    return getattr(user, "tenant_id", None)
+    if not user:
+        raise HTTPException(status.HTTP_401_UNAUTHORIZED, "Authentication is required.")
+    if getattr(user, "account_level", None) == "platform_admin":
+        return None
+    tenant_id = getattr(user, "tenant_id", None)
+    if not tenant_id:
+        raise HTTPException(status.HTTP_403_FORBIDDEN, "Account is not assigned to a company tenant.")
+    return str(tenant_id)
 
 
 def require_permission(permission: str):
@@ -223,6 +268,10 @@ def _profile_response(profile: CompanyProfile) -> CompanyProfileResponse:
         city=profile.city,
         country=profile.country,
         vatId=profile.vat_id,
+        taxNumber=profile.tax_number,
+        bankName=profile.bank_name,
+        iban=profile.iban,
+        bic=profile.bic,
         phone=profile.phone,
         email=profile.email,
         website=profile.website,
@@ -262,11 +311,8 @@ def _user_response(user: UserAccount, db: Session) -> AuthUserResponse:
     )
 
 
-def _auth_payload(user: UserAccount, token: str, db: Session) -> AuthResponse:
-    return AuthResponse(
-        token=token,
-        user=_user_response(user, db),
-    )
+def _auth_payload(user: UserAccount, db: Session) -> AuthResponse:
+    return AuthResponse(user=_user_response(user, db))
 
 
 def _ai_feature_response(user: UserAccount) -> list[AccountControlFeatureResponse]:
@@ -330,7 +376,70 @@ def _issue_session(user: UserAccount) -> str:
     return token
 
 
-def _bearer_token(authorization: str | None) -> str:
+def _set_session_cookie(response: Response | None, token: str) -> None:
+    if response is None:
+        return
+    secure_default = "true" if os.getenv("CORS_ORIGIN", "").lower().startswith("https://") else "false"
+    secure = os.getenv("SESSION_COOKIE_SECURE", secure_default).strip().lower() in {"1", "true", "yes"}
+    same_site = os.getenv("SESSION_COOKIE_SAMESITE", "lax").strip().lower()
+    if same_site not in {"lax", "strict", "none"}:
+        same_site = "lax"
+    if same_site == "none" and not secure:
+        raise RuntimeError("SameSite=None session cookies require SESSION_COOKIE_SECURE=true.")
+    response.set_cookie(
+        SESSION_COOKIE_NAME,
+        token,
+        max_age=SESSION_TTL_HOURS * 60 * 60,
+        httponly=True,
+        secure=secure,
+        samesite=same_site,
+        path="/",
+    )
+
+
+def _clear_session(user: UserAccount) -> None:
+    user.session_token_hash = None
+    user.session_created_at = None
+
+
+def verify_current_password_with_lockout(db: Session, user: UserAccount, password: str) -> None:
+    """Verify a destructive-action step-up password with the same durable lockout policy as login."""
+    if isinstance(db, DependsParam) or not hasattr(db, "scalar"):
+        if not _verify_password(password, user.password_hash):
+            raise HTTPException(status.HTTP_401_UNAUTHORIZED, "Current password is incorrect.")
+        return
+    locked_user = db.scalar(select(UserAccount).where(UserAccount.id == user.id).with_for_update()) or user
+    now = datetime.now(timezone.utc)
+    locked_until = _as_aware_utc(locked_user.locked_until)
+    if locked_until and locked_until > now:
+        raise HTTPException(
+            status.HTTP_429_TOO_MANY_REQUESTS,
+            "Too many password attempts. Try again later.",
+            headers={"Retry-After": str(max(1, int((locked_until - now).total_seconds())))}
+        )
+    if _verify_password(password, locked_user.password_hash):
+        locked_user.failed_login_attempts = 0
+        locked_user.locked_until = None
+        db.commit()
+        return
+
+    attempts = int(locked_user.failed_login_attempts or 0) + 1
+    locked_user.failed_login_attempts = min(attempts, MAX_FAILED_LOGIN_ATTEMPTS)
+    if attempts >= MAX_FAILED_LOGIN_ATTEMPTS:
+        locked_user.locked_until = now + timedelta(minutes=LOGIN_LOCK_MINUTES)
+    db.commit()
+    if locked_user.locked_until:
+        raise HTTPException(
+            status.HTTP_429_TOO_MANY_REQUESTS,
+            "Too many password attempts. Try again later.",
+            headers={"Retry-After": str(LOGIN_LOCK_MINUTES * 60)},
+        )
+    raise HTTPException(status.HTTP_401_UNAUTHORIZED, "Current password is incorrect.")
+
+
+def _session_token(authorization: str | None, session_cookie: str | None = None) -> str:
+    if isinstance(session_cookie, str) and session_cookie:
+        return session_cookie
     if not authorization or not authorization.lower().startswith("bearer "):
         raise HTTPException(status.HTTP_401_UNAUTHORIZED, "Missing authorization token.")
     token = authorization.split(" ", 1)[1].strip()
@@ -339,34 +448,75 @@ def _bearer_token(authorization: str | None) -> str:
     return token
 
 
-def get_current_user(authorization: str | None = Header(default=None), db: Session = Depends(get_db)) -> UserAccount:
-    token_hash = _hash_token(_bearer_token(authorization))
+def _bearer_token(authorization: str | None) -> str:
+    return _session_token(authorization)
+
+
+def get_current_user(
+    authorization: str | None = Header(default=None),
+    session_cookie: str | None = Cookie(default=None, alias=SESSION_COOKIE_NAME),
+    db: Session = Depends(get_db),
+) -> UserAccount:
+    token_hash = _hash_token(_session_token(authorization, session_cookie))
     user = db.scalar(
         select(UserAccount).where(UserAccount.session_token_hash == token_hash, UserAccount.is_active == True)
     )
     if not user:
         raise HTTPException(status.HTTP_401_UNAUTHORIZED, "Invalid or expired session.")
+    created_at = _as_aware_utc(user.session_created_at)
+    if not created_at or datetime.now(timezone.utc) - created_at > timedelta(hours=SESSION_TTL_HOURS):
+        _clear_session(user)
+        db.commit()
+        raise HTTPException(status.HTTP_401_UNAUTHORIZED, "Invalid or expired session.")
+    if user.account_level != "platform_admin":
+        tenant_id = tenant_id_for_user(user)
+        tenant = db.get(SaasTenant, tenant_id)
+        if not tenant or tenant.status != "active":
+            raise HTTPException(status.HTTP_403_FORBIDDEN, "Company tenant is not active.")
+    return user
+
+
+def require_platform_admin(user: UserAccount = Depends(get_current_user)) -> UserAccount:
+    if user.account_level != "platform_admin" or not has_permission(user, "manage_platform"):
+        raise HTTPException(status.HTTP_403_FORBIDDEN, "Platform administrator access is required.")
+    return user
+
+
+def require_company_manager(user: UserAccount = Depends(get_current_user)) -> UserAccount:
+    if user.account_level != "company_manager" or not has_permission(user, "manage_company"):
+        raise HTTPException(status.HTTP_403_FORBIDDEN, "Company manager access is required.")
+    tenant_id_for_user(user)
     return user
 
 
 @router.post("/register", response_model=AuthResponse, status_code=status.HTTP_201_CREATED)
-def register(payload: AuthRegisterPayload, db: Session = Depends(get_db)) -> AuthResponse:
+def register(payload: AuthRegisterPayload, response: Response = None, db: Session = Depends(get_db)) -> AuthResponse:
+    if os.getenv("ALLOW_PUBLIC_REGISTRATION", "false").strip().lower() not in {"1", "true", "yes"}:
+        raise HTTPException(status.HTTP_403_FORBIDDEN, "Public registration is disabled. Contact a platform administrator.")
     email = _validate_email(payload.email)
     display_name = _clean_text(payload.displayName) or email.split("@", 1)[0]
     password = _validate_password(payload.password)
     phone = _validate_phone(payload.phone)
 
+    tenant_name = display_name
+    if db.scalar(select(SaasTenant.id).where(func.lower(SaasTenant.company_name) == tenant_name.lower())):
+        tenant_name = f"{display_name} {secrets.token_hex(3)}"
+    tenant = SaasTenant(company_name=tenant_name, contact_email=email, status="active", user_count=1)
+    db.add(tenant)
+    db.flush()
     user = UserAccount(
         email=email,
         display_name=display_name,
         password_hash=_hash_password(password),
         phone=phone,
+        tenant_id=tenant.id,
         account_level="company_manager",
-        tenant_name=None,
+        tenant_name=tenant.company_name,
         role="company_manager",
         permissions_json=json.dumps(MANAGER_DEFAULT_PERMISSIONS, separators=(",", ":")),
     )
     token = _issue_session(user)
+    _set_session_cookie(response, token)
     db.add(user)
     try:
         db.commit()
@@ -374,43 +524,58 @@ def register(payload: AuthRegisterPayload, db: Session = Depends(get_db)) -> Aut
         db.rollback()
         raise HTTPException(status.HTTP_409_CONFLICT, "Email is already registered.") from exc
     db.refresh(user)
-    return _auth_payload(user, token, db)
+    return _auth_payload(user, db)
 
 
 @router.post("/login", response_model=AuthResponse)
-def login(payload: AuthLoginPayload, db: Session = Depends(get_db)) -> AuthResponse:
+def login(
+    payload: AuthLoginPayload,
+    response: Response = None,
+    db: Session = Depends(get_db),
+    request: Request = None,
+) -> AuthResponse:
     email = _validate_email(payload.email)
-    user = db.scalar(select(UserAccount).where(UserAccount.email == email))
+    _enforce_login_rate_limit(request)
+    if not payload.password or len(payload.password) > 128:
+        raise HTTPException(status.HTTP_401_UNAUTHORIZED, "Invalid email or password.")
+    user = db.scalar(select(UserAccount).where(UserAccount.email == email).with_for_update())
     now = datetime.now(timezone.utc)
-    if user and user.locked_until:
+    locked_until = _as_aware_utc(user.locked_until) if user else None
+    if user and locked_until and locked_until > now:
         raise HTTPException(
             status.HTTP_429_TOO_MANY_REQUESTS,
-            "Account locked after too many wrong password attempts. A manager must reset login attempts.",
+            "Too many login attempts. Try again later.",
+            headers={"Retry-After": str(max(1, int((locked_until - now).total_seconds())))},
         )
+    if user and locked_until:
+        user.locked_until = None
+        user.failed_login_attempts = 0
 
     if not user or not user.is_active:
+        _verify_password(payload.password, DUMMY_PASSWORD_HASH)
         raise HTTPException(status.HTTP_401_UNAUTHORIZED, "Invalid email or password.")
 
     if not _verify_password(payload.password, user.password_hash):
         user.failed_login_attempts = int(user.failed_login_attempts or 0) + 1
         if user.failed_login_attempts >= MAX_FAILED_LOGIN_ATTEMPTS:
-            user.locked_until = now
+            user.locked_until = now + timedelta(minutes=LOGIN_LOCK_MINUTES)
             user.failed_login_attempts = MAX_FAILED_LOGIN_ATTEMPTS
             db.commit()
             raise HTTPException(
                 status.HTTP_429_TOO_MANY_REQUESTS,
-                "Account locked after too many wrong password attempts. A manager must reset login attempts.",
+                "Too many login attempts. Try again later.",
+                headers={"Retry-After": str(LOGIN_LOCK_MINUTES * 60)},
             )
         db.commit()
-        remaining = MAX_FAILED_LOGIN_ATTEMPTS - user.failed_login_attempts
-        raise HTTPException(status.HTTP_401_UNAUTHORIZED, f"Invalid email or password. {remaining} attempts remaining.")
+        raise HTTPException(status.HTTP_401_UNAUTHORIZED, "Invalid email or password.")
 
     token = _issue_session(user)
+    _set_session_cookie(response, token)
     user.failed_login_attempts = 0
     user.locked_until = None
     db.commit()
     db.refresh(user)
-    return _auth_payload(user, token, db)
+    return _auth_payload(user, db)
 
 
 @router.get("/me", response_model=AuthUserResponse)
@@ -421,13 +586,18 @@ def me(user: UserAccount = Depends(get_current_user), db: Session = Depends(get_
 @router.post("/change-password")
 def change_password(
     payload: AuthChangePasswordPayload,
+    response: Response = None,
     user: UserAccount = Depends(get_current_user),
     db: Session = Depends(get_db),
 ) -> dict[str, bool]:
     if not _verify_password(payload.currentPassword, user.password_hash):
         raise HTTPException(status.HTTP_401_UNAUTHORIZED, "Current password is incorrect.")
     new_password = _validate_password(payload.newPassword)
+    if _verify_password(new_password, user.password_hash):
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, "New password must be different from the current password.")
     user.password_hash = _hash_password(new_password)
+    next_token = _issue_session(user)
+    _set_session_cookie(response, next_token)
     user.failed_login_attempts = 0
     user.locked_until = None
     user.updated_at = datetime.now(timezone.utc)
@@ -455,7 +625,7 @@ def get_company_profile(
 @router.put("/company-profile", response_model=CompanyProfileResponse)
 def upsert_company_profile(
     payload: CompanyProfilePayload,
-    user: UserAccount = Depends(get_current_user),
+    user: UserAccount = Depends(require_permission("manage_company")),
     db: Session = Depends(get_db),
 ) -> CompanyProfileResponse:
     company_name = _clean_text(payload.companyName)
@@ -483,6 +653,9 @@ def upsert_company_profile(
     profile.city = city
     profile.country = _clean_text(payload.country) or "DE"
     profile.vat_id = _clean_text(payload.vatId)
+    for field, attribute in (("taxNumber", "tax_number"), ("bankName", "bank_name"), ("iban", "iban"), ("bic", "bic")):
+        if field in payload.model_fields_set:
+            setattr(profile, attribute, _clean_text(getattr(payload, field)))
     profile.phone = phone
     profile.email = email
     profile.website = _clean_text(payload.website)
@@ -638,11 +811,16 @@ def reset_company_user_login_attempts(
 
 
 @router.post("/logout")
-def logout(authorization: str | None = Header(default=None), db: Session = Depends(get_db)) -> dict[str, bool]:
-    token_hash = _hash_token(_bearer_token(authorization))
+def logout(
+    response: Response,
+    authorization: str | None = Header(default=None),
+    session_cookie: str | None = Cookie(default=None, alias=SESSION_COOKIE_NAME),
+    db: Session = Depends(get_db),
+) -> dict[str, bool]:
+    token_hash = _hash_token(_session_token(authorization, session_cookie))
     user = db.scalar(select(UserAccount).where(UserAccount.session_token_hash == token_hash))
     if user:
-        user.session_token_hash = None
-        user.session_created_at = None
+        _clear_session(user)
         db.commit()
+    response.delete_cookie(SESSION_COOKIE_NAME, path="/")
     return {"ok": True}

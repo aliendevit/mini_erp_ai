@@ -31,6 +31,10 @@ class CompanyProfilePayload(BaseModel):
     city: str | None = None
     country: str | None = "DE"
     vatId: str | None = None
+    taxNumber: str | None = Field(default=None, max_length=80)
+    bankName: str | None = Field(default=None, max_length=160)
+    iban: str | None = Field(default=None, max_length=50)
+    bic: str | None = Field(default=None, max_length=20)
     phone: str | None = None
     email: str | None = None
     website: str | None = None
@@ -60,7 +64,6 @@ class AuthUserResponse(BaseModel):
 
 
 class AuthResponse(BaseModel):
-    token: str
     user: AuthUserResponse
 
 

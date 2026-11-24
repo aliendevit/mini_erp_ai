@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from io import BytesIO
+import os
 from pathlib import Path
 from typing import Any, Mapping
 from xml.sax.saxutils import escape
@@ -304,11 +305,17 @@ def _is_rtl(locale: str) -> bool:
 
 
 def _resolve_font_paths() -> tuple[Path, Path] | None:
+    custom_dir = os.getenv("PROPOSAL_FONT_DIR", "").strip()
     candidates = [
+        (Path(custom_dir) / "DejaVuSans.ttf", Path(custom_dir) / "DejaVuSans-Bold.ttf") if custom_dir else None,
+        (Path("/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf"), Path("/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf")),
         (Path(r"C:\Windows\Fonts\tahoma.ttf"), Path(r"C:\Windows\Fonts\tahomabd.ttf")),
         (Path(r"C:\Windows\Fonts\arial.ttf"), Path(r"C:\Windows\Fonts\arialbd.ttf")),
     ]
-    for regular, bold in candidates:
+    for candidate in candidates:
+        if candidate is None:
+            continue
+        regular, bold = candidate
         if regular.exists() and bold.exists():
             return regular, bold
     return None
@@ -650,12 +657,12 @@ def build_proposal_pdf(payload: Mapping[str, Any], locale: str = "en") -> bytes:
     generated = date_text(payload.get("updatedAt") or payload.get("createdAt"))
     hero_rows = [[
         P(labels["title"], title_style),
-        P(f"{labels['status']}: {status}<br/>{labels['generated']}: {generated}", subtitle_style),
+        P(f"{labels['status']}: {status}\n{labels['generated']}: {generated}", subtitle_style),
     ]] if not rtl else [[
-        P(f"{labels['status']}: {status}<br/>{labels['generated']}: {generated}", subtitle_style),
+        P(f"{labels['status']}: {status}\n{labels['generated']}: {generated}", subtitle_style),
         P(labels["title"], title_style),
     ]]
-    hero = Table(hero_rows, colWidths=[118 * mm, 58 * mm], hAlign="RIGHT" if rtl else "LEFT")
+    hero = Table(hero_rows, colWidths=([58 * mm, 118 * mm] if rtl else [118 * mm, 58 * mm]), hAlign="RIGHT" if rtl else "LEFT")
     hero.setStyle(TableStyle([
         ("BACKGROUND", (0, 0), (-1, -1), navy),
         ("BOX", (0, 0), (-1, -1), 0, navy),
